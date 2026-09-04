@@ -41,12 +41,19 @@ the news sources, Telegram and Discord, and nothing talks in to it.
 | Service | Image | Role | Ports |
 |---------|-------|------|-------|
 | `news-radar` | built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
-| `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` on the docker network |
+| `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` inside the network; published on the host as `NEWS_RADAR_HTTP_PORT`, default `8088` |
+
+**Host port 8080 is already taken on this homelab by ntfy** - binding it makes the
+Caddy container fail to start with `port is already allocated`, and a probe of
+`localhost:8080` silently answers from ntfy instead. The published port is
+therefore `NEWS_RADAR_HTTP_PORT` (default `8088`) and exists only for local
+debugging; the tunnel talks to `caddy:8080` over the docker network and ignores
+it entirely. Verified 2026-09-04 by starting the stack on this machine.
 
 Add a `cloudflared` service only if the homelab does not already run a tunnel.
 It already serves `mcp.dtbao.org`, so the cheaper path is to add one public
 hostname route to the existing tunnel, pointing `news.dtbao.org` at
-`http://caddy:8080`.
+`http://caddy:8080` - the in-network port, not the published one.
 
 ## Volumes
 

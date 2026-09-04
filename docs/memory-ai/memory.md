@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-04 - 10 durable doc(s)._
+_Generated 2026-09-04 - 13 durable doc(s)._
 
 ## State (transient)
 
@@ -15,49 +15,124 @@ _Generated 2026-09-04 - 10 durable doc(s)._
 
 # Progress
 
-> Current delivery state — what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
+> Current delivery state - what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
 
 ## What works
 
-- Git repository initialized: `main` and `developing` branches created and pushed to `origin` (`git@github.com:dtbao-embedded-dev/news-radar.git`), both tracking their remote.
-- Memory bank scaffolded at `docs/memory-ai/` and announced in `CLAUDE.md`.
+**P0 Foundation is complete.** See `architecture/delivery-phases.md` for the
+phase map and the finished-product definition all of it serves.
+
+- **The design bank is complete enough to build from.** Twelve durable docs plus
+  one ADR cover the target architecture, the sources and their exact URLs, the
+  item shape and dedup rule, every config key, the keyword-file syntax, the
+  notification contracts, the crawl algorithm with its known edge cases, and the
+  release and setup procedures.
+- **`python scripts/setup.py` works on Windows and Linux.** Verified on this
+  machine: it checks Python 3.12 and Docker Compose v5.4.0, creates
+  `config/config.yaml` and `docker/.env` from their templates without ever
+  overwriting an existing file, prompts for missing secrets while preserving the
+  `.env` comments, and exits non-zero while a required secret is blank.
+  `--dry-run`, `--check`, `--force` and `--non-interactive` all behave as
+  documented.
+- **`python scripts/release.py <version>` works.** `--dry-run 0.1.0` prints the
+  changelog it would write, built from the real commit history, and the exact git
+  chain: commit on `release/*`, merge into `developing`, merge into `main`, tag,
+  return, push. `python tests/test_release.py` passes with plain asserts and no
+  test framework.
+- **CI publishes a release from a tag.** `.github/workflows/release.yml` triggers
+  on `v*`, cuts the version's section out of `CHANGELOG.md` using `release.py`'s
+  own extractor, and falls back to GitHub-generated notes when there is no
+  section. Both paths were exercised locally against the real workflow code.
+- **The docker stack is defined and Caddy actually runs.** Verified by starting
+  it: Caddy serves `output/` with the `Cache-Control` headers from our Caddyfile.
 
 ## What's left
 
-- Everything: the repository holds no application code yet (only `README.md` and this bank).
-- Define the product scope of "news-radar" — 🔴 gap, needs a human. No source, spec, or design note exists in the repo to derive it from.
-- Pick the language/runtime and build tooling, then record it as `architecture/`.
-- Add a `.gitignore` once the stack is chosen.
+Everything the product actually does. The application layer is **specified but
+not written** - `src/news_radar/` does not exist yet.
+
+- **P1 Fetch** - HTTP client with a real User-Agent and per-host throttling, feed
+  parsing, the fixed-feed reader, the keyword-driven search-feed generator, and
+  per-source failure isolation.
+- **P2 Filter and rank** - keyword-file parser, the match engine with diacritic
+  folding, dedup, and the weighted ranking.
+- **P3 Store and render** - SQLite store, the seen-set, and `output/index.html`.
+- **P4 Notify** - Telegram and Discord senders, the new-only diff, and backoff.
+- **P5 Deploy** - the `Dockerfile`, the schedule loop, and the Cloudflare Tunnel
+  route for `news.dtbao.org`.
+- **P6 Ops** - retention, heartbeat, failure alerting.
 
 ## Known issues
 
-- No default-branch policy set on GitHub: the first pushed branch (`main`) is the default, so pull requests target `main` rather than `developing`. Change it in the repository settings if `developing` should be the integration branch.
+- **No `LICENSE` file.** news-radar is a clean-room reimplementation precisely so
+  it is free to pick one (`adr-0001`), but nobody has picked it yet. Decide before
+  the repository is made public.
+- **The `news-radar` compose service cannot start.** It builds from a `Dockerfile`
+  that lands in P5. Until then only `docker compose ... up -d caddy` works, and
+  the compose file says so.
+- **Host port 8080 is taken by ntfy on this homelab.** Caddy is published on
+  `NEWS_RADAR_HTTP_PORT`, default `8088`. A probe of `localhost:8080` answers
+  from ntfy, which looks like success and is not.
+- **Nine bank docs are marked `inferred`.** They describe code that does not exist
+  yet. Flip each to `confirmed` as its phase lands and the doc is checked against
+  the real implementation.
+- **No default-branch policy on GitHub**: the first pushed branch (`main`) is the
+  default, so pull requests target `main` rather than `developing`.
 
 ### active-context.md
 
 # Active Context
 
-> What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient — not a durable fact.
+> What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
 
-Bootstrapping the repository. No application code exists yet.
+P0 Foundation shipped on `release/v0.1`. The next piece of work is **P1 Fetch**:
+getting real items out of the eight fixed feeds and the keyword-built search
+feeds, which is the first phase that produces something a human can look at.
 
 ## Recent changes
 
-- Memory bank initialized (`docs/memory-ai/`) and wired into `CLAUDE.md`.
-- Initial commit `chore: initialize repository` with a one-line `README.md`.
-- Branches `main` and `developing` created and pushed to `origin`.
+- Memory bank filled out: architecture (phases, layout, deployment), data
+  (sources, item shape), interface (config, CLIs, notification channels),
+  behavior (the crawl algorithm), rule (release, setup, how to consult
+  TrendRadar), plus `adr-0001` recording the clean-room decision.
+- `config/config.yaml.example`, `config/frequency_words.txt`, the compose stack
+  and the Caddyfile added; `.gitignore` now keeps the real config, `docker/.env`
+  and `output/` out of the repository.
+- `scripts/setup.py` and `scripts/release.py` added, with
+  `tests/test_release.py`.
+- Release CI switched from manual dispatch to a `v*` tag trigger, taking its
+  notes from `CHANGELOG.md`.
+- Caddy's published host port moved to `NEWS_RADAR_HTTP_PORT` (default `8088`)
+  after 8080 turned out to be taken by ntfy on the homelab.
 
 ## Next steps
 
-1. Decide what `news-radar` is and does, and what stack it is built on — nothing in the repo answers this.
-2. Record that decision as `architecture/` docs (layout, build, config) plus an `adr/` entry.
-3. Add a `.gitignore` matching the chosen stack.
+1. **Add the `Dockerfile` and the `src/news_radar/` package skeleton** - the
+   compose stack cannot start its crawl service until this exists, so it blocks
+   every later verification.
+2. **P1-1 HTTP client** - User-Agent from config, timeout, retry with backoff,
+   per-hostname minimum interval. Reddit's 403 on an anonymous UA is the first
+   thing to prove fixed.
+3. **P1-2 and P1-3** - feed parsing via `feedparser`, then the fixed-feed reader
+   producing normalised `NewsItem`s with per-source failure isolation.
+4. **P1-4** - the search-feed generator, including the JSON shape from HN Algolia.
 
 ## Active decisions
 
-- Branch model: `main` is the released/stable branch, `developing` is the integration branch (inferred from the branch names requested, not yet written down as a rule).
+- **Clean-room from TrendRadar.** It is a reference to consult when stuck, never
+  a source to copy from - it is GPL-3.0. `rule/reference-trendradar.md` says
+  where to look by problem and what may not cross back.
+- **Two runtime dependencies, total**: `pyyaml` and `feedparser`. HTTP, storage
+  and templating come from the standard library. A third needs justifying in the
+  changelog.
+- **Both scripts stay stdlib-only** so they run on a bare checkout, before
+  anything is installed.
+- **Self-hosted, not GitHub Pages.** The crawl and the site both run on the
+  homelab; `news.dtbao.org` is reached through the existing Cloudflare Tunnel.
+- **Secrets live only in `docker/.env`.** `config.yaml` is committed as a
+  template and a leaked copy must be harmless.
 
 
 ## Memory
@@ -688,8 +763,8 @@ a **fatal config error**, not a warning. Silently not sending is the failure mod
 this project most wants to avoid. `scripts/setup.py` checks the same rule before
 the container is ever started - see [[cli-scripts]].
 
-### [interface] Script CLIs - setup.py and release.py  🟡 [inferred - verify]
-*`interface/cli-scripts.md` - The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees. - status: draft - source: scripts/setup.py, scripts/release.py - keywords: setup.py, release.py, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI*
+### [interface] Script CLIs - setup.py and release.py
+*`interface/cli-scripts.md` - The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees. - status: active - source: scripts/setup.py, scripts/release.py - keywords: setup.py, release.py, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI*
 
 # Script CLIs - setup.py and release.py
 
@@ -966,6 +1041,270 @@ costs an afternoon to rediscover.
 | **The same story from an AMP or syndicated URL** | Two rows, two notifications | Accepted limit - canonicalisation does not resolve it, and title clustering is not implemented |
 | **A source hangs** | The whole run hangs; nothing outside the process kills it | `request_timeout_s` is the only bound that exists - it must always be set |
 | **Clock skew on the host** | Freshness ranking inverts | `TZ` is pinned in the container; ages are computed in UTC |
+
+### [rule] Release Flow
+*`rule/release-flow.md` - How a version is cut - the branch model, running release.py, what CI does with the tag, and what to do when it fails midway. - status: active - source: scripts/release.py, .github/workflows/release.yml, CHANGELOG.md - keywords: release, release.py, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release*
+
+# Release Flow
+
+> One command cuts a release: `python scripts/release.py <version>`. Everything
+> else - the changelog, the merges, the tag, the push, the GitHub Release - falls
+> out of it. Nothing in this flow is done by hand.
+
+## Branch model
+
+| Branch | Role |
+|--------|------|
+| `main` | Released and stable. Only ever reached through `developing` |
+| `developing` | Integration. Everything lands here before it reaches `main` |
+| `release/<minor>` | Where a version line is prepared, e.g. `release/v0.1`. Day-to-day work happens here |
+
+`main` and `developing` are listed in `protected_branches` in
+`.claude/gitconfig.yml`, so ordinary commit tooling never pushes them.
+`release.py` is the **deliberate** exception: pushing those two branches is the
+whole point of a release, and it asks for confirmation before doing it.
+
+## Versioning
+
+Semantic versioning, `MAJOR.MINOR.PATCH`.
+
+- `MAJOR` - a change that breaks an existing config, keyword file, or output contract.
+- `MINOR` - a new capability that older configs still work with.
+- `PATCH` - a fix with no new capability.
+
+The tag is `v<version>`; `VERSION` holds the bare number without the `v`.
+
+## Cutting a release
+
+```
+python scripts/release.py 0.1.0
+```
+
+`<version>` is the only required argument and takes either form (`0.1.0` or
+`v0.1.0`). Useful flags: `--dry-run` to see the whole plan without touching
+anything, `--yes` to skip the prompt, `--remote <name>` for a push target other
+than `origin`.
+
+**Always run `--dry-run` first.** It prints the changelog section that will be
+written and the exact git commands in order, and it changes nothing.
+
+What the real run does, in order:
+
+1. **Preflight** - the version parses, the working tree is clean, the current
+   branch is `release/*`, both `developing` and `main` exist, and the tag is not
+   already taken locally or on the remote. A failure here changes nothing.
+2. **Changelog** - reads the conventional-commit subjects since the previous tag,
+   groups them (breaking changes first, then features, fixes, and the rest) and
+   inserts the section at the top of `CHANGELOG.md`. Previous release commits are
+   skipped: they describe the release, not what is in it.
+3. **VERSION** - written to the bare number.
+4. **Commit** - `CHANGELOG.md` and `VERSION` only, as
+   `chore(release): v0.1.0`, on the current `release/*` branch.
+5. **Merge chain** - `release/*` into `developing`, then `developing` into
+   `main`, both `--no-ff` so the release is visible as a merge commit.
+6. **Tag** - an annotated tag `v0.1.0` created while on `main`.
+7. **Back and push** - returns to the `release/*` branch, then pushes the three
+   branches and the tag.
+
+CI takes over from the tag: `.github/workflows/release.yml` triggers on a pushed
+`v*` tag, cuts that version's section out of `CHANGELOG.md` (using
+`release.py`'s own extractor, so there is no second parser) and publishes it as
+the GitHub Release notes. A version with no changelog section still publishes,
+falling back to GitHub-generated notes and logging a warning.
+
+## Rules
+
+1. **Never write a version heading in `CHANGELOG.md` by hand.** `release.py`
+   owns every `## v...` line. Fixing the wording inside an existing section is
+   fine; adding a heading makes the file and the tags disagree.
+2. **Never create the tag by hand**, and never push `main` or `developing`
+   outside a release.
+3. **Write conventional-commit subjects.** They are the changelog. A commit whose
+   subject does not parse still appears, under "Other" - readable, but it reads
+   like an accident because it is one.
+4. **Re-releasing the same version is not supported.** The preflight refuses a
+   tag that exists. Cut the next patch instead of deleting a published tag.
+
+## When it fails midway
+
+Nothing is written until the preflight passes and the prompt is answered, so a
+failure before that leaves the repository untouched.
+
+After that point, `release.py` stops at the first failing git command, prints the
+command and git's own message, and exits `3` without trying to unwind. That is
+deliberate: a half-finished merge is something a human should look at, not
+something a script should guess about.
+
+Recovery is ordinary git. Find out which step failed from the output, then:
+
+- **A merge conflict** - resolve it, commit the merge, and finish the remaining
+  steps by hand from the list `--dry-run` prints.
+- **The push was rejected** - fetch, reconcile, and re-push. The commits and the
+  tag already exist locally.
+- **Nothing usable happened yet** - `git switch` back to the release branch and
+  reset the release commit; then re-run.
+
+### [rule] Setting Up on the Homelab
+*`rule/setup-homelab.md` - The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux. - status: active - source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile - keywords: setup, setup.py, docker compose, homelab, cloudflare tunnel, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088*
+
+# Setting Up on the Homelab
+
+> Three steps: clone, `python scripts/setup.py`, `docker compose up -d`. The
+> same three on Windows and on Linux - that is why setup is a Python script and
+> not a pair of shell scripts.
+
+## Prerequisites
+
+| Needs | Why |
+|-------|-----|
+| Python 3.11+ | Runs `setup.py` and `release.py`; `setup.py` checks the version and refuses an older one |
+| Docker Engine + Compose v2 | Runs the stack. `setup.py` reports both versions before doing anything else |
+| A free host port | `8080` is already taken on this homelab by ntfy - the default published port is `8088`, overridable with `NEWS_RADAR_HTTP_PORT` |
+
+Nothing else. There are no API keys for fetching news; every secret is a
+notification secret.
+
+## Procedure
+
+```
+git clone git@github.com:dtbao-embedded-dev/news-radar.git
+cd news-radar
+python scripts/setup.py
+docker compose -f docker/docker-compose.yml up -d
+```
+
+**Step 2 in detail.** `setup.py` checks Python and Docker, then creates the two
+files that are deliberately not in git:
+
+| Created | From | Holds |
+|---------|------|-------|
+| `config/config.yaml` | `config/config.yaml.example` | Feeds, search templates, ranking weights, schedule |
+| `docker/.env` | `docker/.env.example` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL`, `TZ`, `NEWS_RADAR_HTTP_PORT` |
+
+It then asks for any notification secret that is still empty and writes it into
+`docker/.env`, preserving the comments. It **exits non-zero while a required
+secret is blank** - a stack that starts and silently never notifies is the
+failure this project most wants to avoid.
+
+An existing file is never overwritten: it is reported as `[skip]`. Use `--force`
+to replace one deliberately.
+
+| Flag | Use it when |
+|------|-------------|
+| `--dry-run` | You want to see what it would do. Writes nothing, asks nothing |
+| `--check` | Verifying an existing install - same checks, creates nothing |
+| `--force` | Regenerating a config from the template on purpose |
+| `--non-interactive` | Unattended provisioning; a blank secret is reported, not prompted for |
+
+## Getting the secrets
+
+- **Telegram** - create a bot with `@BotFather` for the token. Message the bot
+  once, then read the chat id from
+  `https://api.telegram.org/bot<TOKEN>/getUpdates`.
+- **Discord** - channel settings, Integrations, Webhooks, New Webhook, Copy URL.
+
+Both live only in `docker/.env`, which is gitignored. They never go into
+`config.yaml`.
+
+## Exposing news.dtbao.org
+
+Caddy serves `output/` inside the docker network on port `8080`. The published
+host port (`8088` by default) is for local debugging only.
+
+The homelab already runs a Cloudflare Tunnel for `mcp.dtbao.org`, so the cheap
+path is to add one public hostname to it rather than run a second tunnel:
+
+| Field | Value |
+|-------|-------|
+| Public hostname | `news.dtbao.org` |
+| Service | `http://caddy:8080` |
+
+The tunnel container must be on the same docker network as `caddy` for that
+service name to resolve. If it lives in another compose project, attach it to
+this project's network as an external network rather than publishing more ports.
+
+## Verifying it works
+
+1. `docker compose -f docker/docker-compose.yml ps` - both services `running`.
+2. `curl http://localhost:8088/` - Caddy answers with the current report.
+   A 200 from a *different* service means the port is taken; change
+   `NEWS_RADAR_HTTP_PORT` rather than guessing.
+3. Open `https://news.dtbao.org` from outside the LAN.
+4. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
+   received exactly one message.
+
+## Updating
+
+```
+git pull
+python scripts/setup.py --check
+docker compose -f docker/docker-compose.yml up -d --build
+```
+
+`--check` catches a config key added upstream that the local `config.yaml` does
+not have yet. The crawl container reads its config at startup, so a config change
+needs a restart - see [[deployment-homelab]].
+
+### [rule] TrendRadar Is the Reference Repo When You Get Stuck
+*`rule/reference-trendradar.md` - When and how to consult TrendRadar for a problem news-radar hits, and exactly what may not be carried back. - status: active - source: https://github.com/sansan0/TrendRadar, docs/memory-ai/adr/adr-0001-clean-room-from-trendradar.md - keywords: TrendRadar, reference, stuck, GPL-3.0, clean-room, copyleft, prior art, how to consult*
+
+# TrendRadar Is the Reference Repo When You Get Stuck
+
+> `https://github.com/sansan0/TrendRadar` is not upstream and is never merged
+> from. It is the **reference to open when a specific problem is hard**: read how
+> they solved it, understand the approach, then come back and write our own.
+
+## When to open it
+
+Not routinely. Open it when a concrete step of news-radar misbehaves and the
+answer is not obvious - a feed returning junk, dedup collapsing the wrong stories,
+a Telegram message failing to parse, a page rendering wrong, a ranking that puts
+noise on top. TrendRadar has been in production for a long time at a scale
+news-radar has not seen; it has already been bitten by most of it.
+
+Do **not** open it to decide what news-radar should be. That is what
+[[delivery-phases]] is for.
+
+## Where to look, by problem
+
+| Stuck on | Go read |
+|----------|---------|
+| The overall crawl to filter to render to push flow | Its package entrypoint (`python -m trendradar`) |
+| How to name and layer configuration keys | `config/config.yaml` |
+| Keyword-file syntax: groups, required and excluded words, global filters | `config/frequency_words.txt` and the README section describing it |
+| Message formatting per channel: escaping, splitting, batching | Its notification adapters (feishu, telegram, slack, and the rest) |
+| Report page layout: dark mode, tabs, in-page search | The `index.html` it generates |
+| Ranking that behaves sensibly | Its `advanced.weight.rank` / `frequency` / `hotness` split |
+| Which platform ids and endpoints exist at all | Its newsnow integration - useful as prior art even though news-radar uses RSS |
+
+Both projects solve the same shape of problem, so the *questions* transfer even
+where the answers do not: news-radar reads RSS and keyword-built search feeds,
+TrendRadar reads Chinese hot-lists through the newsnow API.
+
+## What may cross over, and what may not
+
+TrendRadar is **GPL-3.0**. Copying its expression into news-radar makes
+news-radar a derivative work and pulls the copyleft with it. That is the reason
+for the line below, not an aesthetic preference - see
+`adr/adr-0001-clean-room-from-trendradar.md`.
+
+| Allowed | Not allowed |
+|---------|-------------|
+| An approach restated in your own words: "they split the ranking weight into three terms" | Source code, in any amount |
+| A fact about the world: an API endpoint, a documented rate limit, a message-size limit | Function, class, or module names |
+| A problem you did not know existed: "titles arrive with markup, strip it first" | File and directory structure |
+| A design question worth asking: "should a keyword group cap its own output?" | Constant values, message-format strings |
+| | A configuration schema copied key for key |
+
+Practical test before you write the line: **close the tab first.** If you cannot
+write it from memory in your own structure, you are copying, not learning.
+
+## Recording what you learned
+
+When consulting it changes a decision here, write the decision into this bank in
+news-radar's own terms - a `behavior/` or `data/` doc, or an ADR if it settles a
+question that could be re-litigated. Say in prose that the idea came from
+TrendRadar. Do not reproduce the upstream artifact to explain it.
 
 ### [adr] ADR-0001: Clean-room reimplementation, TrendRadar as reference only
 *`adr/adr-0001-clean-room-from-trendradar.md` - Why news-radar is written from scratch instead of forking TrendRadar, and what that forbids. - status: active - source: conversation, https://github.com/sansan0/TrendRadar - keywords: ADR-0001, clean-room, TrendRadar, GPL-3.0, license, fork, copyleft, reference*

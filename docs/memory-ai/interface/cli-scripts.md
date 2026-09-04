@@ -2,10 +2,10 @@
 title: Script CLIs - setup.py and release.py
 category: interface
 purpose: The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees.
-status: draft
+status: active
 updated: 2026-09-04
 source: scripts/setup.py, scripts/release.py
-confidence: inferred
+confidence: confirmed
 keywords: setup.py, release.py, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI
 order: 2
 ---

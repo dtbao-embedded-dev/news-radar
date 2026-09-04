@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-04 - 0 durable doc(s)._
+_Generated 2026-09-04 - 4 durable doc(s)._
 
 ## State (transient)
 
@@ -62,4 +62,383 @@ Bootstrapping the repository. No application code exists yet.
 
 ## Memory
 
-_(empty - add docs under architecture/ data/ interface/ behavior/ rule/)_
+### [architecture] Delivery Phases  🟡 [inferred - verify]
+*`architecture/delivery-phases.md` - The finished product news-radar aims at, and the phase-by-phase task breakdown that gets there. - status: active - source: conversation - keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, scope, milestones, definition of done*
+
+# Delivery Phases
+
+> news-radar is a self-hosted news radar: it hunts stories on a schedule, filters
+> them against your own keyword file, publishes them to https://news.dtbao.org,
+> and pushes only the new matches to Telegram and Discord.
+
+## The finished product
+
+Six statements define "done". Every phase below exists to make one of them true.
+
+1. **It hunts on its own.** A crawl container runs on a schedule (default every
+   30 minutes). It pulls the fixed feeds *and* builds search feeds from **each
+   keyword group** in `frequency_words.txt`. Adding a keyword adds a hunting
+   path — no code change.
+2. **It filters for you.** Everything fetched passes one filter: required words
+   `+`, excluded words `!`, per-group cap `@`, regex. Duplicates collapse on a
+   dedup key; survivors are ranked by source rank + how many sources carried the
+   story + freshness.
+3. **Opening https://news.dtbao.org is enough to read it.** Caddy serves
+   `output/`, exposed through a Cloudflare Tunnel. The page groups stories by
+   keyword group, has a dark mode, a search box, and per-day history.
+4. **New stories come to you.** Each crawl pushes only the **new** matches to
+   Telegram and Discord. Nothing is re-sent.
+5. **Installing on a new machine is three steps.** `git clone` →
+   `python scripts/setup.py` (fill in tokens) → `docker compose up -d`.
+   Identical on Windows and Linux.
+6. **Releasing is one command.** `python scripts/release.py 0.2.0` writes the
+   changelog, commits `chore(release): v0.2.0` on `release/*`, merges into
+   `developing` then `main`, tags, returns to `release/*` and pushes. CI turns
+   the tag into a GitHub Release.
+
+All of it is written from scratch. TrendRadar is read for *how they solved a
+problem*, never copied — see [[reference-trendradar]] and
+`adr/adr-0001-clean-room-from-trendradar.md`.
+
+## Phases
+
+Each phase is shippable on its own: it ends in something a human can run and see.
+
+| Phase | Goal | Phase is done when |
+|-------|------|--------------------|
+| P0 | Foundation: the design bank, config templates, docker skeleton, setup + release tooling | `setup.py --dry-run` and `release.py --dry-run` both run; the bank passes `validate --strict` |
+| P1 | Fetch: get raw items out of every source | One command prints N raw items pulled from all fixed feeds *and* from keyword-built search feeds |
+| P2 | Filter and rank: turn raw items into the shortlist | The same command prints grouped, deduped, ranked matches instead of raw items |
+| P3 | Store and render: persist and publish a page | `output/index.html` opens in a browser and shows today's matches; history survives a restart |
+| P4 | Notify: push the new ones | A crawl with new matches lands exactly one message in Telegram and one in Discord; a crawl with none sends nothing |
+| P5 | Deploy: run it for real on the homelab | https://news.dtbao.org serves the current report, refreshed unattended |
+| P6 | Ops: keep it alive without babysitting | Seven days unattended with no manual intervention and no disk growth |
+
+## Task breakdown
+
+### P0 — Foundation *(this repo's current phase)*
+
+| # | Task |
+|---|------|
+| P0-1 | Design bank: `architecture/` (this doc, module layout, deployment) + clean-room ADR |
+| P0-2 | Design bank: `data/` — source table with the exact URL patterns, item shape, dedup key, `output/` layout |
+| P0-3 | Design bank: `interface/` — config keys, keyword-file syntax, env vars, script CLIs, notification channel contracts; `behavior/news-search.md` |
+| P0-4 | Config templates and docker skeleton: `config.yaml.example`, `frequency_words.txt`, `docker-compose.yml`, `Caddyfile`, `.env.example` |
+| P0-5 | `scripts/setup.py` — one script, same behaviour on Windows and Linux |
+| P0-6 | `scripts/release.py` + `tests/test_release.py` |
+| P0-7 | CI: tag-triggered release workflow, `CHANGELOG.md`, `VERSION` |
+| P0-8 | Design bank: `rule/` — release procedure, setup procedure, how to consult TrendRadar |
+
+### P1 — Fetch
+
+| # | Task |
+|---|------|
+| P1-1 | HTTP client: explicit User-Agent, timeout, retry with backoff, per-host minimum interval |
+| P1-2 | Feed parser: RSS 2.0 + Atom + the broken variants in the wild (use `feedparser`, do not hand-roll) |
+| P1-3 | Fixed-feed reader: read `platforms`/`feeds` from config, fetch each, tag every item with its source id |
+| P1-4 | Search-feed generator: expand each keyword group into the three search URL templates, fetch, tag |
+| P1-5 | Failure isolation: one dead source must never abort the crawl — log it, keep the rest |
+| P1-6 | JSON-API source support (HN Algolia returns JSON, not a feed) |
+
+### P2 — Filter and rank
+
+| # | Task |
+|---|------|
+| P2-1 | Parse `frequency_words.txt`: groups, `+` required, `!` excluded, `@` cap, `/regex/`, display label |
+| P2-2 | Match engine: decide which groups an item belongs to, case- and diacritic-insensitive |
+| P2-3 | Global filter section applied before grouping |
+| P2-4 | Dedup: collapse the same story arriving from several sources onto one dedup key |
+| P2-5 | Rank: weighted sum of source rank, cross-source frequency, and freshness; weights live in config |
+| P2-6 | Per-group cap `@n` applied after ranking |
+
+### P3 — Store and render
+
+| # | Task |
+|---|------|
+| P3-1 | SQLite store: items, sources, per-run log; schema migration on open |
+| P3-2 | Seen-set: what has already been reported, so P4 can diff |
+| P3-3 | HTML renderer: one self-contained `output/index.html`, grouped by keyword group |
+| P3-4 | Page features: dark mode, client-side search, per-day history navigation |
+| P3-5 | Retention: prune rows and files older than the configured window |
+
+### P4 — Notify
+
+| # | Task |
+|---|------|
+| P4-1 | Telegram sender: bot API, message length limit, HTML/Markdown escaping |
+| P4-2 | Discord sender: webhook, embed limits, 2000-character body limit |
+| P4-3 | New-only diff against the seen-set; nothing new means nothing sent |
+| P4-4 | Batching and backoff: respect 429 and `Retry-After` on both channels |
+| P4-5 | Report modes: current run / daily digest / incremental |
+
+### P5 — Deploy
+
+| # | Task |
+|---|------|
+| P5-1 | Dockerfile for the crawl service; pin the base image |
+| P5-2 | Compose: crawl service with an internal schedule loop + Caddy serving `output/` |
+| P5-3 | Cloudflare Tunnel route for `news.dtbao.org` |
+| P5-4 | First live run on the homelab, verified from outside the LAN |
+
+### P6 — Ops
+
+| # | Task |
+|---|------|
+| P6-1 | Heartbeat: a run that fails silently must be visible |
+| P6-2 | Failure alerting into the same Telegram/Discord channels |
+| P6-3 | Backup and restore of the SQLite store |
+| P6-4 | Optional AI summary of the day's matches |
+
+## What is deliberately not in scope
+
+- No multi-user accounts, no login, no write API — the page is read-only output.
+- No comment scraping, no full-article extraction: titles, links, timestamps only.
+- No mobile app; the page is responsive and that is the whole client story.
+
+### [architecture] Module Layout and Stack  🟡 [inferred - verify]
+*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: draft - source: conversation - keywords: tree, layout, layering, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
+
+# Module Layout and Stack
+
+> One Python package under `src/`, two stdlib-only scripts under `scripts/`, and
+> a docker stack under `docker/`. Data flows one way: fetch -> filter -> rank ->
+> store -> render/notify. No back edges.
+
+## Tree
+
+```
+news-radar/
+├── config/
+│   ├── config.yaml.example     # template, committed
+│   ├── config.yaml             # real, gitignored, created by setup.py
+│   └── frequency_words.txt     # keyword groups, committed
+├── docker/
+│   ├── docker-compose.yml      # crawl service + caddy
+│   ├── Caddyfile               # serves output/ on :8080
+│   ├── .env.example            # template, committed
+│   └── .env                    # secrets, gitignored, created by setup.py
+├── scripts/
+│   ├── setup.py                # homelab bootstrap, stdlib only
+│   └── release.py              # release automation, stdlib only
+├── src/news_radar/             # P1..P4
+│   ├── __main__.py             # entrypoint: python -m news_radar
+│   ├── config.py               # load + validate config.yaml and env
+│   ├── keywords.py             # parse frequency_words.txt
+│   ├── fetch/
+│   │   ├── http.py             # UA, timeout, retry, per-host throttle
+│   │   ├── feeds.py            # fixed RSS/Atom sources
+│   │   └── search.py           # keyword -> search URL -> items
+│   ├── filter.py               # match items against keyword groups
+│   ├── rank.py                 # dedup + weighted ranking
+│   ├── store.py                # SQLite persistence + seen-set
+│   ├── render.py               # output/index.html
+│   └── notify/
+│       ├── telegram.py
+│       └── discord.py
+├── tests/
+│   └── test_release.py         # plain asserts, no framework
+├── output/                     # gitignored: index.html, news.db, per-day files
+├── docs/memory-ai/             # this bank
+├── .github/workflows/release.yml
+├── CHANGELOG.md
+├── VERSION
+└── README.md
+```
+
+## Layering
+
+Five layers, each importing only downward. A violation is a bug, not a style
+preference: it is what makes the pipeline impossible to test one stage at a time.
+
+| Layer | Modules | May import |
+|-------|---------|-----------|
+| 1 — transport | `fetch/http.py` | stdlib only |
+| 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords` |
+| 3 — selection | `filter.py`, `rank.py` | `keywords`, plain data types |
+| 4 — persistence | `store.py` | layer 3 output types |
+| 5 — output | `render.py`, `notify/*` | layers 3 and 4 |
+
+`__main__.py` is the only module that knows about all five; it wires them and owns
+the schedule loop. `config.py` and `keywords.py` are leaves — they import nothing
+from the package.
+
+`scripts/` is outside the package entirely and imports nothing from it: both
+scripts must run on a machine where the package's dependencies are not installed
+yet. That is the whole point of `setup.py`.
+
+## Stack and dependencies
+
+| Concern | Choice | Why not something else |
+|---------|--------|------------------------|
+| Language | Python 3.12 | Already on the target machines; `release.py` was specified as Python |
+| Config format | YAML via **PyYAML** | The config is hand-edited; JSON has no comments |
+| Feed parsing | **feedparser** | Twenty years of malformed RSS/Atom in the wild. Hand-rolling `xml.etree` here is the classic mistake |
+| HTTP | stdlib `urllib.request` | One GET with a User-Agent and a timeout. `requests` earns nothing here |
+| Storage | stdlib `sqlite3` | Single writer, single file, no server to run |
+| Templating | stdlib `string.Template` / f-strings | One page. A template engine is a dependency for nothing |
+| Web server | Caddy (container) | Static files plus automatic HTTPS if ever served directly |
+| Scheduling | in-process loop in the crawl container | Compose has no cron; a host cron differs between Windows and Linux |
+
+**Runtime dependencies: `pyyaml`, `feedparser`. That is the entire list.** Adding
+a third needs a line in the changelog saying what it replaced.
+
+`scripts/setup.py` and `scripts/release.py` use **stdlib only** — no PyYAML, no
+feedparser — so they work on a bare Python install.
+
+## Configuration precedence
+
+Lowest to highest:
+
+1. Defaults compiled into `config.py`
+2. `config/config.yaml`
+3. Environment variables (`docker/.env` in the container, real env outside)
+
+Secrets — bot tokens, webhook URLs — live **only** in the environment layer.
+`config.yaml` never holds one; it is committed as `.example` and a leaked copy
+must be harmless.
+
+### [architecture] Homelab Deployment  🟡 [inferred - verify]
+*`architecture/deployment-homelab.md` - How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world. - status: draft - source: conversation - keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflare tunnel, schedule, volumes, restart policy*
+
+# Homelab Deployment
+
+> Two containers on the homelab: one crawls on a loop and writes `output/`, one
+> serves `output/` over HTTP. A Cloudflare Tunnel maps `news.dtbao.org` onto the
+> second one. Nothing is published from GitHub.
+
+## Topology
+
+```
+            internet
+               |
+        Cloudflare edge          TLS terminates here
+               |
+      Cloudflare Tunnel          outbound-only, no port forwarding
+               |
+   +-----------+-------------------------+   docker network (homelab)
+   |                                     |
+   |   caddy  :8080  ---- reads ---->  output/  <---- writes ---- news-radar
+   |   serves static files              (volume)                 (crawl loop)
+   |                                                             reads config/
+   +-------------------------------------------------------------------------+
+```
+
+Only Caddy is reachable. The crawl container exposes no port; it talks outward to
+the news sources, Telegram and Discord, and nothing talks in to it.
+
+## Services
+
+| Service | Image | Role | Ports |
+|---------|-------|------|-------|
+| `news-radar` | built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
+| `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` on the docker network |
+
+Add a `cloudflared` service only if the homelab does not already run a tunnel.
+It already serves `mcp.dtbao.org`, so the cheaper path is to add one public
+hostname route to the existing tunnel, pointing `news.dtbao.org` at
+`http://caddy:8080`.
+
+## Volumes
+
+| Host path | Container path | Mode | Holds |
+|-----------|----------------|------|-------|
+| `./config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` |
+| `./output` | `/app/output` | read-write (crawl) / read-only (caddy, as `/srv`) | `index.html`, `news.db`, per-day snapshots |
+
+`output/` is a bind mount, not a named volume, so a human can open
+`output/index.html` directly on the host to debug a render without touching the
+container.
+
+## Scheduling
+
+The crawl container runs a **loop inside the process**, sleeping
+`schedule.interval_minutes` (default 30) between runs. It is not a cron job.
+
+Reasons: Compose has no scheduler; a host cron is written differently on Windows
+and Linux, which breaks the "same three steps on both" promise; and an in-process
+loop keeps the SQLite connection and the seen-set warm between runs.
+
+Consequences to accept: the container must be restarted for a config change to
+take effect, and `restart: unless-stopped` is what makes a crash recover. A run
+that hangs must be bounded by the HTTP timeouts in `fetch/http.py`, because
+nothing outside the process will kill it.
+
+## Environment
+
+| Variable | Set in | Used by |
+|----------|--------|---------|
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | `docker/.env` | `notify/telegram.py` |
+| `DISCORD_WEBHOOK_URL` | `docker/.env` | `notify/discord.py` |
+| `TZ` | `docker/.env`, default `Asia/Ho_Chi_Minh` | timestamps on the page and in messages |
+| `NEWS_RADAR_CONFIG` | compose, default `/app/config/config.yaml` | `config.py` |
+
+`docker/.env` is gitignored and created by `scripts/setup.py`. See
+[[config-and-env]] for the full key list.
+
+## Failure modes to design for
+
+| What breaks | Symptom | Where it is handled |
+|-------------|---------|---------------------|
+| One source is down or rate-limits | That source contributes nothing this run | `fetch/` isolates per-source failures (P1-5) |
+| Tunnel drops | `news.dtbao.org` unreachable, crawl keeps working | Cloudflare reconnects; `output/` is still correct on the host |
+| Disk fills with snapshots | Writes fail | Retention window (P3-5, P6) |
+| Crawl crashes on a bad item | Container exits | `restart: unless-stopped` plus a heartbeat so a crash loop is visible (P6-1) |
+| Clock skew | Freshness ranking goes wrong | `TZ` pinned in the container, not inherited from the host |
+
+### [adr] ADR-0001: Clean-room reimplementation, TrendRadar as reference only
+*`adr/adr-0001-clean-room-from-trendradar.md` - Why news-radar is written from scratch instead of forking TrendRadar, and what that forbids. - status: active - source: conversation, https://github.com/sansan0/TrendRadar - keywords: ADR-0001, clean-room, TrendRadar, GPL-3.0, license, fork, copyleft, reference*
+
+# ADR-0001: Clean-room reimplementation, TrendRadar as reference only
+
+> news-radar solves the same problem as TrendRadar and is written from zero
+> anyway. TrendRadar is read to learn *how* a problem was solved; nothing is
+> copied across.
+
+## Status
+
+Accepted, 2026-09-04.
+
+## Context
+
+`https://github.com/sansan0/TrendRadar` is a mature, widely used project (62k
+stars) that aggregates trending stories, filters them by a keyword file, renders
+an HTML report and pushes to a list of chat channels. news-radar wants the same
+shape of system, aimed at different sources and a different audience.
+
+Two facts decide the approach:
+
+1. **TrendRadar is licensed GPL-3.0** (verified via the GitHub API:
+   `license.spdx_id == "GPL-3.0"`). Deriving from it makes the derivative work
+   subject to the same copyleft.
+2. **The requirements differ where it matters.** news-radar targets English and
+   Vietnamese technology feeds via RSS plus keyword-built search feeds; TrendRadar
+   targets Chinese hot-lists through the newsnow API. Its notification set, its
+   AI layer and its storage backends are all wider than needed here. A fork would
+   start with more code to delete than to keep.
+
+## Decision
+
+Write news-radar from scratch. Treat TrendRadar as **documentation**: read it
+when a specific problem is hard, understand the approach, then implement our own.
+
+**Allowed to carry across:** an approach, stated in words — "ranking is a
+weighted sum of rank, cross-source frequency and hotness", "the keyword file uses
+a blank line to separate independent groups".
+
+**Not allowed to carry across:** source code, function or module names, file
+layout, constant values, message-format strings, or a configuration schema copied
+key-for-key.
+
+## Consequences
+
+- news-radar stays free to pick its own license. **No `LICENSE` file exists yet**
+  — that decision is still open and must be made before the repository is made
+  public.
+- No upstream merges. Every fix TrendRadar makes has to be re-derived here if it
+  applies. That cost is accepted and is why the reference rule exists at all.
+- Problems already solved upstream get solved again. The mitigation is
+  [[reference-trendradar]]: a table of "stuck on X, go read Y", so the second
+  implementation is informed rather than blind.
+- Design docs in this bank describe news-radar's own design. Where a doc records
+  an idea learned from TrendRadar, it says so in prose and does not reproduce the
+  upstream artifact.

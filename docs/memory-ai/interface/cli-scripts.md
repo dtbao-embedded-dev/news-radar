@@ -61,7 +61,7 @@ not three dot-separated numbers is rejected before git is touched.
 
 | Flag | Guarantee |
 |------|-----------|
-| *(none)* | Runs the full release, asking once for confirmation before the first push |
+| *(none)* | Runs the full release, printing the whole git chain and asking once for confirmation **before executing any of it** |
 | `--dry-run` | **Touches nothing.** Prints the exact git commands in execution order and exits `0` |
 | `--yes` | Skip the confirmation prompt. For CI or a scripted release |
 | `--remote <name>` | Push target, default `origin` |
@@ -74,13 +74,15 @@ Preflight, all before any write:
 4. Tag `v<version>` does not already exist locally or on the remote.
 5. Branches `developing` and `main` exist.
 
-A failed preflight exits non-zero with nothing changed. See [[release-flow]] for
-the full procedure and the branch chain it drives.
+A failed preflight exits non-zero with nothing changed. Under `--dry-run` the
+same checks run but only report: a dry run must be readable from a branch that
+could not release yet. See [[release-flow]] for the full procedure and the branch
+chain it drives.
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Release completed, or `--dry-run` printed the plan |
-| `1` | Preflight failed - wrong branch, dirty tree, tag exists, bad version |
+| `1` | Preflight failed - wrong branch, dirty tree, tag exists - or the confirmation was declined |
 | `2` | Bad usage - missing or malformed `<version>` |
 | `3` | A git command failed mid-run; the message names the step and what to inspect |
 

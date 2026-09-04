@@ -1,0 +1,69 @@
+# news-radar keyword groups.
+#
+# A blank line separates one group from the next. Each group is matched,
+# capped and displayed on its own.
+#
+#   word        match if the title contains this term
+#   +word       required - the title must contain this too
+#   !word       excluded - a title containing this never matches this group
+#   @n          keep at most n items in this group, after ranking
+#   /pattern/   match by regular expression instead of substring
+#   => Label    display name for the group
+#   # ...       comment
+#
+# The FIRST plain term of a group is its primary term: that is the one
+# substituted into the search templates in config.yaml. Later plain terms
+# widen local matching but cost no extra request.
+#
+# Matching folds case and Vietnamese diacritics, so "dien tu" matches
+# "Dien tu" and "Điện tử". A /regex/ is applied to the original title.
+
+ESP32
+ESP-IDF
+ESP32-S3
+ESP32-C6
+@10
+=> ESP32
+
+firmware
+bootloader
+OTA update
+!tuyen dung
+!hiring
+@10
+=> Firmware
+
+RTOS
+FreeRTOS
+Zephyr
+@8
+=> RTOS
+
+embedded linux
+buildroot
+yocto
+device tree
+@8
+=> Embedded Linux
+
+RISC-V
+@8
+=> RISC-V
+
+Rust embedded
+embassy-rs
+@6
+=> Rust on MCU
+
+CVE
+/CVE-\d{4}-\d+/
++embedded
+@6
+=> Security
+
+# Applied to every item from every source, before any group is considered.
+[GLOBAL_FILTER]
+!giveaway
+!coupon
+!khuyen mai
+!sponsored

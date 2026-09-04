@@ -1,0 +1,15 @@
+# skill-support-commit local files
+.claude/gitconfig.yml
+.claude/commit-backup.json
+
+# Real config and secrets - templates are committed, these are not
+config/config.yaml
+docker/.env
+
+# Derived data: crawl output, rendered pages, SQLite store
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/

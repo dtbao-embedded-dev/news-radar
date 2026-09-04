@@ -1,0 +1,49 @@
+# news-radar homelab stack.
+#
+#   docker compose -f docker/docker-compose.yml up -d
+#
+# Secrets come from docker/.env, which Compose loads automatically because it
+# sits next to this file. scripts/setup.py creates it from .env.example.
+#
+# NOTE (P0): the crawl service builds from a Dockerfile that does not exist
+# yet - the application layer lands in P1..P5. Until then only `caddy` is
+# startable:  docker compose -f docker/docker-compose.yml up -d caddy
+
+name: news-radar
+
+services:
+  # Fetch -> filter -> rank -> store -> render -> notify, on an internal loop.
+  # Exposes no port: it talks out, nothing talks in.
+  news-radar:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: news-radar
+    restart: unless-stopped
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      NEWS_RADAR_CONFIG: /app/config/config.yaml
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    volumes:
+      - ../config:/app/config:ro
+      - ../output:/app/output
+
+  # Serves ../output as static files. Reached from outside through the
+  # existing homelab Cloudflare Tunnel, routed to http://caddy:8080.
+  caddy:
+    image: caddy:2-alpine
+    container_name: news-radar-caddy
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../output:/srv:ro
+      - caddy_data:/data
+    ports:
+      - "8080:8080"
+
+volumes:
+  caddy_data:

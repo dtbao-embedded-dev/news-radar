@@ -1,0 +1,18 @@
+# Serves the crawl output. Only this container is reachable; the crawler
+# exposes no port. TLS terminates at the Cloudflare edge, so plain HTTP here.
+:8080 {
+	root * /srv
+	encode gzip
+
+	# The current report is rewritten every run - never let a proxy hold it.
+	header / Cache-Control "no-cache"
+
+	# Day snapshots are written once and never touched again.
+	header /days/* Cache-Control "public, max-age=3600"
+
+	file_server browse
+	log {
+		output stdout
+		format console
+	}
+}

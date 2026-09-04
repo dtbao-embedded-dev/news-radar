@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-04 - 6 durable doc(s)._
+_Generated 2026-09-04 - 10 durable doc(s)._
 
 ## State (transient)
 
@@ -569,6 +569,394 @@ output/
 
 Everything under `output/` is gitignored. It is derived data: deleting the whole
 directory costs the archive, not the configuration.
+
+### [interface] Config Keys, Keyword File and Environment  🟡 [inferred - verify]
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: draft - source: config/config.yaml.example, config/frequency_words.txt - keywords: config.yaml, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
+
+# Config Keys, Keyword File and Environment
+
+> `config.yaml` holds behaviour and is safe to commit as a template.
+> `frequency_words.txt` holds what to hunt for. The environment holds every
+> secret, and nothing else.
+
+## config.yaml
+
+Loaded from `NEWS_RADAR_CONFIG`, default `config/config.yaml`. Any key omitted
+falls back to the default below.
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `app.timezone` | str | `Asia/Ho_Chi_Minh` | Timezone used when rendering timestamps; storage stays UTC |
+| `schedule.interval_minutes` | int | `30` | Sleep between crawls in the in-process loop |
+| `schedule.run_on_start` | bool | `true` | Crawl immediately on container start instead of waiting one interval |
+| `feeds[]` | list | 8 entries | Fixed feeds - see [[news-sources]] |
+| `feeds[].id` | str | - | Stable id; used in `sources`, in the report, and as the `reported` key |
+| `feeds[].name` | str | - | Display name on the page |
+| `feeds[].url` | str | - | Feed URL |
+| `feeds[].enabled` | bool | `true` | Skip without deleting the entry |
+| `feeds[].rank_weight` | float | `1.0` | Per-source multiplier in the source term of the score |
+| `search_templates[]` | list | 3 entries | Keyword-driven searches - see [[news-sources]] |
+| `search_templates[].id` | str | - | Stable id |
+| `search_templates[].url` | str | - | Must contain `{kw}`; the only substitution performed |
+| `search_templates[].format` | str | `rss` | `rss`, `atom`, or `hn_algolia_json` |
+| `search_templates[].enabled` | bool | varies | `reddit_search` ships disabled - it duplicates the fixed Reddit feed heavily |
+| `search_templates[].rank_weight` | float | `0.8` | Search hits rank below front-page hits by default |
+| `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file |
+| `report.mode` | str | `incremental` | `incremental` (only new), `current` (this run's matches), `daily` (whole day) |
+| `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
+| `report.rank_threshold` | int | `5` | The first N of each group are highlighted on the page |
+| `rank.weight_source` | float | `0.5` | Weight of the source term |
+| `rank.weight_frequency` | float | `0.3` | Weight of the cross-source frequency term |
+| `rank.weight_freshness` | float | `0.2` | Weight of the freshness term |
+| `rank.freshness_half_life_hours` | float | `12` | Age at which the freshness term halves |
+| `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
+| `storage.retention_days` | int | `0` | `0` = keep everything; otherwise prune rows and day files past the window |
+| `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
+| `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
+| `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |
+| `advanced.request_interval_ms` | int | `2000` | Minimum gap between two requests **to the same host** |
+| `advanced.request_timeout_s` | int | `15` | Per-request timeout; nothing outside the process will kill a hung run |
+| `advanced.max_retries` | int | `2` | Retries per request, exponential backoff |
+| `advanced.user_agent` | str | `news-radar/{version} (+https://news.dtbao.org)` | `{version}` is substituted from `VERSION`; an anonymous UA gets 403 from Reddit |
+| `advanced.debug` | bool | `false` | Verbose per-source logging |
+
+**No secret ever appears in this file.** A leaked `config.yaml` must be harmless.
+
+## frequency_words.txt
+
+Plain text, UTF-8. **A blank line separates one group from the next**, and each
+group is counted, capped and displayed independently.
+
+| Line form | Meaning |
+|-----------|---------|
+| `word` | Match if the title contains this term (case- and diacritic-insensitive) |
+| `+word` | **Required**: the title must contain this as well, on top of matching the group |
+| `!word` | **Excluded**: a title containing this never matches the group |
+| `@n` | Cap this group at `n` items after ranking |
+| `/pattern/` | Match by regular expression instead of substring |
+| `=> Label` | Display name for the group on the page and in messages |
+| `# comment` | Ignored |
+
+The **first plain term** of a group is the group's *primary term*: it is what gets
+substituted into the search templates. Later plain terms widen the local match but
+generate no extra requests.
+
+A group named `[GLOBAL_FILTER]` is special: its `!` lines are applied to every
+item from every source before grouping, and it produces no output section.
+
+Worked shape:
+
+```
+# hunt embedded firmware stories, at most 10 per run
+ESP32
+ESP-IDF
++firmware
+!tuyen dung
+@10
+=> Embedded
+
+[GLOBAL_FILTER]
+!coupon
+!giveaway
+```
+
+Here `ESP32` is the primary term - the search templates are queried with it - while
+`ESP-IDF` only widens local matching. `+firmware` narrows both.
+
+## Environment variables
+
+The only place secrets live. In the container they come from `docker/.env`;
+outside it, from the real environment.
+
+| Variable | Required | Default | Read by |
+|----------|----------|---------|---------|
+| `TELEGRAM_BOT_TOKEN` | when Telegram is enabled | - | `notify/telegram.py` |
+| `TELEGRAM_CHAT_ID` | when Telegram is enabled | - | `notify/telegram.py` |
+| `DISCORD_WEBHOOK_URL` | when Discord is enabled | - | `notify/discord.py` |
+| `NEWS_RADAR_CONFIG` | no | `config/config.yaml` | `config.py` |
+| `TZ` | no | `Asia/Ho_Chi_Minh` | container clock; `app.timezone` still wins for rendering |
+
+Startup validation: a channel that is `enabled: true` with its variable missing is
+a **fatal config error**, not a warning. Silently not sending is the failure mode
+this project most wants to avoid. `scripts/setup.py` checks the same rule before
+the container is ever started - see [[cli-scripts]].
+
+### [interface] Script CLIs - setup.py and release.py  🟡 [inferred - verify]
+*`interface/cli-scripts.md` - The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees. - status: draft - source: scripts/setup.py, scripts/release.py - keywords: setup.py, release.py, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI*
+
+# Script CLIs - setup.py and release.py
+
+> Two standalone scripts, stdlib only, runnable on a machine where the package's
+> dependencies are not installed. Both refuse to do anything surprising without
+> being asked.
+
+## scripts/setup.py
+
+```
+python scripts/setup.py [--dry-run] [--force] [--non-interactive] [--check]
+```
+
+Bootstraps a homelab checkout: verifies the toolchain, creates the real config
+and env files from their templates, and validates the notification secrets.
+
+| Flag | Guarantee |
+|------|-----------|
+| *(none)* | Interactive. Creates missing files, prompts for missing secrets, never overwrites an existing file |
+| `--dry-run` | **Writes nothing and prompts for nothing.** Prints the checks and the files it would create, then exits |
+| `--force` | Overwrite files that already exist. Without it, an existing file is reported and left alone |
+| `--non-interactive` | Never prompt; leave a missing secret blank and report it. For unattended provisioning |
+| `--check` | Verify only: toolchain present, required files exist, required secrets non-empty. Creates nothing |
+
+Steps, in order:
+
+1. Check Python is 3.11 or newer.
+2. Check `docker` and `docker compose` are on `PATH`; report the versions.
+3. Create `config/config.yaml` from `config/config.yaml.example` if absent.
+4. Create `docker/.env` from `docker/.env.example` if absent.
+5. For each notification channel enabled in the config, ensure its variables are
+   present and non-empty in `docker/.env`; prompt unless `--non-interactive`.
+6. Print the next command to run.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Everything needed is in place (or, under `--dry-run`, would be) |
+| `1` | A prerequisite is missing, or a required secret is still empty |
+| `2` | Bad usage - unknown flag, or a template file is missing from the checkout |
+
+## scripts/release.py
+
+```
+python scripts/release.py <version> [--dry-run] [--yes] [--remote <name>]
+```
+
+`<version>` is the only positional argument. It accepts `0.1.0` or `v0.1.0` and
+normalises both to `v0.1.0` for the tag and the commit subject. Anything that is
+not three dot-separated numbers is rejected before git is touched.
+
+| Flag | Guarantee |
+|------|-----------|
+| *(none)* | Runs the full release, asking once for confirmation before the first push |
+| `--dry-run` | **Touches nothing.** Prints the exact git commands in execution order and exits `0` |
+| `--yes` | Skip the confirmation prompt. For CI or a scripted release |
+| `--remote <name>` | Push target, default `origin` |
+
+Preflight, all before any write:
+
+1. `<version>` parses as `vMAJOR.MINOR.PATCH`.
+2. The working tree is clean.
+3. The current branch matches `release/*`.
+4. Tag `v<version>` does not already exist locally or on the remote.
+5. Branches `developing` and `main` exist.
+
+A failed preflight exits non-zero with nothing changed. See [[release-flow]] for
+the full procedure and the branch chain it drives.
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Release completed, or `--dry-run` printed the plan |
+| `1` | Preflight failed - wrong branch, dirty tree, tag exists, bad version |
+| `2` | Bad usage - missing or malformed `<version>` |
+| `3` | A git command failed mid-run; the message names the step and what to inspect |
+
+## Shared conventions
+
+- Both scripts run identically on Windows and Linux. No shell, no `sh -c`: every
+  external call goes through `subprocess.run` with an argument list.
+- Both print one line per step, prefixed `[ok]`, `[new]`, `[skip]`, `[warn]` or
+  `[dry]`, so the output is scannable and greppable.
+- Neither imports anything from `src/news_radar`, and neither needs PyYAML: the
+  config template is copied verbatim, not parsed.
+
+### [interface] Notification Channels - Telegram and Discord  🟡 [inferred - verify]
+*`interface/notify-channels.md` - The exact contract news-radar has with the Telegram Bot API and a Discord webhook, including limits and error handling. - status: draft - source: conversation - keywords: telegram, sendMessage, bot token, chat_id, discord, webhook, embeds, 429, retry_after, rate limit, message format, 4096, 2000*
+
+# Notification Channels - Telegram and Discord
+
+> Two channels, one payload. `notify/` receives the ranked, already-deduplicated
+> match list and is the only place that knows what a message looks like.
+
+## What a channel receives
+
+A channel implementation is handed the run's match list grouped by keyword group,
+already filtered to what should be sent under `report.mode`. It decides nothing
+about *which* stories go out - only how they are rendered and split.
+
+Contract, as text:
+
+```
+send(groups: list[Group], run: RunMeta) -> SendResult
+Group    = {label: str, items: list[RankedItem]}
+RunMeta  = {run_id: str, started_at: datetime, source_count: int, error_count: int}
+SendResult = {sent: int, skipped: int, failed: int, retry_after: float | None}
+```
+
+An empty `groups` means **send nothing at all** - not an empty message. A quiet
+run must be quiet.
+
+## Telegram
+
+| Aspect | Value |
+|--------|-------|
+| Endpoint | `POST https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/sendMessage` |
+| Required env | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| Body | JSON: `chat_id`, `text`, `parse_mode: "HTML"`, `disable_web_page_preview: true` |
+| Hard limit | 4096 characters per message (UTF-16 code units, not bytes) |
+| Rate limit | ~30 messages/second overall, ~20 per minute to one group chat |
+| Throttle response | HTTP 429 with `parameters.retry_after` in seconds |
+
+Formatting rules:
+
+- `parse_mode: HTML` with only `<b>`, `<i>`, `<a href>` and `<code>` used. Every
+  title is escaped for `&`, `<` and `>` **before** being wrapped in a tag -
+  an unescaped `&` in a headline makes the whole message fail with
+  `Bad Request: can't parse entities`, and the story is lost.
+- Link preview is disabled: one preview per message would bury the list.
+- A group longer than the limit is split on a **group boundary first**, then on an
+  item boundary. A single item is never split across two messages.
+
+## Discord
+
+| Aspect | Value |
+|--------|-------|
+| Endpoint | `POST <DISCORD_WEBHOOK_URL>` |
+| Required env | `DISCORD_WEBHOOK_URL` |
+| Body | JSON: `content`, optionally `embeds` |
+| Hard limits | `content` 2000 characters; at most 10 embeds; 6000 characters total across all embeds; embed `description` 4096 |
+| Rate limit | Per-webhook bucket; headers `X-RateLimit-Remaining` and `X-RateLimit-Reset-After` |
+| Throttle response | HTTP 429 with a JSON body carrying `retry_after` **in seconds as a float** |
+
+Formatting rules:
+
+- Markdown, not HTML. A title is escaped for `*`, `_`, `` ` `` and `~`, and the
+  link is written as `[title](url)` so the raw URL never widens the line.
+- Default shape is plain `content` with one line per story. Embeds are used only
+  when a group needs a coloured header; the 6000-character total is easier to
+  overrun than the per-embed limit, so the check is on the sum.
+- 2000 characters is a quarter of Telegram's budget: the same run produces more
+  Discord messages than Telegram messages, which is expected, not a bug.
+
+## Error handling, both channels
+
+| Condition | Behaviour |
+|-----------|-----------|
+| HTTP 429 | Sleep the channel's own `retry_after`, then retry the same chunk once. A second 429 gives up for this run and records `failed` |
+| HTTP 5xx | Retry with exponential backoff up to `advanced.max_retries` |
+| HTTP 4xx other than 429 | Do **not** retry - it is a bad token, a bad chat id, or a malformed body. Log the response body and fail the channel |
+| Network timeout | Same as 5xx |
+| Channel fails entirely | The run continues; the page is still rendered and the other channel is still attempted |
+
+A story is written to the `reported` table **only after** its chunk was accepted.
+A crash between send and write re-sends on the next run - a duplicate is the
+acceptable failure, a silently dropped story is not.
+
+`reported` is keyed per channel, so enabling Discord later does not mark stories
+already pushed to Telegram as sent - see [[news-item]].
+
+### [behavior] How News Is Searched, Matched and Ranked  🟡 [inferred - verify]
+*`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: draft - source: conversation - keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*
+
+# How News Is Searched, Matched and Ranked
+
+> One run is six stages: build the URL list, fetch, normalise, match, collapse,
+> rank. Every stage is pure except fetch, which is the only one that can fail
+> partially - and it must fail partially rather than abort.
+
+## Stage 1 - build the URL list
+
+1. Read every `feeds[]` entry with `enabled: true`. Each contributes one URL.
+2. Parse `frequency_words.txt` into groups. Take each group's **primary term**
+   (its first plain line), skipping `[GLOBAL_FILTER]`.
+3. For every enabled `search_templates[]` entry, substitute each primary term into
+   `{kw}`, percent-encoded. A multi-word term is wrapped in quotes first so the
+   search engine treats it as a phrase.
+4. The result is one flat list of `(url, source_id, keyword_group | None)`.
+
+Cost is predictable and worth stating out loud: `len(feeds) + len(groups) x
+len(enabled templates)`. Eight feeds, twelve groups and two enabled templates is
+32 requests per run, not eight.
+
+## Stage 2 - fetch
+
+Requests are issued sequentially, grouped by host, honouring
+`advanced.request_interval_ms` **per hostname**. Every request carries the
+configured User-Agent, `advanced.request_timeout_s`, and up to
+`advanced.max_retries` retries with exponential backoff.
+
+**A failing source is recorded and skipped, never fatal.** The run's `errors` list
+carries one entry per failed source; the report still renders from whatever
+arrived.
+
+## Stage 3 - normalise
+
+Each response is parsed by its declared format (`rss`, `atom`, `hn_algolia_json`)
+and mapped into the `NewsItem` shape - field mapping and URL canonicalisation are
+in [[news-item]] and [[news-sources]]. HTML is stripped from titles here, once,
+so no later stage has to think about markup.
+
+## Stage 4 - match
+
+For each item, for each group:
+
+1. **Global filter first.** If any `!` line of `[GLOBAL_FILTER]` matches, the item
+   is dropped entirely and no group sees it.
+2. **Any-of.** At least one plain term or `/regex/` of the group must match.
+3. **Required.** Every `+` term of the group must also match.
+4. **Excluded.** No `!` term of the group may match.
+
+Matching is done on a folded form of the title: lowercased, Unicode NFD, combining
+marks removed, whitespace collapsed. So `Điện tử` matches `dien tu`, and `ESP32`
+matches `esp32`. `/regex/` lines are applied to the **original** title, not the
+folded one, because a regex author is entitled to write their own case rules.
+
+An item may belong to several groups. It is counted once per group it matches.
+
+A search-feed item carries the group whose term produced its query, but it is
+**still matched normally** - the search engine's idea of relevance does not get a
+free pass into the report.
+
+## Stage 5 - collapse
+
+Items are grouped by `dedup_key` ([[news-item]]). The survivor keeps the earliest
+`published_at` and the union of `source_id`s. The size of that union is the
+cross-source frequency signal - a story that showed up on Hacker News *and*
+Lobsters *and* a Google News query is, empirically, the story of the day.
+
+## Stage 6 - rank
+
+Per group, each surviving item scores:
+
+```
+score = w_source    * max(rank_weight of its sources)
+      + w_frequency * min(1.0, (source_count - 1) / 3)
+      + w_freshness * 0.5 ** (age_hours / freshness_half_life_hours)
+```
+
+Weights are `rank.weight_source`, `rank.weight_frequency`, `rank.weight_freshness`
+(default 0.5 / 0.3 / 0.2) and `rank.freshness_half_life_hours` (default 12).
+
+- An item with `published_at = None` gets a freshness term of `0`, never a guess.
+- `source_count` saturates at four sources: past that, more copies say nothing new.
+- After sorting, the group's `@n` cap applies, falling back to
+  `report.max_per_group`.
+
+## Edge cases
+
+These are known before the first line of `fetch/` is written, because each one
+costs an afternoon to rediscover.
+
+| Case | What happens | What the code must do |
+|------|--------------|-----------------------|
+| **Reddit with the default Python User-Agent** | HTTP 403 on both `r/embedded` and `search.rss` | Always send `advanced.user_agent`; treat an empty UA as a config error |
+| **Google News RSS throttling** | Repeated queries from one IP start returning empty results or HTTP 429 rather than an error page | Keep the per-host interval; treat an empty feed as a soft failure and log it instead of reporting "no news" |
+| **HN Algolia returns JSON, not a feed** | A feed parser sees garbage | Dispatch on `format`, not on the response's content type |
+| **Ask HN items have `url: null`** | No link to publish | Fall back to the HN item permalink built from `objectID` |
+| **LWN subscriber items** | Titles arrive prefixed `[$]`, links land on a paywall | Keep them, but the prefix must survive folding so a `!` filter can exclude them if wanted |
+| **VnExpress descriptions contain `<img>`** | Markup leaks into the title if description is ever used | Titles only, and strip HTML at stage 3 |
+| **Diacritics in Vietnamese titles** | `Điện` never matches a keyword typed `dien` | Fold at stage 4; store the original for display |
+| **A feed with no `pubDate`** | Freshness term undefined | `published_at = None`, freshness term `0`, never "now" |
+| **The same story from an AMP or syndicated URL** | Two rows, two notifications | Accepted limit - canonicalisation does not resolve it, and title clustering is not implemented |
+| **A source hangs** | The whole run hangs; nothing outside the process kills it | `request_timeout_s` is the only bound that exists - it must always be set |
+| **Clock skew on the host** | Freshness ranking inverts | `TZ` is pinned in the container; ages are computed in UTC |
 
 ### [adr] ADR-0001: Clean-room reimplementation, TrendRadar as reference only
 *`adr/adr-0001-clean-room-from-trendradar.md` - Why news-radar is written from scratch instead of forking TrendRadar, and what that forbids. - status: active - source: conversation, https://github.com/sansan0/TrendRadar - keywords: ADR-0001, clean-room, TrendRadar, GPL-3.0, license, fork, copyleft, reference*

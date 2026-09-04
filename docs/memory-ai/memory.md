@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-04 - 4 durable doc(s)._
+_Generated 2026-09-04 - 6 durable doc(s)._
 
 ## State (transient)
 
@@ -384,6 +384,191 @@ nothing outside the process will kill it.
 | Disk fills with snapshots | Writes fail | Retention window (P3-5, P6) |
 | Crawl crashes on a bad item | Container exits | `restart: unless-stopped` plus a heartbeat so a crash loop is visible (P6-1) |
 | Clock skew | Freshness ranking goes wrong | `TZ` pinned in the container, not inherited from the host |
+
+### [data] News Sources and Search Paths  🟡 [inferred - verify]
+*`data/news-sources.md` - Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns. - status: draft - source: conversation - keywords: sources, feeds, RSS, Atom, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent*
+
+# News Sources and Search Paths
+
+> Two kinds of source feed the same pipeline. **Fixed feeds** are fetched whole
+> every run and filtered locally. **Search feeds** are built at runtime from each
+> keyword group, so the keyword travels into the URL and the source does the
+> first cut.
+
+## Fixed feeds
+
+Fetched in full on every run, then matched against `frequency_words.txt`. Adding
+one is a config edit, never a code edit.
+
+| id | Name | URL | Format | Language | Notes |
+|----|------|-----|--------|----------|-------|
+| `hn` | Hacker News front page | `https://hnrss.org/frontpage` | RSS 2.0 | en | Third-party bridge over HN; item `comments` link differs from the story link |
+| `lobsters` | Lobsters | `https://lobste.rs/rss` | RSS 2.0 | en | Tags live in the title suffix, not a separate field |
+| `hackaday` | Hackaday | `https://hackaday.com/blog/feed/` | RSS 2.0 | en | WordPress feed; full body in `content:encoded` - ignore it, titles only |
+| `lwn` | LWN headlines | `https://lwn.net/headlines/rss` | RSS 2.0 | en | Subscriber-only items appear with a `[$]` title prefix |
+| `r_embedded` | r/embedded | `https://www.reddit.com/r/embedded/.rss` | Atom | en | **Requires a real User-Agent**; the default Python one gets HTTP 403 |
+| `vnexpress_sohoa` | VnExpress So hoa | `https://vnexpress.net/rss/so-hoa.rss` | RSS 2.0 | vi | Description carries an `<img>` tag - strip HTML before matching |
+| `genk` | GenK | `https://genk.vn/rss/home.rss` | RSS 2.0 | vi | Mixed tech and consumer news |
+| `tinhte` | Tinh te | `https://tinhte.vn/rss` | RSS 2.0 | vi | Forum-flavoured; heavier duplicate rate than the others |
+
+Each entry in `config.yaml` carries an `id`, a `name`, a `url`, `enabled`, and an
+optional `rank_weight` (default `1.0`) that feeds the ranking in
+[[news-search]].
+
+## Search feeds
+
+For every keyword group in `frequency_words.txt`, the group's **primary term**
+(the first line of the group) is substituted into each enabled template. One
+group with three templates enabled produces three requests per run.
+
+| id | Template | Returns | Substitution |
+|----|----------|---------|--------------|
+| `google_news` | `https://news.google.com/rss/search?q={kw}&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase |
+| `hn_algolia` | `https://hn.algolia.com/api/v1/search?query={kw}` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID` |
+| `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement as the fixed Reddit feed |
+
+`hl` / `gl` / `ceid` on the Google template pin the result locale to Vietnamese.
+Changing them to `hl=en&gl=US&ceid=US:en` gives the English-language cut of the
+same query; both may be enabled at once as two separate template entries.
+
+An item from a search feed is tagged with **both** the template id and the keyword
+group that produced it, so the report can say why a story was picked up.
+
+## Field mapping
+
+Every source is normalised into the shape in [[news-item]] before anything else
+touches it.
+
+| NewsItem field | RSS 2.0 | Atom | HN Algolia JSON |
+|----------------|---------|------|-----------------|
+| `title` | `item/title` | `entry/title` | `hits[].title` |
+| `url` | `item/link` | `entry/link[@rel="alternate"]/@href` | `hits[].url` (may be null for Ask HN - fall back to the item permalink) |
+| `published_at` | `item/pubDate` (RFC 822) | `entry/published` or `entry/updated` (RFC 3339) | `hits[].created_at` (RFC 3339) |
+| `source_id` | the config `id` | the config `id` | `hn_algolia` |
+| `external_id` | `item/guid` if present, else the link | `entry/id` | `hits[].objectID` |
+
+A missing `published_at` is recorded as `None`, never as "now" - freshness ranking
+must be able to tell "no date" from "just published".
+
+## Politeness and limits
+
+| Source | Constraint | Consequence for the fetcher |
+|--------|-----------|-----------------------------|
+| Reddit (both entries) | Blocks the default Python User-Agent with HTTP 403 | Send an identifying UA such as `news-radar/<version> (+https://news.dtbao.org)` |
+| Google News RSS | Throttles repeated queries from one IP; no documented quota | Keep the per-host interval at 2 s or more; a run with 20 keyword groups is 20 requests |
+| HN Algolia | Documented ~10 000 requests/hour per IP | Not a practical limit here |
+| All | No API keys anywhere | Nothing to store in `.env` for fetching; secrets are notification-only |
+
+The per-host minimum interval is a single config value
+(`advanced.request_interval_ms`, default 2000) applied by hostname, not by source
+id - `hn` and `hn_algolia` are different hosts, the two Reddit entries are not.
+
+## Adding a source later
+
+1. Add an entry under `feeds:` (fixed) or `search_templates:` (search) in
+   `config/config.yaml`.
+2. If it returns something that is neither RSS, Atom, nor a JSON shape already
+   handled, it needs a parser in `fetch/` - that is a code change and a new task.
+3. Record it in the table above and restamp `updated`.
+
+### [data] News Item, Dedup Key and Output Layout  🟡 [inferred - verify]
+*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: draft - source: conversation - keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot*
+
+# News Item, Dedup Key and Output Layout
+
+> One flat record per story, one dedup key that collapses the same story arriving
+> from several sources, one SQLite file and one HTML page under `output/`.
+
+## NewsItem
+
+Produced by `fetch/`, consumed by everything downstream. Immutable once built:
+`filter.py` and `rank.py` attach their results to a separate wrapper rather than
+mutating the item.
+
+| Field | Type | Required | Meaning |
+|-------|------|----------|---------|
+| `title` | str | yes | Headline, HTML stripped, whitespace collapsed |
+| `url` | str | yes | Story link as published by the source |
+| `canonical_url` | str | yes | `url` after normalisation (see below) - the dedup input |
+| `source_id` | str | yes | `id` of the fixed feed or search template it came from |
+| `external_id` | str | yes | The source's own id (`guid`, `entry/id`, `objectID`); falls back to `canonical_url` |
+| `published_at` | datetime \| None | no | Source timestamp, converted to UTC. `None` means the source gave none - never substitute "now" |
+| `fetched_at` | datetime | yes | When this run retrieved it, UTC |
+| `keyword_group` | str \| None | no | For a search-feed item: the group whose term produced the query |
+
+Invariants:
+
+- `title` is never empty; an item without a title is dropped at parse time.
+- `canonical_url` is stable across runs for the same story, or dedup silently stops working.
+- All datetimes are timezone-aware UTC in memory and stored as UTC in SQLite.
+  Local time (`TZ`, default `Asia/Ho_Chi_Minh`) is applied only at render time.
+
+## URL canonicalisation
+
+Applied in this order to produce `canonical_url`:
+
+1. Lowercase the scheme and host; drop a leading `www.`.
+2. Force `https`.
+3. Drop tracking parameters: everything starting `utm_`, plus `fbclid`, `gclid`,
+   `ref`, `ref_src`, `spm`, `s_cid`.
+4. Drop the fragment.
+5. Strip a trailing `/` unless the path is exactly `/`.
+6. Leave every other query parameter intact - some sites carry the article id there.
+
+## Dedup key
+
+```
+dedup_key = sha1(canonical_url)                       when the URL survives step 6 non-empty
+          = sha1("t:" + normalised_title)             when the item has no usable URL
+```
+
+`normalised_title` is the title lowercased, diacritics folded, punctuation
+removed, whitespace collapsed. The title fallback exists because aggregator items
+sometimes carry only a permalink to the aggregator itself.
+
+Collapsing rule: the surviving record keeps the **earliest** `published_at` and
+accumulates the set of `source_id`s that carried it. That set size is the
+cross-source frequency term the ranking uses - see [[news-search]].
+
+Deliberate limit: the same story published under two different URLs (a syndicated
+copy, an AMP variant) does **not** collapse. Title-similarity clustering is not
+implemented; it would need a threshold nobody has tuned yet.
+
+## SQLite store
+
+One file, `output/news.db`. Schema described as shape, not DDL.
+
+| Table | Columns | Purpose |
+|-------|---------|---------|
+| `items` | `dedup_key` (PK), `title`, `canonical_url`, `url`, `first_seen_at`, `published_at`, `sources` (JSON array of source ids) | Every story ever seen, one row per dedup key |
+| `matches` | `dedup_key`, `group_name`, `score`, `run_id` | Which groups an item matched in a given run, and the score it got |
+| `reported` | `dedup_key`, `channel`, `reported_at` | The seen-set: what has already gone out to Telegram or Discord |
+| `runs` | `run_id` (PK), `started_at`, `finished_at`, `items_fetched`, `items_matched`, `errors` (JSON) | One row per crawl, for the heartbeat and for debugging a quiet day |
+
+`reported` is keyed per channel on purpose: adding Discord later must not
+retroactively count stories already pushed to Telegram as "sent".
+
+Schema version lives in SQLite's `user_version` pragma; `store.py` migrates
+forward on open and never migrates backward.
+
+## Output layout
+
+```
+output/
+├── index.html          # current report - what Caddy serves at /
+├── news.db             # SQLite store above
+└── days/
+    └── 2026-09-04.html # one immutable snapshot per day, linked from index.html
+```
+
+- `index.html` is rewritten every run; it is never appended to.
+- `days/<date>.html` is written once when a day rolls over and is not touched
+  again, so a stale render can never rewrite history.
+- Retention (`storage.retention_days`, default 0 = keep everything) prunes
+  `days/` files and `items` rows older than the window in the same pass.
+
+Everything under `output/` is gitignored. It is derived data: deleting the whole
+directory costs the archive, not the configuration.
 
 ### [adr] ADR-0001: Clean-room reimplementation, TrendRadar as reference only
 *`adr/adr-0001-clean-room-from-trendradar.md` - Why news-radar is written from scratch instead of forking TrendRadar, and what that forbids. - status: active - source: conversation, https://github.com/sansan0/TrendRadar - keywords: ADR-0001, clean-room, TrendRadar, GPL-3.0, license, fork, copyleft, reference*

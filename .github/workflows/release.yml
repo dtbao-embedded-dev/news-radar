@@ -1,0 +1,67 @@
+name: Release
+
+# A tag pushed by scripts/release.py publishes the GitHub Release. The notes are
+# the CHANGELOG.md section for that exact version: the changelog in the
+# repository is the source of truth, not a diff GitHub regenerates later.
+#
+# "on" is quoted so YAML keeps it a string - bare `on:` parses as the boolean
+# true, which makes every tool that reads this file disagree about the key.
+"on":
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reject a malformed tag before it becomes a published release that has
+      # to be deleted by hand.
+      - name: Validate tag
+        run: |
+          case "$VERSION" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::tag must look like v1.2.3, got '$VERSION'"; exit 1 ;;
+          esac
+
+      # Reuses scripts/release.py so the section is cut by the same code that
+      # wrote it - no second changelog parser to keep in sync.
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import sys
+
+          sys.path.insert(0, "scripts")
+          import release
+
+          version = os.environ["VERSION"]
+          changelog = pathlib.Path("CHANGELOG.md")
+          text = changelog.read_text(encoding="utf-8") if changelog.is_file() else ""
+          notes = release.extract_changelog_section(text, version).strip()
+          if not notes:
+              print(f"::warning::no CHANGELOG.md section for {version}, "
+                    "falling back to GitHub-generated notes")
+          pathlib.Path("RELEASE_NOTES.md").write_text(
+              notes + "\n" if notes else "", encoding="utf-8"
+          )
+          PY
+
+      - name: Publish release
+        run: |
+          if [ -s RELEASE_NOTES.md ]; then
+            gh release create "$VERSION" --title "$VERSION" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$VERSION" --title "$VERSION" --generate-notes
+          fi

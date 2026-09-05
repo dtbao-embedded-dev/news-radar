@@ -28,7 +28,7 @@ from .fetch.search import read_search_feeds
 from .filter import select
 from .keywords import KeywordError, parse as parse_keywords
 from .rank import collapse, rank_groups
-from . import notify, render, store
+from . import notify, ops, render, store
 from .notify import discord, telegram
 
 log = logging.getLogger("news_radar")
@@ -251,16 +251,40 @@ def _notify(cfg, fetcher, run_id, labels, fetched_at):
             conn.close()
 
 
-def crawl(cfg):
-    """One pass: fetch, filter, rank, store, render, notify.
+def _dead_sources(cfg, errors):
+    """A problem when *every* enabled source failed, and nothing otherwise.
 
-    The whole pipeline, and it returns the ranked shortlist. Nothing after the
-    fetch can cost it: storage and rendering are guarded together, the senders
-    separately, and a channel separately again.
+    One dead source is already handled - `read_source()` isolates it and the
+    per-source count prints `[failed]`. All of them at once is a different
+    animal: a DNS outage, a dropped network, a proxy in front of the container.
+    It looks exactly like a quiet news day in every line above it.
+    """
+    enabled = {entry.get("id") for entry in
+               cfg.enabled_feeds() + cfg.enabled_search_templates()}
+    failed = {source_id for source_id, _ in errors}
+    if enabled and enabled <= failed:
+        return ["every one of the {} enabled source(s) failed this "
+                "cycle".format(len(enabled))]
+    return []
+
+
+def crawl(cfg):
+    """One pass: fetch, filter, rank, store, render, notify, heartbeat.
+
+    Returns `(ranked, problems)` - the shortlist, and the reasons this cycle
+    should not be called a success. An empty problem list is what licenses the
+    heartbeat ping, and two non-empty ones in a row are what `run()` turns into
+    an alert.
+
+    Nothing after the fetch can cost the shortlist: storage and rendering are
+    guarded together, the senders separately, and a channel separately again.
+    The problems are collected rather than raised for the same reason - a cycle
+    that half-worked should publish the half that worked *and* say so.
     """
     started = time.monotonic()
     fetched_at = dt.datetime.now(dt.timezone.utc)
     fetcher = _fetcher(cfg)
+    problems = []
 
     try:
         groups, global_filter = parse_keywords(cfg.get("keywords.file"))
@@ -270,6 +294,8 @@ def crawl(cfg):
         # reason is on one line rather than in a traceback.
         log.error("keyword file unusable, search feeds skipped this cycle: %s", exc)
         groups, global_filter = [], []
+        problems.append("the keyword file is unusable, so every search feed "
+                        "was skipped: {}".format(exc))
 
     feed_items, feed_errors = read_fixed_feeds(fetcher, cfg, fetched_at=fetched_at)
     search_items, search_errors = read_search_feeds(
@@ -305,11 +331,24 @@ def crawl(cfg):
              "across %d group(s)", len(matched), len(stories),
              sum(len(s) for s in ranked.values()), len(ranked))
     _report_groups(ranked)
+    problems += _dead_sources(cfg, errors)
+
     run_id = _publish(cfg, ranked, groups, fetched_at, len(items),
                       len(matched), errors)
     if run_id:
         _notify(cfg, fetcher, run_id, [g.label for g in groups], fetched_at)
-    return ranked
+    else:
+        # `_publish` already logged the traceback. Without this line the cycle
+        # would go on to ping the heartbeat and claim it succeeded, which is
+        # the exact silent failure P6-1 exists to close.
+        problems.append("storing or rendering failed - see the traceback above")
+
+    # Last, and with the verdict on everything above it: the ping is a claim
+    # that this cycle worked, so it is only ever made once that is known.
+    problems += ops.heartbeat(fetcher, cfg.get("ops.site_url"),
+                              cfg.get("ops.heartbeat_url"),
+                              healthy=not problems)
+    return ranked, problems
 
 
 def run(cfg, once=False):
@@ -318,7 +357,9 @@ def run(cfg, once=False):
     run_on_start = cfg.get("schedule.run_on_start", True)
 
     if once:
-        crawl(cfg)
+        _, problems = crawl(cfg)
+        for problem in problems:
+            log.error("problem: %s", problem)
         return 0
 
     if not run_on_start:
@@ -329,12 +370,17 @@ def run(cfg, once=False):
 
     while not _stop.is_set():
         try:
-            crawl(cfg)
-        except Exception:
+            _, problems = crawl(cfg)
+        except Exception as exc:  # noqa: BLE001
             # One bad cycle must not end the service. The traceback goes to the
             # log and the next cycle runs; a crash loop would lose the schedule
             # entirely and docker would restart us into the same failure.
             log.exception("crawl failed, continuing to the next cycle")
+            problems = ["the cycle raised {}: {}".format(
+                type(exc).__name__, exc)]
+
+        for problem in problems:
+            log.error("problem: %s", problem)
 
         log.info("next crawl in %d minute(s)", interval_s // 60)
         if _stop.wait(interval_s):

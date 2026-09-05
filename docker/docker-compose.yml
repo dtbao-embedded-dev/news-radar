@@ -32,6 +32,15 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       NEWS_RADAR_CONFIG: /app/config/config.yaml
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    # The crawl talks to a dozen hosts it does not control, so it does not
+    # borrow the host's resolver. On this homelab `www.reddit.com` failed to
+    # resolve through it - on the host as well as in the container - while
+    # `reddit.com` resolved and 301'd to the name that would not. One of the
+    # eight fixed feeds was dead every cycle because of it. Public resolvers
+    # answer it correctly; override these if your network requires its own.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     volumes:
       - ../config:/app/config:ro
       - ../output:/app/output

@@ -32,6 +32,11 @@ feeds:
     url: https://lwn.net/headlines/rss
     enabled: true
     rank_weight: 0.9
+  # If this one answers "Name or service not known", the resolver is the
+  # problem and not Reddit: `www.reddit.com` failed to resolve on this homelab's
+  # host *and* in the container until the crawl service was given its own
+  # nameservers in docker-compose.yml. `old.reddit.com` is not the workaround it
+  # looks like - it resolves and then serves 350 kB of HTML instead of the feed.
   - id: r_embedded
     name: r/embedded
     url: https://www.reddit.com/r/embedded/.rss

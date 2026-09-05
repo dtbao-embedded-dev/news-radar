@@ -4,7 +4,7 @@ category: interface
 purpose: The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process.
 status: active
 updated: 2026-09-05
-source: src/news_radar/__main__.py, src/news_radar/config.py, src/news_radar/fetch/, Dockerfile
+source: src/news_radar/__main__.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile
 confidence: confirmed
 keywords: python -m news_radar, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl
 order: 4
@@ -56,30 +56,57 @@ look hung under `docker logs`.
 
 `crawl()` builds one `Fetcher` (the per-host throttle state lives on it), parses
 the keyword file, reads every enabled fixed feed, then every enabled search
-template crossed with every keyword group, and returns the raw `NewsItem` list.
-See [[fetch-layer]] for the signatures it calls.
+template crossed with every keyword group, matches what came back against the
+groups, collapses duplicates, ranks and caps each group - and then **stores and
+publishes it**. See [[fetch-layer]], [[selection-layer]] and [[storage-layer]]
+for the signatures at each step.
 
 It prints **one count line per configured source, zeros included** - a source
 that quietly stops returning items looks exactly like a quiet week in a total.
-Then one summary line, then the errors:
+Then the summary, the errors, the shortlist group by group, and what was
+written:
 
 ```
 INFO  fixed feeds: 208 item(s) from 8 source(s)
 INFO    hn                   20 item(s)
 INFO    r_embedded            0 item(s)  [failed]
-INFO  search feeds: 389 item(s) from 7 group(s) x 2 template(s)
-INFO    google_news         253 item(s)
+INFO  search feeds: 156 item(s) from 7 group(s) x 2 template(s)
+INFO    google_news          16 item(s)
 WARN  source failed: r_embedded - URLError: ...
-INFO  fetched 597 raw item(s) in 57.3s, 1 source(s) failed
+INFO  fetched 364 raw item(s) in 49.9s, 1 source(s) failed
+INFO  matched 68 item(s) -> 61 story(ies) after dedup -> 43 kept across 7 group(s)
+INFO    ESP32 - 10 item(s)
+INFO      0.42  I Connected My Withings Body+ to Home Assistant with an ESP32  [hn_algolia]
+INFO    Security - 0 item(s)
+INFO  rendered output/index.html (7 group(s), 90 story(ies))
+INFO  stored 43 match row(s) as run 20260905T081328Z; the page shows 90
+      story(ies) across 7 group(s) today
+WARN  the senders are not implemented yet (P4) - nothing is notified this cycle
 ```
+
+**Every group is reported, empty ones included.** `Security - 0 item(s)` is a
+line in the run, not a missing section: a keyword that has gone quiet is exactly
+what a total would hide, and the page makes the same promise for the same reason.
+
+**The page shows more stories than the run kept.** `43 kept` is this cycle's
+shortlist; `90 story(ies) today` is what the store holds for the whole local day.
+The page is rendered from the store, never from the run in memory - that is what
+makes a restart at noon still publish what the morning found.
 
 **An unusable keyword file costs the search feeds, not the run.** The fixed
 feeds do not need it, so `crawl()` logs the `KeywordError` on one line and
-continues with no groups. Losing half a cycle beats losing all of it.
+continues with no groups. Losing half a cycle beats losing all of it. With no
+groups there is also no order to render in, so the page is **left as it was**
+rather than rewritten with no sections - a blank page reads as "no news" instead
+of "the radar is broken".
+
+**Storage and rendering cannot cost the fetch.** `_publish()` is wrapped whole: a
+locked database, a full disk or a read-only volume is logged with its traceback
+and the cycle still returns the shortlist it spent fifty seconds collecting.
 
 ## What it does not do yet
 
-Nothing is filtered, ranked, stored, published or notified: the cycle ends on
-`filtering and ranking are not implemented yet (P2)`. P2 lands the selection,
-P3 the store and the page, P4 the senders. The flags and exit codes above do
-not change with them.
+Nothing is notified: the cycle ends on `the senders are not implemented yet
+(P4)`. P4 lands the Telegram and Discord senders and the new-only diff, which
+reads the seen-set P3 already writes. The flags and exit codes above do not
+change with it.

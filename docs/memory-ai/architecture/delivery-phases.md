@@ -88,7 +88,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 **P2-1 landed here too.** `keywords.py` parses the whole file already, because
 finding a group's primary term means skipping every other prefix anyway.
 
-### P2 — Filter and rank *(done — this repo's current phase is P3)*
+### P2 — Filter and rank *(done)*
 
 | # | Task |
 |---|------|
@@ -105,15 +105,19 @@ months old and the freshness term is `0` for nearly all of them - the shortlist
 currently ranks on source weight alone. Narrowing both queries to a recent
 window is a `config.yaml` change, not a code one.
 
-### P3 — Store and render
+### P3 — Store and render *(done — this repo's current phase is P4)*
 
 | # | Task |
 |---|------|
-| P3-1 | SQLite store: items, sources, per-run log; schema migration on open |
-| P3-2 | Seen-set: what has already been reported, so P4 can diff |
-| P3-3 | HTML renderer: one self-contained `output/index.html`, grouped by keyword group |
-| P3-4 | Page features: dark mode, client-side search, per-day history navigation |
-| P3-5 | Retention: prune rows and files older than the configured window |
+| P3-1 | ~~SQLite store: items, sources, per-run log; schema migration on open~~ — `store.py`, five tables, `user_version` |
+| P3-2 | ~~Seen-set: what has already been reported, so P4 can diff~~ — `unreported()` / `mark_reported()`, keyed per channel |
+| P3-3 | ~~HTML renderer: one self-contained `output/index.html`, grouped by keyword group~~ — `render.write()` |
+| P3-4 | ~~Page features: dark mode, client-side search, per-day history navigation~~ — inline CSS and ~40 lines of JS, no library |
+| P3-5 | ~~Retention: prune rows and files older than the configured window~~ — `store.prune()` |
+
+**The page is rendered from the store, not from the run in memory.** `day_matches()` returns the whole local day, which is what makes a restart at noon still publish what the morning found - the phase's definition of done. Signatures are in [[storage-layer]].
+
+**P2's weak link was closed here too.** Narrowing Google News to `when:7d` and querying HN Algolia through `search_by_date` finally makes the freshness term fire; what it cost in volume is in `progress.md`.
 
 ### P4 — Notify
 

@@ -45,8 +45,8 @@ group with three templates enabled produces three requests per run.
 
 | id | Template | Returns | Substitution |
 |----|----------|---------|--------------|
-| `google_news` | `https://news.google.com/rss/search?q={kw}&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase |
-| `hn_algolia` | `https://hn.algolia.com/api/v1/search?query={kw}` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID` |
+| `google_news` | `https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:7d` is not optional - without it the engine answers relevance-first and returns hits aged months |
+| `hn_algolia` | `https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID`. `search_by_date` orders chronologically, so the window needs no epoch computing; `tags=story` drops comment hits, whose title is not a headline |
 | `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement as the fixed Reddit feed |
 
 `hl` / `gl` / `ceid` on the Google template pin the result locale to Vietnamese.

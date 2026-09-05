@@ -9,67 +9,86 @@ updated: 2026-09-05
 
 ## Current focus
 
-**P2 Filter and rank is done** (2026-09-05). `python -m news_radar --once` turns
-**597 raw items into 209 matches, 205 stories after dedup, and 50 kept across 7
-keyword groups**, printed group by group with a score and the sources that
-carried each story. That is the phase's definition of done.
+**P3 Store and render is done** (2026-09-05). `python -m news_radar --once`
+writes `output/news.db` and a self-contained `output/index.html` plus
+`output/days/<date>.html`, grouped by keyword group with a dark mode, a search
+box and a link to every past day. A second `--once` kept **all 50 of the first
+run's stories on the page**. That is the phase's definition of done.
 
-The next piece of work is **P3 Store and render**: putting that shortlist in
-SQLite, keeping a seen-set so P4 can diff it, and writing `output/index.html`.
-`crawl()` already returns the ranked mapping P3 needs.
+The next piece of work is **P4 Notify**: the Telegram and Discord senders, the
+new-only diff against the seen-set `store.py` already writes, and the backoff
+both channels need. `store.unreported()` and `store.mark_reported()` exist,
+are tested, and have no caller yet - P4 is the first one.
 
 ## Recent changes
 
-- **P2 landed in five commits on `release/v0.1`** (2026-09-05): `filter.py`
-  (`blocked`, `group_matches`, `select`), `rank.py` (`Story`, `collapse`,
-  `score`, `rank_groups`), and the `crawl()` wiring that builds the two plain
-  dicts layer 3 needs and prints the shortlist.
-- **Two new test files, both stdlib-only.** `test_filter.py` and `test_rank.py`
-  need neither PyYAML nor feedparser, because `filter.py` and `rank.py` import
-  no config and read no clock. Seven of the nine test files now run on a bare
-  Windows checkout.
-- **The scoring formula grew one rule the design did not have**: an item dated
-  in the future is clamped to age `0`. `0.5 ** negative` is greater than 1, so
-  a single bad `pubDate` would have topped every group it appeared in.
-- **`interface/selection-layer.md` is new**, and `behavior/news-search.md`,
-  `architecture/module-layout.md`, `architecture/delivery-phases.md` are
-  restamped against the real modules.
+- **P3 landed in six commits on `release/v0.1`** (2026-09-05): `store.py` (five
+  tables migrated on `user_version`, `save`, `day_matches`, the seen-set,
+  `prune`), `render.py` (`local_tz`, `day_bounds`, `write`), and the
+  `_publish()` wiring in `__main__.py`.
+- **The page is rendered from the store, never from the run in memory.** That
+  one choice is what makes "history survives a restart" true. It was proven, not
+  assumed: five stories scored higher in run 1 than in run 2 and the page
+  carried run 1's score for all five.
+- **The search templates were narrowed and it worked - at a cost.** `when:7d`
+  and `search_by_date` make the freshness term fire (ten stories now clear the
+  `0.40` source-only floor where none did), but Google News (vi) returned
+  **16 items instead of 253** because the Vietnamese index has almost no recent
+  embedded coverage. Kept deliberately; the detail is in `progress.md`.
+- **Two departures from the design bank, both recorded in [[news-item]]**: the
+  sources are a table rather than a JSON column on `items`, and
+  `days/<date>.html` is rewritten every run rather than once at midnight.
+- **`interface/storage-layer.md` is new**, and `news-item.md`,
+  `crawl-cli.md`, `module-layout.md`, `delivery-phases.md` are restamped against
+  the real modules. `news-item.md` carries no 🟡 markers any more.
 
-Before this session: P1 landed the whole fetch layer; P0 the release tooling,
-the docker stack, the config loader and the design bank - see `progress.md`.
+Before this session: P2 landed the selection layer, P1 the whole fetch layer,
+P0 the release tooling, the docker stack, the config loader and the design bank
+- see `progress.md`.
 
 ## Next steps
 
-1. **P3-1 SQLite store** - items, sources and a per-run log, schema migrated on
-   open. The shape is in `data/news-item.md`, whose last two sections are still
-   marked 🟡 for exactly this.
-2. **P3-2 seen-set** - what has already been reported, keyed the way P4's diff
-   will read it.
-3. **P3-3 renderer** - one self-contained `output/index.html` grouped by keyword
-   group, then P3-4's dark mode, search box and per-day history.
-4. **Narrow the search queries to a recent window** - a `config.yaml` change,
-   not code. Google News and HN Algolia answer relevance-first, so most search
-   hits are months old and score `0` for freshness. Worth doing before the page
-   exists, or the first published report will look stale.
+1. **P4-1 Telegram sender** - bot API, the message length limit, HTML escaping.
+2. **P4-2 Discord sender** - webhook, embed limits, the 2000-character body.
+3. **P4-3 the new-only diff** - `store.unreported()` per channel; nothing new
+   means nothing sent, and `mark_reported()` is written only after the chunk was
+   accepted.
+4. **P4-4 backoff** - 429 and `Retry-After` on both channels.
+5. **Watch the page for a few days.** Retention is written but has never run
+   against a window that had anything to drop - `retention_days` is `0` in the
+   shipped config, so nothing prunes until someone sets it.
 
 ## Active decisions
 
-- **Layer 3 imports no config and reads no clock.** The weights, the
-  `{source_id: rank_weight}` map and `now` are arguments `__main__.py` builds.
-  It is why the selection tests run with nothing installed, and a `cfg` import
-  inside `filter.py` or `rank.py` is a bug, not a shortcut.
+- **The page is rendered from the store, not from `ranked`.** `day_matches()`
+  returns the whole local day; rendering the in-memory shortlist would publish
+  an afternoon that has forgotten its own morning. A `render.write(..., ranked)`
+  anywhere is a bug, not a shortcut.
+- **Layer 3 and layer 4 import no config and read no clock.** The weights, the
+  `{source_id: rank_weight}` map, the data directory, the retention window and
+  `now` are all arguments `__main__.py` builds. It is why nine of the eleven
+  test files run with nothing installed.
+- **Everything off a feed is escaped at the render boundary.** Titles, links and
+  source ids all go through `html.escape`. A feed title is somebody else's text
+  arriving unreviewed every thirty minutes.
+- **The page needs no network to be read.** Inline CSS and JavaScript, no
+  external stylesheet, script or image - `test_render.py` asserts it rather than
+  trusting it.
 - **Clean-room from TrendRadar.** It is a reference to consult when stuck, never
   a source to copy from - it is GPL-3.0. `rule/reference-trendradar.md` says
   where to look by problem and what may not cross back.
 - **Two runtime dependencies, total**: `pyyaml` and `feedparser`. HTTP, storage
   and templating come from the standard library. A third needs justifying in the
-  changelog. P1 and P2 both held the line - selection is pure stdlib.
+  changelog. P3 held the line - the store is `sqlite3` and the page is
+  f-strings. It is also why `render.local_tz()` falls back to the host offset
+  instead of the project taking `tzdata` for one lookup.
 - **One guard, not one per caller.** `feeds.read_source()` is the only place a
-  source failure is caught; `search.py` calls it rather than repeating the
-  try/except. A second guard anywhere is a bug.
+  source failure is caught; `_publish()` is the only place a storage or render
+  failure is. A second guard anywhere is a bug.
 - **The changelog records technical changes only**, written by hand into
   `## Unreleased` in the same commit as the change. One entry per change, not
-  per commit: all of P2 is one `**crawl**` line.
+  per commit: all of P3 is one `**crawl**` line, and the search-window fix is a
+  `**config**` line of its own because it is a separate change.
 - **Both scripts stay stdlib-only** so they run on a bare checkout, before
   anything is installed.
 - **Self-hosted, not GitHub Pages.** The crawl and the site both run on the

@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-05 - 17 durable doc(s)._
+_Generated 2026-09-05 - 18 durable doc(s)._
 
 ## State (transient)
 
@@ -19,10 +19,49 @@ _Generated 2026-09-05 - 17 durable doc(s)._
 
 ## What works
 
-**P0 Foundation is released as v0.1.0; P1 Fetch and P2 Filter and rank are
-complete** (2026-09-05).
+**P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, and P3
+Store and render are complete** (2026-09-05).
 See `architecture/delivery-phases.md` for the phase map and the finished-product
 definition all of it serves.
+
+### P3 - Store and render
+
+- **The page exists and history survives a restart.** Measured in the container
+  on 2026-09-05: `python -m news_radar --once` wrote `output/news.db` and a
+  29 KB `output/index.html` plus `output/days/2026-09-05.html`. A second `--once`
+  found the same 50 stories and **all 50 of the first run's stories were still on
+  the page** - that is P3's definition of done.
+- **The page is rendered from the store, not from the run in memory.** Proven
+  rather than asserted: five stories scored higher in run 1 than in run 2, and
+  the page carried run 1's score for all five (agreement to within 1e-9). A page
+  built from `ranked` could not do that.
+- **Five tables, one file, migrated on `user_version`.** `items`,
+  `item_sources`, `matches`, `reported`, `runs`. A store written by a *higher*
+  schema version raises `StoreError` rather than being downgraded.
+- **The sources are a table, not a JSON column.** The union of sources is then an
+  `INSERT OR IGNORE` away instead of a read-modify-write on every re-sighting.
+  A deliberate departure from the design - see [[news-item]].
+- **Three re-sighting rules are pinned by tests.** `first_seen_at` never moves;
+  `published_at` keeps the earliest non-null and a `NULL` never overwrites a real
+  timestamp; the source set accumulates.
+- **The seen-set is per channel and nothing calls it yet.** `unreported()` and
+  `mark_reported()` are written and tested; P4 is the first caller. Marking a
+  story sent on Telegram leaves it unreported on Discord.
+- **The page is self-contained, and the test asserts it.** No external
+  stylesheet, script or image - a report that needs a CDN stops being readable
+  exactly when the network is the thing you wanted to read about. Dark mode with
+  `localStorage`, a search box that folds diacritics the way the matcher does, a
+  link to every past day, and the first `report.rank_threshold` of each group
+  highlighted.
+- **Every title, link and source id is escaped on the way in.** A feed title is
+  somebody else's text arriving unreviewed every thirty minutes; the test pins a
+  `<script>` in a title coming back escaped.
+- **Storage and rendering cannot cost the fetch.** `_publish()` is wrapped whole;
+  a failure is logged with its traceback and the cycle still returns the
+  shortlist.
+- **Two more stdlib-only test files.** `test_store.py` needs only `sqlite3` and
+  `test_render.py` only `html` and `pathlib`, so nine of the eleven test files
+  now run on a bare Windows checkout.
 
 ### P2 - Filter and rank
 
@@ -155,12 +194,11 @@ definition all of it serves.
 
 ## What's left
 
-Persistence onwards. `src/news_radar/` now holds the entrypoint, the config
-loader, the item shape, the keyword parser, the whole fetch layer and the whole
-selection layer; from `store.py` on, every stage module is still **specified but
-not written**.
+Notification onwards. `src/news_radar/` now holds the entrypoint, the config
+loader, the item shape, the keyword parser, the whole fetch layer, the whole
+selection layer, the store and the renderer; only `notify/` is still
+**specified but not written**.
 
-- **P3 Store and render** - SQLite store, the seen-set, and `output/index.html`.
 - **P4 Notify** - Telegram and Discord senders, the new-only diff, and backoff.
 - **P5 Deploy** - the Cloudflare Tunnel route for `news.dtbao.org` and the first
   unattended live run. The `Dockerfile` and the schedule loop are done.
@@ -168,13 +206,20 @@ not written**.
 
 ## Known issues
 
-- **The search templates answer relevance-first, not date-first.** Measured
-  2026-09-05: Google News returned `ESP32` hits aged 1704-5783 hours, HN Algolia
-  the same shape. At the default 12 h half-life the freshness term is `0` for
-  nearly every search hit, so the shortlist ranks on source weight alone and the
-  order inside a group is close to arbitrary. `published_at` itself is fine -
-  the fixed feeds came back at 1.5 h and 18 h. The fix is narrowing both queries
-  to a recent window in `config.yaml`, not code.
+- **Google News (vi) has almost no recent embedded coverage.** P2's
+  relevance-first problem is fixed - `when:7d` on Google News and
+  `search_by_date` on HN Algolia mean the freshness term finally fires, and ten
+  stories now clear the source-only floor of `0.40` where none did. But the
+  window has nothing much to select: measured 2026-09-05, seven queries returned
+  **16 items instead of 253**, with `ESP32`, `RTOS`, `embedded linux` and
+  `Rust embedded` returning **zero** even at `when:30d`. The operator itself
+  works - `Samsung` bare returns items aged up to 433 h and `when:7d` caps at
+  167.5 h - the Vietnamese index simply has no recent articles on these terms.
+  The 237 items lost were three to eight months old, scored exactly `0.40`, and
+  were filling whole groups (the `Firmware` group was ten Vietnamese AirPods
+  articles). Kept deliberately: fewer and fresh beats bulkier and stale. Getting
+  volume *and* freshness would mean an English locale, which is a different
+  editorial decision, not a bug fix.
 
 - **The pre-rewrite root commit is still reachable on GitHub.** History was
   rewritten on 2026-09-05 to drop a `Co-Authored-By` trailer, but a force push
@@ -182,12 +227,13 @@ not written**.
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
 - **Four bank docs are still marked `inferred`**: `delivery-phases` and
-  `deployment-homelab` (both describe work not done), `config-and-env` and
-  `notify-channels` (never checked key by key against the code). Flip each once
-  it is verified against the real implementation. P1 flipped `news-item`,
-  `news-sources`, `news-search`, `module-layout` and `crawl-cli` to `confirmed`
-  - note that the last two sections of `news-item` are still P3 and carry their
-  own inline 🟡 marker.
+  `deployment-homelab` (both still describe work not done - P4 onwards, and the
+  tunnel), `config-and-env` and `notify-channels` (never checked key by key
+  against the code). Flip each once it is verified against the real
+  implementation. `news-item`, `news-sources`, `news-search`, `module-layout`,
+  `crawl-cli`, `selection-layer` and `storage-layer` are `confirmed`; P3 cleared
+  the last two 🟡 sections of `news-item`, so the bank now carries no inline
+  gap markers at all.
 - **`www.reddit.com` does not resolve from this homelab.** Both Reddit sources
   are therefore dead here, whatever User-Agent is sent. It is a network fact,
   not a code defect: failure isolation handles it, and the fixed feed stays
@@ -211,67 +257,86 @@ not written**.
 
 ## Current focus
 
-**P2 Filter and rank is done** (2026-09-05). `python -m news_radar --once` turns
-**597 raw items into 209 matches, 205 stories after dedup, and 50 kept across 7
-keyword groups**, printed group by group with a score and the sources that
-carried each story. That is the phase's definition of done.
+**P3 Store and render is done** (2026-09-05). `python -m news_radar --once`
+writes `output/news.db` and a self-contained `output/index.html` plus
+`output/days/<date>.html`, grouped by keyword group with a dark mode, a search
+box and a link to every past day. A second `--once` kept **all 50 of the first
+run's stories on the page**. That is the phase's definition of done.
 
-The next piece of work is **P3 Store and render**: putting that shortlist in
-SQLite, keeping a seen-set so P4 can diff it, and writing `output/index.html`.
-`crawl()` already returns the ranked mapping P3 needs.
+The next piece of work is **P4 Notify**: the Telegram and Discord senders, the
+new-only diff against the seen-set `store.py` already writes, and the backoff
+both channels need. `store.unreported()` and `store.mark_reported()` exist,
+are tested, and have no caller yet - P4 is the first one.
 
 ## Recent changes
 
-- **P2 landed in five commits on `release/v0.1`** (2026-09-05): `filter.py`
-  (`blocked`, `group_matches`, `select`), `rank.py` (`Story`, `collapse`,
-  `score`, `rank_groups`), and the `crawl()` wiring that builds the two plain
-  dicts layer 3 needs and prints the shortlist.
-- **Two new test files, both stdlib-only.** `test_filter.py` and `test_rank.py`
-  need neither PyYAML nor feedparser, because `filter.py` and `rank.py` import
-  no config and read no clock. Seven of the nine test files now run on a bare
-  Windows checkout.
-- **The scoring formula grew one rule the design did not have**: an item dated
-  in the future is clamped to age `0`. `0.5 ** negative` is greater than 1, so
-  a single bad `pubDate` would have topped every group it appeared in.
-- **`interface/selection-layer.md` is new**, and `behavior/news-search.md`,
-  `architecture/module-layout.md`, `architecture/delivery-phases.md` are
-  restamped against the real modules.
+- **P3 landed in six commits on `release/v0.1`** (2026-09-05): `store.py` (five
+  tables migrated on `user_version`, `save`, `day_matches`, the seen-set,
+  `prune`), `render.py` (`local_tz`, `day_bounds`, `write`), and the
+  `_publish()` wiring in `__main__.py`.
+- **The page is rendered from the store, never from the run in memory.** That
+  one choice is what makes "history survives a restart" true. It was proven, not
+  assumed: five stories scored higher in run 1 than in run 2 and the page
+  carried run 1's score for all five.
+- **The search templates were narrowed and it worked - at a cost.** `when:7d`
+  and `search_by_date` make the freshness term fire (ten stories now clear the
+  `0.40` source-only floor where none did), but Google News (vi) returned
+  **16 items instead of 253** because the Vietnamese index has almost no recent
+  embedded coverage. Kept deliberately; the detail is in `progress.md`.
+- **Two departures from the design bank, both recorded in [[news-item]]**: the
+  sources are a table rather than a JSON column on `items`, and
+  `days/<date>.html` is rewritten every run rather than once at midnight.
+- **`interface/storage-layer.md` is new**, and `news-item.md`,
+  `crawl-cli.md`, `module-layout.md`, `delivery-phases.md` are restamped against
+  the real modules. `news-item.md` carries no 🟡 markers any more.
 
-Before this session: P1 landed the whole fetch layer; P0 the release tooling,
-the docker stack, the config loader and the design bank - see `progress.md`.
+Before this session: P2 landed the selection layer, P1 the whole fetch layer,
+P0 the release tooling, the docker stack, the config loader and the design bank
+- see `progress.md`.
 
 ## Next steps
 
-1. **P3-1 SQLite store** - items, sources and a per-run log, schema migrated on
-   open. The shape is in `data/news-item.md`, whose last two sections are still
-   marked 🟡 for exactly this.
-2. **P3-2 seen-set** - what has already been reported, keyed the way P4's diff
-   will read it.
-3. **P3-3 renderer** - one self-contained `output/index.html` grouped by keyword
-   group, then P3-4's dark mode, search box and per-day history.
-4. **Narrow the search queries to a recent window** - a `config.yaml` change,
-   not code. Google News and HN Algolia answer relevance-first, so most search
-   hits are months old and score `0` for freshness. Worth doing before the page
-   exists, or the first published report will look stale.
+1. **P4-1 Telegram sender** - bot API, the message length limit, HTML escaping.
+2. **P4-2 Discord sender** - webhook, embed limits, the 2000-character body.
+3. **P4-3 the new-only diff** - `store.unreported()` per channel; nothing new
+   means nothing sent, and `mark_reported()` is written only after the chunk was
+   accepted.
+4. **P4-4 backoff** - 429 and `Retry-After` on both channels.
+5. **Watch the page for a few days.** Retention is written but has never run
+   against a window that had anything to drop - `retention_days` is `0` in the
+   shipped config, so nothing prunes until someone sets it.
 
 ## Active decisions
 
-- **Layer 3 imports no config and reads no clock.** The weights, the
-  `{source_id: rank_weight}` map and `now` are arguments `__main__.py` builds.
-  It is why the selection tests run with nothing installed, and a `cfg` import
-  inside `filter.py` or `rank.py` is a bug, not a shortcut.
+- **The page is rendered from the store, not from `ranked`.** `day_matches()`
+  returns the whole local day; rendering the in-memory shortlist would publish
+  an afternoon that has forgotten its own morning. A `render.write(..., ranked)`
+  anywhere is a bug, not a shortcut.
+- **Layer 3 and layer 4 import no config and read no clock.** The weights, the
+  `{source_id: rank_weight}` map, the data directory, the retention window and
+  `now` are all arguments `__main__.py` builds. It is why nine of the eleven
+  test files run with nothing installed.
+- **Everything off a feed is escaped at the render boundary.** Titles, links and
+  source ids all go through `html.escape`. A feed title is somebody else's text
+  arriving unreviewed every thirty minutes.
+- **The page needs no network to be read.** Inline CSS and JavaScript, no
+  external stylesheet, script or image - `test_render.py` asserts it rather than
+  trusting it.
 - **Clean-room from TrendRadar.** It is a reference to consult when stuck, never
   a source to copy from - it is GPL-3.0. `rule/reference-trendradar.md` says
   where to look by problem and what may not cross back.
 - **Two runtime dependencies, total**: `pyyaml` and `feedparser`. HTTP, storage
   and templating come from the standard library. A third needs justifying in the
-  changelog. P1 and P2 both held the line - selection is pure stdlib.
+  changelog. P3 held the line - the store is `sqlite3` and the page is
+  f-strings. It is also why `render.local_tz()` falls back to the host offset
+  instead of the project taking `tzdata` for one lookup.
 - **One guard, not one per caller.** `feeds.read_source()` is the only place a
-  source failure is caught; `search.py` calls it rather than repeating the
-  try/except. A second guard anywhere is a bug.
+  source failure is caught; `_publish()` is the only place a storage or render
+  failure is. A second guard anywhere is a bug.
 - **The changelog records technical changes only**, written by hand into
   `## Unreleased` in the same commit as the change. One entry per change, not
-  per commit: all of P2 is one `**crawl**` line.
+  per commit: all of P3 is one `**crawl**` line, and the search-window fix is a
+  `**config**` line of its own because it is a separate change.
 - **Both scripts stay stdlib-only** so they run on a bare checkout, before
   anything is installed.
 - **Self-hosted, not GitHub Pages.** The crawl and the site both run on the
@@ -363,7 +428,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 **P2-1 landed here too.** `keywords.py` parses the whole file already, because
 finding a group's primary term means skipping every other prefix anyway.
 
-### P2 — Filter and rank *(done — this repo's current phase is P3)*
+### P2 — Filter and rank *(done)*
 
 | # | Task |
 |---|------|
@@ -380,15 +445,19 @@ months old and the freshness term is `0` for nearly all of them - the shortlist
 currently ranks on source weight alone. Narrowing both queries to a recent
 window is a `config.yaml` change, not a code one.
 
-### P3 — Store and render
+### P3 — Store and render *(done — this repo's current phase is P4)*
 
 | # | Task |
 |---|------|
-| P3-1 | SQLite store: items, sources, per-run log; schema migration on open |
-| P3-2 | Seen-set: what has already been reported, so P4 can diff |
-| P3-3 | HTML renderer: one self-contained `output/index.html`, grouped by keyword group |
-| P3-4 | Page features: dark mode, client-side search, per-day history navigation |
-| P3-5 | Retention: prune rows and files older than the configured window |
+| P3-1 | ~~SQLite store: items, sources, per-run log; schema migration on open~~ — `store.py`, five tables, `user_version` |
+| P3-2 | ~~Seen-set: what has already been reported, so P4 can diff~~ — `unreported()` / `mark_reported()`, keyed per channel |
+| P3-3 | ~~HTML renderer: one self-contained `output/index.html`, grouped by keyword group~~ — `render.write()` |
+| P3-4 | ~~Page features: dark mode, client-side search, per-day history navigation~~ — inline CSS and ~40 lines of JS, no library |
+| P3-5 | ~~Retention: prune rows and files older than the configured window~~ — `store.prune()` |
+
+**The page is rendered from the store, not from the run in memory.** `day_matches()` returns the whole local day, which is what makes a restart at noon still publish what the morning found - the phase's definition of done. Signatures are in [[storage-layer]].
+
+**P2's weak link was closed here too.** Narrowing Google News to `when:7d` and querying HN Algolia through `search_by_date` finally makes the freshness term fire; what it cost in volume is in `progress.md`.
 
 ### P4 — Notify
 
@@ -463,8 +532,8 @@ news-radar/
 │   │   └── search.py           # keyword -> search URL -> items
 │   ├── filter.py               # DONE - global filter + match against groups
 │   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
-│   ├── store.py                # P3 - SQLite persistence + seen-set
-│   ├── render.py               # P3 - output/index.html
+│   ├── store.py                # DONE - SQLite persistence, seen-set, retention
+│   ├── render.py               # DONE - output/index.html + days/<date>.html
 │   └── notify/                 # P4
 │       ├── telegram.py
 │       └── discord.py
@@ -477,6 +546,8 @@ news-radar/
 │   ├── test_search.py          # plain asserts, needs feedparser + PyYAML
 │   ├── test_filter.py          # plain asserts, stdlib only
 │   ├── test_rank.py            # plain asserts, stdlib only
+│   ├── test_store.py           # plain asserts, stdlib only (sqlite3)
+│   ├── test_render.py          # plain asserts, stdlib only
 │   ├── test_release.py         # plain asserts, stdlib only
 │   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
@@ -500,7 +571,7 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | 1 — transport | `fetch/http.py` | stdlib only |
 | 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
 | 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
-| 4 — persistence | `store.py` | layer 3 output types |
+| 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
 | 5 — output | `render.py`, `notify/*` | layers 3 and 4 |
 
 `__main__.py` is the only module that knows about all five; it wires them and owns
@@ -526,7 +597,7 @@ yet. That is the whole point of `setup.py`.
 | Feed parsing | **feedparser** | Twenty years of malformed RSS/Atom in the wild. Hand-rolling `xml.etree` here is the classic mistake |
 | HTTP | stdlib `urllib.request` | One GET with a User-Agent and a timeout. `requests` earns nothing here |
 | Storage | stdlib `sqlite3` | Single writer, single file, no server to run |
-| Templating | stdlib `string.Template` / f-strings | One page. A template engine is a dependency for nothing |
+| Templating | stdlib f-strings | One page. A template engine is a dependency for nothing |
 | Web server | Caddy (container) | Static files plus automatic HTTPS if ever served directly |
 | Scheduling | in-process loop in the crawl container | Compose has no cron; a host cron differs between Windows and Linux |
 
@@ -687,8 +758,8 @@ group with three templates enabled produces three requests per run.
 
 | id | Template | Returns | Substitution |
 |----|----------|---------|--------------|
-| `google_news` | `https://news.google.com/rss/search?q={kw}&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase |
-| `hn_algolia` | `https://hn.algolia.com/api/v1/search?query={kw}` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID` |
+| `google_news` | `https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:7d` is not optional - without it the engine answers relevance-first and returns hits aged months |
+| `hn_algolia` | `https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID`. `search_by_date` orders chronologically, so the window needs no epoch computing; `tags=story` drops comment hits, whose title is not a headline |
 | `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement as the fixed Reddit feed |
 
 `hl` / `gl` / `ceid` on the Google template pin the result locale to Vietnamese.
@@ -736,7 +807,7 @@ id - `hn` and `hn_algolia` are different hosts, the two Reddit entries are not.
 3. Record it in the table above and restamp `updated`.
 
 ### [data] News Item, Dedup Key and Output Layout
-*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py - keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot*
+*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py - keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot*
 
 # News Item, Dedup Key and Output Layout
 
@@ -800,24 +871,40 @@ implemented; it would need a threshold nobody has tuned yet.
 
 ## SQLite store
 
-> 🟡 `inferred` - this section and the next describe P3. `store.py` and
-> `render.py` do not exist yet; everything above them is confirmed against
-> `src/news_radar/item.py`.
-
-One file, `output/news.db`. Schema described as shape, not DDL.
+One file, `output/news.db`. Schema described as shape, not DDL - the exact
+signatures are in [[storage-layer]].
 
 | Table | Columns | Purpose |
 |-------|---------|---------|
-| `items` | `dedup_key` (PK), `title`, `canonical_url`, `url`, `first_seen_at`, `published_at`, `sources` (JSON array of source ids) | Every story ever seen, one row per dedup key |
-| `matches` | `dedup_key`, `group_name`, `score`, `run_id` | Which groups an item matched in a given run, and the score it got |
-| `reported` | `dedup_key`, `channel`, `reported_at` | The seen-set: what has already gone out to Telegram or Discord |
+| `items` | `dedup_key` (PK), `title`, `url`, `canonical_url`, `first_seen_at`, `published_at` | Every story ever shortlisted, one row per dedup key |
+| `item_sources` | `(dedup_key, source_id)` (PK) | Which sources carried it - one row per pair, accumulating |
+| `matches` | `(dedup_key, group_name, run_id)` (PK), `score` | Which groups an item matched in a given run, and the score it got |
+| `reported` | `(dedup_key, channel)` (PK), `reported_at` | The seen-set: what has already gone out to Telegram or Discord |
 | `runs` | `run_id` (PK), `started_at`, `finished_at`, `items_fetched`, `items_matched`, `errors` (JSON) | One row per crawl, for the heartbeat and for debugging a quiet day |
+
+**The sources are a table, not a JSON column on `items`.** The design called for
+a `sources` JSON array; a table earns its place because the union of sources is
+then an `INSERT OR IGNORE` away, instead of a read-modify-write of the row on
+every re-sighting. It also reads back as one `group_concat` in the day query.
 
 `reported` is keyed per channel on purpose: adding Discord later must not
 retroactively count stories already pushed to Telegram as "sent".
 
 Schema version lives in SQLite's `user_version` pragma; `store.py` migrates
-forward on open and never migrates backward.
+forward on open and never migrates backward - a file written by a **higher**
+version raises `StoreError` rather than being downgraded.
+
+Every timestamp is an ISO-8601 UTC string carrying the same `+00:00` suffix, so
+`<` and `>` in SQL mean what they say. Local time is applied only at render time.
+
+### The three re-sighting rules
+
+A story found again tomorrow is the same row, not a second one:
+
+1. `first_seen_at` never moves once set - it is the answer to "is this new?".
+2. `published_at` keeps the **earliest** non-null anyone reported; a source that
+   gives no timestamp never erases one that did.
+3. The source set accumulates.
 
 ## Output layout
 
@@ -826,12 +913,17 @@ output/
 ├── index.html          # current report - what Caddy serves at /
 ├── news.db             # SQLite store above
 └── days/
-    └── 2026-09-04.html # one immutable snapshot per day, linked from index.html
+    └── 2026-09-04.html # one snapshot per day, linked from index.html
 ```
 
 - `index.html` is rewritten every run; it is never appended to.
-- `days/<date>.html` is written once when a day rolls over and is not touched
-  again, so a stale render can never rewrite history.
+- `days/<date>.html` is written **every run**, with the identical body, under the
+  current local date. A past day is still never touched - the filename moves with
+  the date - and there is no day-rollover branch to get wrong. The design called
+  for writing it once at midnight; this has the same effect with less to break.
+- Both files are self-contained: inline CSS and JavaScript, no external
+  stylesheet, script or image. A report that needs a CDN stops being readable
+  exactly when the network is the thing you wanted to read about.
 - Retention (`storage.retention_days`, default 0 = keep everything) prunes
   `days/` files and `items` rows older than the window in the same pass.
 
@@ -1145,7 +1237,7 @@ acceptable failure, a silently dropped story is not.
 already pushed to Telegram as sent - see [[news-item]].
 
 ### [interface] Crawl CLI - python -m news_radar
-*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/config.py, src/news_radar/fetch/, Dockerfile - keywords: python -m news_radar, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
+*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile - keywords: python -m news_radar, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
 
 # Crawl CLI - `python -m news_radar`
 
@@ -1193,33 +1285,60 @@ look hung under `docker logs`.
 
 `crawl()` builds one `Fetcher` (the per-host throttle state lives on it), parses
 the keyword file, reads every enabled fixed feed, then every enabled search
-template crossed with every keyword group, and returns the raw `NewsItem` list.
-See [[fetch-layer]] for the signatures it calls.
+template crossed with every keyword group, matches what came back against the
+groups, collapses duplicates, ranks and caps each group - and then **stores and
+publishes it**. See [[fetch-layer]], [[selection-layer]] and [[storage-layer]]
+for the signatures at each step.
 
 It prints **one count line per configured source, zeros included** - a source
 that quietly stops returning items looks exactly like a quiet week in a total.
-Then one summary line, then the errors:
+Then the summary, the errors, the shortlist group by group, and what was
+written:
 
 ```
 INFO  fixed feeds: 208 item(s) from 8 source(s)
 INFO    hn                   20 item(s)
 INFO    r_embedded            0 item(s)  [failed]
-INFO  search feeds: 389 item(s) from 7 group(s) x 2 template(s)
-INFO    google_news         253 item(s)
+INFO  search feeds: 156 item(s) from 7 group(s) x 2 template(s)
+INFO    google_news          16 item(s)
 WARN  source failed: r_embedded - URLError: ...
-INFO  fetched 597 raw item(s) in 57.3s, 1 source(s) failed
+INFO  fetched 364 raw item(s) in 49.9s, 1 source(s) failed
+INFO  matched 68 item(s) -> 61 story(ies) after dedup -> 43 kept across 7 group(s)
+INFO    ESP32 - 10 item(s)
+INFO      0.42  I Connected My Withings Body+ to Home Assistant with an ESP32  [hn_algolia]
+INFO    Security - 0 item(s)
+INFO  rendered output/index.html (7 group(s), 90 story(ies))
+INFO  stored 43 match row(s) as run 20260905T081328Z; the page shows 90
+      story(ies) across 7 group(s) today
+WARN  the senders are not implemented yet (P4) - nothing is notified this cycle
 ```
+
+**Every group is reported, empty ones included.** `Security - 0 item(s)` is a
+line in the run, not a missing section: a keyword that has gone quiet is exactly
+what a total would hide, and the page makes the same promise for the same reason.
+
+**The page shows more stories than the run kept.** `43 kept` is this cycle's
+shortlist; `90 story(ies) today` is what the store holds for the whole local day.
+The page is rendered from the store, never from the run in memory - that is what
+makes a restart at noon still publish what the morning found.
 
 **An unusable keyword file costs the search feeds, not the run.** The fixed
 feeds do not need it, so `crawl()` logs the `KeywordError` on one line and
-continues with no groups. Losing half a cycle beats losing all of it.
+continues with no groups. Losing half a cycle beats losing all of it. With no
+groups there is also no order to render in, so the page is **left as it was**
+rather than rewritten with no sections - a blank page reads as "no news" instead
+of "the radar is broken".
+
+**Storage and rendering cannot cost the fetch.** `_publish()` is wrapped whole: a
+locked database, a full disk or a read-only volume is logged with its traceback
+and the cycle still returns the shortlist it spent fifty seconds collecting.
 
 ## What it does not do yet
 
-Nothing is filtered, ranked, stored, published or notified: the cycle ends on
-`filtering and ranking are not implemented yet (P2)`. P2 lands the selection,
-P3 the store and the page, P4 the senders. The flags and exit codes above do
-not change with them.
+Nothing is notified: the cycle ends on `the senders are not implemented yet
+(P4)`. P4 lands the Telegram and Discord senders and the new-only diff, which
+reads the seen-set P3 already writes. The flags and exit codes above do not
+change with it.
 
 ### [interface] Fetch Layer Contracts
 *`interface/fetch-layer.md` - Every public signature of the fetch layer and the two leaf modules it stands on - what each returns, what it raises, and what it deliberately does not. - status: active - source: src/news_radar/fetch/http.py, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py, src/news_radar/item.py, src/news_radar/keywords.py - keywords: Fetcher, HttpError, parse, read_source, read_fixed_feeds, build_urls, read_search_feeds, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle*
@@ -1407,6 +1526,142 @@ operator gave it. An id absent from the map scores `DEFAULT_SOURCE_WEIGHT`
 
 The scoring formula itself, and the two timestamp rules it enforces (unknown
 scores `0`, future is clamped to age `0`), are in [[news-search]] stage 6.
+
+### [interface] Storage and Render Layer Contracts
+*`interface/storage-layer.md` - Every public signature of the store and render modules - what each writes, what the page is built from, and the row shape that travels between them. - status: active - source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py - keywords: open_db, start_run, finish_run, save, day_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot*
+
+# Storage and Render Layer Contracts
+
+> Two modules, layers 4 and 5. `store.py` writes every shortlisted story into
+> one SQLite file and answers "has this gone out yet?"; `render.py` turns a day
+> of that store into one self-contained page. Neither imports `config`: the data
+> directory, the retention window, the timezone name and every timestamp arrive
+> as arguments that `__main__.py` builds, the same discipline layer 3 holds.
+
+## `store.py` - layer 4
+
+Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
+
+| Signature | Returns | Notes |
+|-----------|---------|-------|
+| `open_db(data_dir)` | `sqlite3.Connection` | Creates `data_dir`, connects to `news.db`, migrates on `user_version`. `row_factory` is `sqlite3.Row` |
+| `start_run(conn, started_at)` | `run_id: str` | Opens the `runs` row. Id is the UTC start as `%Y%m%dT%H%M%SZ`, with a `-2`, `-3`… suffix if that second is taken |
+| `finish_run(conn, run_id, finished_at, items_fetched, items_matched, errors)` | `None` | Closes the row; `errors` is JSON-encoded as a list of pairs |
+| `save(conn, run_id, ranked, now)` | `int` | `{label: [Story]}` in, number of `matches` rows written out |
+| `day_matches(conn, start_utc, end_utc)` | `{label: [row]}` | Only labels that have rows. See the row shape below |
+| `unreported(conn, dedup_keys, channel)` | `[dedup_key]` | The seen-set diff, in the caller's order. `[]` for an empty input |
+| `mark_reported(conn, dedup_keys, channel, when)` | `None` | Idempotent - `INSERT OR IGNORE` |
+| `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)` |
+| `to_db(moment)` / `from_db(text)` | `str \| None` / `datetime \| None` | The one serialisation, both ways |
+
+`StoreError` is raised only when the file's `user_version` is **higher** than
+`SCHEMA_VERSION`: the store migrates forward and refuses to downgrade. A missing
+file is not an error - it is the first run.
+
+### Tables
+
+| Table | Columns | Purpose |
+|-------|---------|---------|
+| `items` | `dedup_key` PK, `title`, `url`, `canonical_url`, `first_seen_at`, `published_at` | Every story ever shortlisted, one row per dedup key |
+| `item_sources` | `(dedup_key, source_id)` PK | Which sources carried it - accumulating, one row per pair |
+| `matches` | `(dedup_key, group_name, run_id)` PK, `score` | Which groups it matched in a given run, and the score that run gave it |
+| `reported` | `(dedup_key, channel)` PK, `reported_at` | The seen-set: what has already gone out, per channel |
+| `runs` | `run_id` PK, `started_at`, `finished_at`, `items_fetched`, `items_matched`, `errors` | One row per crawl, for the heartbeat and for debugging a quiet day |
+
+Timestamps are ISO-8601 **UTC** strings, every one carrying the same `+00:00`
+suffix, so `<` and `>` in SQL mean what they say and no comparison has to go
+through Python. Local time never reaches this module.
+
+### The three re-sighting rules
+
+A story found again tomorrow is the same row, not a second one, and `save()`
+holds all three in one UPSERT:
+
+1. **`first_seen_at` never moves.** It is the answer to "is this new?", which is
+   the whole of P4's diff.
+2. **`published_at` keeps the earliest non-null** anyone reported. A source that
+   gives no timestamp must not erase one that did, so a `NULL` never wins.
+3. **The source set accumulates**, because `item_sources` ignores a duplicate.
+
+### The row `day_matches` returns
+
+One row per `(story, group)` however many runs saw it - the **best** score any
+run in the window gave it wins, because a story that got fresher during the day
+should not be ranked by the run that noticed it first.
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `dedup_key` | str | Its key, so the caller can diff against the seen-set |
+| `title`, `url`, `canonical_url` | str | As stored |
+| `score` | float | The best of the window |
+| `published_at` | `datetime \| None` | Aware UTC, parsed back |
+| `first_seen_at` | `datetime` | Aware UTC |
+| `sources` | `tuple[str, ...]` | The accumulated source ids |
+
+## `render.py` - layer 5
+
+Imports `html`, `zoneinfo`, `pathlib` and f-strings. No template engine: one
+page does not earn a dependency.
+
+| Signature | Returns | Notes |
+|-----------|---------|-------|
+| `local_tz(name)` | `tzinfo` | Never raises - see the fallback below |
+| `day_bounds(now, tz)` | `(start_utc, end_utc)` | The local day containing `now`, half-open, expressed in UTC |
+| `write(data_dir, labels, day_rows, meta, tz, threshold=5)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html` with identical bodies |
+
+`labels` fixes the group order **and** is what keeps an empty group on the page:
+a keyword that has gone quiet looks identical to a keyword nobody wrote about,
+and only one of those is worth knowing. `day_rows` is what `day_matches()`
+returned; a label with no entry there renders its section with `no stories
+today` rather than vanishing.
+
+`meta` is read with `.get()` and understands `run_id`, `fetched`, `matched`,
+`sources`, `errors` and `generated_at`; `generated_at` also decides which date
+the snapshot is filed under.
+
+### What the page is
+
+- **Self-contained.** The CSS and the JavaScript are inline and there is not one
+  external stylesheet, script or image. A radar whose report needs a CDN stops
+  being readable exactly when the network is the thing you wanted to read about.
+  `tests/test_render.py` asserts this rather than trusting it.
+- **Escaped at the boundary.** Every title, link and source id goes through
+  `html.escape(..., quote=True)` on the way in. A feed title is somebody else's
+  text and it arrives unreviewed every thirty minutes.
+- **Dark mode** through CSS custom properties: `prefers-color-scheme` by default,
+  overridden by a `data-theme` attribute the toggle sets and `localStorage`
+  remembers. A `localStorage` that throws (private mode) costs the memory, not
+  the page.
+- **A search box** that filters `<li>` on `textContent`, folding diacritics the
+  same way `item.fold()` does - so a search typed `dien tu` finds `Điện tử`.
+  A group whose every story is filtered out hides itself.
+- **`report.rank_threshold`** marks the first N of each group with a `hot` class.
+
+### The timezone fallback
+
+`local_tz()` never raises. Windows ships no tz database, so
+`ZoneInfo("Asia/Ho_Chi_Minh")` resolves in the Linux container and can fail on a
+developer's host; pulling in `tzdata` for one lookup would break the
+two-runtime-dependency rule. An unresolvable name falls back to the host's own
+offset and logs one line per name per process. Vietnam has no DST, so the
+fallback is exact there - a zone that *does* observe DST would need `tzdata`.
+
+## What `__main__._publish()` wires
+
+`open_db` → `start_run` → `save` → `local_tz` + `day_bounds` → `day_matches` →
+`render.write` → `prune` → `finish_run`, the whole sequence inside one
+`try/except`. A locked database, a full disk or a read-only volume costs the
+page, never the fetch: the cycle logs the traceback and still returns the
+shortlist. **The page is rendered from `day_matches()`, never from the `ranked`
+mapping still in memory** - that one choice is what makes a restart at noon
+still publish what the morning found.
+
+An empty `groups` list (an unusable keyword file) skips the render entirely and
+leaves the previous page in place. A page with no sections at all reads as "no
+news" rather than "the radar is broken", which is the wrong lie to tell.
+
+See [[selection-layer]] for what produces `ranked`, and [[news-item]] for the
+dedup key everything here is filed under.
 
 ### [behavior] How News Is Searched, Matched and Ranked
 *`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*

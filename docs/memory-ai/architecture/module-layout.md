@@ -46,8 +46,8 @@ news-radar/
 │   │   └── search.py           # keyword -> search URL -> items
 │   ├── filter.py               # DONE - global filter + match against groups
 │   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
-│   ├── store.py                # P3 - SQLite persistence + seen-set
-│   ├── render.py               # P3 - output/index.html
+│   ├── store.py                # DONE - SQLite persistence, seen-set, retention
+│   ├── render.py               # DONE - output/index.html + days/<date>.html
 │   └── notify/                 # P4
 │       ├── telegram.py
 │       └── discord.py
@@ -60,6 +60,8 @@ news-radar/
 │   ├── test_search.py          # plain asserts, needs feedparser + PyYAML
 │   ├── test_filter.py          # plain asserts, stdlib only
 │   ├── test_rank.py            # plain asserts, stdlib only
+│   ├── test_store.py           # plain asserts, stdlib only (sqlite3)
+│   ├── test_render.py          # plain asserts, stdlib only
 │   ├── test_release.py         # plain asserts, stdlib only
 │   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
@@ -83,7 +85,7 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | 1 — transport | `fetch/http.py` | stdlib only |
 | 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
 | 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
-| 4 — persistence | `store.py` | layer 3 output types |
+| 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
 | 5 — output | `render.py`, `notify/*` | layers 3 and 4 |
 
 `__main__.py` is the only module that knows about all five; it wires them and owns
@@ -109,7 +111,7 @@ yet. That is the whole point of `setup.py`.
 | Feed parsing | **feedparser** | Twenty years of malformed RSS/Atom in the wild. Hand-rolling `xml.etree` here is the classic mistake |
 | HTTP | stdlib `urllib.request` | One GET with a User-Agent and a timeout. `requests` earns nothing here |
 | Storage | stdlib `sqlite3` | Single writer, single file, no server to run |
-| Templating | stdlib `string.Template` / f-strings | One page. A template engine is a dependency for nothing |
+| Templating | stdlib f-strings | One page. A template engine is a dependency for nothing |
 | Web server | Caddy (container) | Static files plus automatic HTTPS if ever served directly |
 | Scheduling | in-process loop in the crawl container | Compose has no cron; a host cron differs between Windows and Linux |
 

@@ -2,6 +2,14 @@
 # exposes no port. TLS terminates at the Cloudflare edge, so plain HTTP here.
 :8080 {
 	root * /srv
+
+	# The SQLite store lives in the same directory as the pages, because the
+	# crawler writes one volume. It is not part of the report: serving it hands
+	# a stranger the whole archive in one request, and the wildcard covers the
+	# -wal / -shm / -journal files SQLite can leave beside it. 404 rather than
+	# 403 - there is no reason to confirm the file is there.
+	respond /news.db* 404
+
 	encode gzip
 
 	# The current report is rewritten every run - never let a proxy hold it.
@@ -10,7 +18,11 @@
 	# Day snapshots are written once and never touched again.
 	header /days/* Cache-Control "public, max-age=3600"
 
-	file_server browse
+	# No `browse`: index.html already links every snapshot, so a directory
+	# listing adds nothing a reader needs and publishes the shape of everything
+	# else in the volume.
+	file_server
+
 	log {
 		output stdout
 		format console

@@ -56,6 +56,24 @@ on the homelab wants the obvious one. Verified 2026-09-05 - Caddy answers `200`
 on `8088` with the `Cache-Control` headers from our Caddyfile, and nothing
 listens on `8080`.
 
+### What Caddy will and will not serve
+
+`output/` is one volume holding the pages **and** the SQLite store, so the file
+server has to be told the difference:
+
+| Path | Answer |
+|------|--------|
+| `/`, `/index.html` | the current report, `Cache-Control: no-cache` |
+| `/days/<date>.html` | that day's snapshot, `Cache-Control: public, max-age=3600` |
+| `/news.db`, `/news.db-wal`, `/news.db-shm`, `/news.db-journal` | `404` |
+| any directory | `404` - `browse` is off |
+
+The store is not part of the report: serving it hands a stranger the whole
+archive in one request. `404` rather than `403`, because there is no reason to
+confirm the file is there. Directory listing is off for the same reason and
+costs nothing - `index.html` already links every snapshot. Both matter more once
+P5 puts this on the public internet, and both are cheap enough to have now.
+
 Add a `cloudflared` service only if the homelab does not already run a tunnel.
 It already serves `mcp.dtbao.org`, so the cheaper path is to add one public
 hostname route to the existing tunnel, pointing `news.dtbao.org` at

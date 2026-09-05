@@ -69,6 +69,15 @@ one makes the file and the tags disagree.
 
 ### Fixes
 
+- **caddy**: the SQLite store is no longer downloadable from the site.
+  `output/` holds `news.db` next to the pages because the crawler writes one
+  volume, and the file server was handing it to anyone who asked for
+  `/news.db` - the whole archive in a single request - while `browse` published
+  a listing of everything else in the directory. Requests for the store and its
+  `-wal` / `-shm` / `-journal` siblings now answer `404`, and directory listing
+  is off; `index.html` already links every day snapshot, so nothing a reader
+  needs was behind it. Worth taking before `news.dtbao.org` reaches the public
+  internet in P5
 - **config**: both shipped search templates now ask for recent stories rather
   than relevant ones, so the freshness half of the ranking finally does
   something. Google News takes a `when:7d` window and Hacker News is queried

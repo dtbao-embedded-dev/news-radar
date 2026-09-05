@@ -26,6 +26,19 @@ finished-product definition all of it serves.
 
 ### P6 - Ops
 
+- **`r_embedded` is alive again, and the bank was wrong about why.** This file
+  used to carry it as a known issue reading "fixing it means the homelab's DNS,
+  not this repository" - and that last clause was the mistake. `www.reddit.com`
+  did fail to resolve on the host as well as in the container, but the crawl
+  does not have to borrow the host's resolver: `dns: [1.1.1.1, 8.8.8.8]` on the
+  crawl service in `docker-compose.yml` fixes it inside this repository. Two
+  dead ends are recorded in [[news-sources]] so nobody tries them twice -
+  `reddit.com` resolves and 301s to the name that does not, and
+  `old.reddit.com` resolves and serves 350 kB of HTML instead of the feed.
+  Measured 2026-09-05 after the change: `fixed feeds: 233 item(s) from 8
+  source(s)`, `r_embedded 25 item(s)`, **0 sources failed** - the first cycle in
+  this project's life where every configured source answered.
+
 - **The day now arrives as a paragraph, not only as a list.** P6-4 shipped:
   `summarize.py` writes one line per keyword group - the group's name and at
   most two sentences about what stood out - above the stories on the page, and
@@ -397,11 +410,6 @@ the ops layer and the summary - and the whole thing is reachable at
   `module-layout`, `crawl-cli`, `fetch-layer`, `selection-layer` and
   `storage-layer` were already `confirmed`, and the bank carries no inline gap
   markers at all.
-- **`www.reddit.com` does not resolve from this homelab.** Both Reddit sources
-  are therefore dead here, whatever User-Agent is sent. It is a network fact,
-  not a code defect: failure isolation handles it, and the fixed feed stays
-  enabled so the run reports it rather than hiding it. Fixing it means the
-  homelab's DNS, not this repository.
 - **Google News items are redirector links.** They arrive as
   `news.google.com/rss/articles/CBMi...`, so the same story from Google News and
   from Hacker News will not collapse on `canonical_url` in P2. Accepted, of the
@@ -1184,7 +1192,7 @@ one is a config edit, never a code edit.
 | `lobsters` | Lobsters | `https://lobste.rs/rss` | RSS 2.0 | en | Tags live in the title suffix, not a separate field |
 | `hackaday` | Hackaday | `https://hackaday.com/blog/feed/` | RSS 2.0 | en | WordPress feed; full body in `content:encoded` - ignore it, titles only |
 | `lwn` | LWN headlines | `https://lwn.net/headlines/rss` | RSS 2.0 | en | Subscriber-only items appear with a `[$]` title prefix |
-| `r_embedded` | r/embedded | `https://www.reddit.com/r/embedded/.rss` | Atom | en | **Requires a real User-Agent**; the default Python one gets HTTP 403 |
+| `r_embedded` | r/embedded | `https://www.reddit.com/r/embedded/.rss` | Atom | en | **Requires a real User-Agent**; the default Python one gets HTTP 403. **Needs its own resolver**: `www.reddit.com` failed to resolve on this homelab - host *and* container - so the crawl service sets `dns: [1.1.1.1, 8.8.8.8]` in `docker-compose.yml`. `reddit.com` resolves and then 301s to the name that will not; `old.reddit.com` resolves and then serves 350 kB of HTML rather than the feed. Neither is a workaround, the resolver is |
 | `vnexpress_sohoa` | VnExpress So hoa | `https://vnexpress.net/rss/so-hoa.rss` | RSS 2.0 | vi | Description carries an `<img>` tag - strip HTML before matching |
 | `genk` | GenK | `https://genk.vn/rss/home.rss` | RSS 2.0 | vi | Mixed tech and consumer news |
 | `tinhte` | Tinh te | `https://tinhte.vn/rss` | RSS 2.0 | vi | Forum-flavoured; heavier duplicate rate than the others |
@@ -1204,7 +1212,7 @@ group with three templates enabled produces three requests per run.
 | `google_news` | `https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:7d` is not optional - without it the engine answers relevance-first and returns hits aged months |
 | `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. Both are kept so Vietnamese AI coverage stays on the page |
 | `hn_algolia` | `https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story&typoTolerance=false` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID`. `search_by_date` orders chronologically, so the window needs no epoch computing; `tags=story` drops comment hits, whose title is not a headline. **`typoTolerance=false` is required, not cosmetic**: with it on, Algolia matches 41,612 stories for `RTOS` and `FreeToken` for `FreeRTOS`, and a date sort then returns the most recent of that noise - `RTOS` yielded 0 usable of 20. Off, it is strictly better on every shipped group: 97 usable a cycle instead of 77 |
-| `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement as the fixed Reddit feed |
+| `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement, and the same resolver requirement |
 
 `hl` / `gl` / `ceid` on the Google template pin the result locale to Vietnamese.
 Changing them to `hl=en&gl=US&ceid=US:en` gives the English-language cut of the

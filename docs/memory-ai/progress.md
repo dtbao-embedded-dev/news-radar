@@ -16,6 +16,19 @@ finished-product definition all of it serves.
 
 ### P6 - Ops
 
+- **`r_embedded` is alive again, and the bank was wrong about why.** This file
+  used to carry it as a known issue reading "fixing it means the homelab's DNS,
+  not this repository" - and that last clause was the mistake. `www.reddit.com`
+  did fail to resolve on the host as well as in the container, but the crawl
+  does not have to borrow the host's resolver: `dns: [1.1.1.1, 8.8.8.8]` on the
+  crawl service in `docker-compose.yml` fixes it inside this repository. Two
+  dead ends are recorded in [[news-sources]] so nobody tries them twice -
+  `reddit.com` resolves and 301s to the name that does not, and
+  `old.reddit.com` resolves and serves 350 kB of HTML instead of the feed.
+  Measured 2026-09-05 after the change: `fixed feeds: 233 item(s) from 8
+  source(s)`, `r_embedded 25 item(s)`, **0 sources failed** - the first cycle in
+  this project's life where every configured source answered.
+
 - **The day now arrives as a paragraph, not only as a list.** P6-4 shipped:
   `summarize.py` writes one line per keyword group - the group's name and at
   most two sentences about what stood out - above the stories on the page, and
@@ -387,11 +400,6 @@ the ops layer and the summary - and the whole thing is reachable at
   `module-layout`, `crawl-cli`, `fetch-layer`, `selection-layer` and
   `storage-layer` were already `confirmed`, and the bank carries no inline gap
   markers at all.
-- **`www.reddit.com` does not resolve from this homelab.** Both Reddit sources
-  are therefore dead here, whatever User-Agent is sent. It is a network fact,
-  not a code defect: failure isolation handles it, and the fixed feed stays
-  enabled so the run reports it rather than hiding it. Fixing it means the
-  homelab's DNS, not this repository.
 - **Google News items are redirector links.** They arrive as
   `news.google.com/rss/articles/CBMi...`, so the same story from Google News and
   from Hacker News will not collapse on `canonical_url` in P2. Accepted, of the

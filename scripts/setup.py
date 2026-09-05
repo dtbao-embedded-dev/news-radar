@@ -248,7 +248,14 @@ def main(argv=None):
         return 1
 
     say("ok", "ready")
-    print("next:  docker compose -f docker/docker-compose.yml up -d")
+    # The crawl service builds from a Dockerfile that lands in P5. Until that
+    # file exists a full `up -d` dies on the build, so point at what can
+    # actually start; the check disappears on its own once P5 adds the file.
+    if (ROOT / "Dockerfile").is_file():
+        print("next:  docker compose -f docker/docker-compose.yml up -d")
+    else:
+        print("next:  docker compose -f docker/docker-compose.yml up -d caddy")
+        print("       (no Dockerfile yet - the crawl service cannot build)")
     return 0
 
 

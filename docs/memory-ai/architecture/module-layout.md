@@ -4,8 +4,8 @@ category: architecture
 purpose: The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take.
 status: active
 updated: 2026-09-05
-source: conversation
-confidence: inferred
+source: src/news_radar/, Dockerfile, requirements.txt
+confidence: confirmed
 keywords: tree, layout, layering, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
 order: 2
 ---
@@ -38,10 +38,11 @@ news-radar/
 │   ├── __init__.py             # DONE - __version__, read from VERSION
 │   ├── __main__.py             # DONE - entrypoint + schedule loop
 │   ├── config.py               # DONE - load + validate config.yaml and env
-│   ├── keywords.py             # P2 - parse frequency_words.txt
-│   ├── fetch/                  # P1
+│   ├── item.py                 # DONE - NewsItem, canonical url, dedup key, fold
+│   ├── keywords.py             # DONE - parse frequency_words.txt (landed in P1)
+│   ├── fetch/                  # DONE - P1
 │   │   ├── http.py             # UA, timeout, retry, per-host throttle
-│   │   ├── feeds.py            # fixed RSS/Atom sources
+│   │   ├── feeds.py            # rss/atom/json -> items, fixed feeds, isolation
 │   │   └── search.py           # keyword -> search URL -> items
 │   ├── filter.py               # P2 - match items against keyword groups
 │   ├── rank.py                 # P2 - dedup + weighted ranking
@@ -52,7 +53,13 @@ news-radar/
 │       └── discord.py
 ├── tests/
 │   ├── test_config.py          # plain asserts, needs PyYAML
-│   └── test_release.py         # plain asserts, stdlib only
+│   ├── test_item.py            # plain asserts, stdlib only
+│   ├── test_keywords.py        # plain asserts, stdlib only
+│   ├── test_http.py            # plain asserts, stdlib only, local http.server
+│   ├── test_feeds.py           # plain asserts, needs feedparser + PyYAML
+│   ├── test_search.py          # plain asserts, needs feedparser + PyYAML
+│   ├── test_release.py         # plain asserts, stdlib only
+│   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
 ├── docs/memory-ai/             # this bank
 ├── .github/workflows/
@@ -72,14 +79,15 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | Layer | Modules | May import |
 |-------|---------|-----------|
 | 1 — transport | `fetch/http.py` | stdlib only |
-| 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords` |
-| 3 — selection | `filter.py`, `rank.py` | `keywords`, plain data types |
+| 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
+| 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
 | 4 — persistence | `store.py` | layer 3 output types |
 | 5 — output | `render.py`, `notify/*` | layers 3 and 4 |
 
 `__main__.py` is the only module that knows about all five; it wires them and owns
-the schedule loop. `config.py` and `keywords.py` are leaves — they import nothing
-from the package.
+the schedule loop. `config.py`, `item.py` and `keywords.py` are leaves — they
+import nothing from the package, which is why each has a test that needs neither
+PyYAML nor feedparser to run.
 
 `scripts/` is outside the package entirely and imports nothing from it: both
 scripts must run on a machine where the package's dependencies are not installed

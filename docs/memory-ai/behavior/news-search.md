@@ -2,10 +2,10 @@
 title: How News Is Searched, Matched and Ranked
 category: behavior
 purpose: The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered.
-status: draft
-updated: 2026-09-04
-source: conversation
-confidence: inferred
+status: active
+updated: 2026-09-05
+source: src/news_radar/fetch/, src/news_radar/__main__.py
+confidence: confirmed
 keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases
 order: 1
 ---
@@ -27,8 +27,10 @@ order: 1
 4. The result is one flat list of `(url, source_id, keyword_group | None)`.
 
 Cost is predictable and worth stating out loud: `len(feeds) + len(groups) x
-len(enabled templates)`. Eight feeds, twelve groups and two enabled templates is
-32 requests per run, not eight.
+len(enabled templates)`. Measured on the shipped config: eight feeds, seven
+groups and two enabled templates is **22 requests and 35-57 s per run**, not
+eight requests. `build_urls()` is pure, so that number is known before the first
+byte goes out.
 
 ## Stage 2 - fetch
 
@@ -110,5 +112,8 @@ costs an afternoon to rediscover.
 | **Diacritics in Vietnamese titles** | `Điện` never matches a keyword typed `dien` | Fold at stage 4; store the original for display |
 | **A feed with no `pubDate`** | Freshness term undefined | `published_at = None`, freshness term `0`, never "now" |
 | **The same story from an AMP or syndicated URL** | Two rows, two notifications | Accepted limit - canonicalisation does not resolve it, and title clustering is not implemented |
+| **Google News returns its own redirector links** | Items come back as `news.google.com/rss/articles/CBMi...`, never the publisher URL, so the same story from Google News and from Hacker News does **not** collapse on `canonical_url` | Accepted limit of the same class as the AMP case. Resolving it means following each redirect - one extra request per item, against a host that already throttles |
+| **The Reddit sources are unreachable on this network** | Not a 403: `www.reddit.com` fails DNS resolution (`Name or service not known`) both on the homelab host and inside the container | Failure isolation covers it - one warning line, the run keeps the other 21 sources. The User-Agent requirement above is still correct wherever Reddit does resolve |
+| **An Algolia hit with an empty title** | `new_item()` raises and the hit is dropped | Counted at DEBUG per source, so a feed that suddenly ships titleless entries is visible instead of silently shrinking |
 | **A source hangs** | The whole run hangs; nothing outside the process kills it | `request_timeout_s` is the only bound that exists - it must always be set |
 | **Clock skew on the host** | Freshness ranking inverts | `TZ` is pinned in the container; ages are computed in UTC |

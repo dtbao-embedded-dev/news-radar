@@ -4,7 +4,7 @@ category: interface
 purpose: The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process.
 status: active
 updated: 2026-09-05
-source: src/news_radar/__main__.py, src/news_radar/config.py, Dockerfile
+source: src/news_radar/__main__.py, src/news_radar/config.py, src/news_radar/fetch/, Dockerfile
 confidence: confirmed
 keywords: python -m news_radar, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl
 order: 4
@@ -52,13 +52,34 @@ into the same failure, losing the schedule.
 service that logs once every 30 minutes would otherwise sit in a block buffer and
 look hung under `docker logs`.
 
+## What one cycle does today
+
+`crawl()` builds one `Fetcher` (the per-host throttle state lives on it), parses
+the keyword file, reads every enabled fixed feed, then every enabled search
+template crossed with every keyword group, and returns the raw `NewsItem` list.
+See [[fetch-layer]] for the signatures it calls.
+
+It prints **one count line per configured source, zeros included** - a source
+that quietly stops returning items looks exactly like a quiet week in a total.
+Then one summary line, then the errors:
+
+```
+INFO  fixed feeds: 208 item(s) from 8 source(s)
+INFO    hn                   20 item(s)
+INFO    r_embedded            0 item(s)  [failed]
+INFO  search feeds: 389 item(s) from 7 group(s) x 2 template(s)
+INFO    google_news         253 item(s)
+WARN  source failed: r_embedded - URLError: ...
+INFO  fetched 597 raw item(s) in 57.3s, 1 source(s) failed
+```
+
+**An unusable keyword file costs the search feeds, not the run.** The fixed
+feeds do not need it, so `crawl()` logs the `KeywordError` on one line and
+continues with no groups. Losing half a cycle beats losing all of it.
+
 ## What it does not do yet
 
-`crawl()` is a placeholder. It logs how many feeds and search templates are
-enabled and which channels would be notified, then logs
-`fetch is not implemented yet (P1) - 0 items this cycle` and returns `0`. It
-returns a count rather than pretending: a loop that reports success while doing
-nothing is worse than one that says it is empty.
-
-P1 replaces the body with the fetch layer, P2 the selection, P3 the store and the
-page, P4 the senders. The flags and exit codes above do not change with them.
+Nothing is filtered, ranked, stored, published or notified: the cycle ends on
+`filtering and ranking are not implemented yet (P2)`. P2 lands the selection,
+P3 the store and the page, P4 the senders. The flags and exit codes above do
+not change with them.

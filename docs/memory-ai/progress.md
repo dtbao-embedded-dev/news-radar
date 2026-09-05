@@ -9,9 +9,45 @@ updated: 2026-09-05
 
 ## What works
 
-**P0 Foundation is complete and released as v0.1.0** (2026-09-05). See
-`architecture/delivery-phases.md` for the phase map and the finished-product
+**P0 Foundation is released as v0.1.0 and P1 Fetch is complete** (2026-09-05).
+See `architecture/delivery-phases.md` for the phase map and the finished-product
 definition all of it serves.
+
+### P1 - Fetch
+
+- **`python -m news_radar --once` pulls real news.** Measured in the container
+  on 2026-09-05: **597 raw items in 57 s, exit 0** - 208 from the eight fixed
+  feeds and 389 from seven keyword groups crossed with two search templates.
+  Both kinds of source contribute, which is exactly P1's definition of done.
+- **One dead source costs one line, never the run.** `www.reddit.com` does not
+  resolve from this homelab (`Name or service not known`, on the host and in the
+  container alike - it is DNS, not the 403 the design predicted). The run
+  reported it once, printed `r_embedded 0 item(s) [failed]`, and kept the other
+  21 sources. `feeds.read_source()` is the single place that guard lives;
+  `search.py` reuses it rather than repeating it.
+- **Every source is counted by name, zeros included.** A feed that silently
+  stops returning items looks identical to a quiet week inside a total, so the
+  cycle prints a line per configured source rather than one grand number.
+- **Three formats, dispatched on the declared type.** RSS 2.0 and Atom through
+  `feedparser`, HN Algolia's JSON by hand - never on the response content type.
+  Verified live against `lobste.rs` (25), `hackaday` (7) and Algolia (20),
+  including a Show HN post with no outbound url falling back to its permalink.
+- **Search queries are exact.** A multi-word primary term is quoted as a phrase
+  before encoding (`%22embedded+linux%22`), and the template's own locale
+  parameters survive character for character. `build_urls()` is pure, so the
+  request count is known before the first byte goes out.
+- **Five test files, none of which touch the network.** `test_item`,
+  `test_keywords` and `test_http` need only the standard library (the last runs
+  a local `http.server` to play a 403, a retryable 500, a gzipped body and a
+  handler slow enough to time out); `test_feeds` and `test_search` read
+  `tests/fixtures/`, one body per predicted edge case.
+- **`keywords.py` landed early.** It is P2-1, written in P1 because the search
+  generator needs each group's primary term and finding that correctly already
+  means skipping every other prefix. It parses the shipped
+  `config/frequency_words.txt` into its 7 groups with the right caps, labels,
+  required terms and regex.
+
+### P0 - Foundation
 
 - **v0.1.0 is published.** `python scripts/release.py 0.1.0` ran the whole chain
   without stopping: promoted the changelog, wrote `VERSION`, committed on
@@ -45,8 +81,9 @@ definition all of it serves.
   own extractor, and falls back to GitHub-generated notes when there is no
   section. Both paths were exercised locally against the real workflow code.
 - **CI runs the checks on every push and pull request.**
-  `.github/workflows/test.yml` runs every `tests/test_*.py` on Python 3.12 with
-  no install step. Verified locally by running the same loop, by proving a
+  `.github/workflows/test.yml` installs `requirements.txt`, then runs every
+  `tests/test_*.py` on Python 3.12 - the loop picks up a new test file without
+  the workflow being edited. Verified locally by running the same loop, by proving a
   failing check aborts it instead of passing silently, and by every green run
   since.
 - **`setup.py` starts the stack itself, verified end to end.** A successful run
@@ -72,26 +109,25 @@ definition all of it serves.
   start when an enabled channel has no secret (verified in the container: three
   problems listed, exit 1), and honours `SIGTERM` mid-interval - `docker stop`
   returned in under a second because the loop waits on an Event rather than
-  sleeping. `crawl()` is an honest placeholder: it logs what it would fetch and
-  that fetch is not implemented, and returns 0 items.
+  sleeping. `crawl()` was an honest placeholder at that point; P1 replaced it
+  with the real fetch layer.
 - **`python tests/test_config.py` passes.** Covers the default merge, the
   fatal-secret rule, and the validation gates, and asserts the committed
   `config.yaml.example` satisfies its own contract.
 
 ## What's left
 
-The pipeline itself. `src/news_radar/` holds the entrypoint and the config
-loader; every stage module is still **specified but not written**.
+Selection onwards. `src/news_radar/` now holds the entrypoint, the config
+loader, the item shape, the keyword parser and the whole fetch layer; from
+`filter.py` on, every stage module is still **specified but not written**.
 
-- **P1 Fetch** - HTTP client with a real User-Agent and per-host throttling, feed
-  parsing, the fixed-feed reader, the keyword-driven search-feed generator, and
-  per-source failure isolation.
-- **P2 Filter and rank** - keyword-file parser, the match engine with diacritic
-  folding, dedup, and the weighted ranking.
+- **P2 Filter and rank** - the match engine with diacritic folding, the global
+  filter, dedup, and the weighted ranking. P2-1 (the keyword parser) is already
+  done, and `item.fold()` and `item.dedup_key()` are waiting to be used.
 - **P3 Store and render** - SQLite store, the seen-set, and `output/index.html`.
 - **P4 Notify** - Telegram and Discord senders, the new-only diff, and backoff.
-- **P5 Deploy** - the `Dockerfile`, the schedule loop, and the Cloudflare Tunnel
-  route for `news.dtbao.org`.
+- **P5 Deploy** - the Cloudflare Tunnel route for `news.dtbao.org` and the first
+  unattended live run. The `Dockerfile` and the schedule loop are done.
 - **P6 Ops** - retention, heartbeat, failure alerting.
 
 ## Known issues
@@ -101,8 +137,24 @@ loader; every stage module is still **specified but not written**.
   does not delete the old objects: `91ea2d9` still answers over the API with the
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
-- **Eight bank docs are marked `inferred`.** They describe code that does not exist
-  yet. Flip each to `confirmed` as its phase lands and the doc is checked against
-  the real implementation.
+- **Four bank docs are still marked `inferred`**: `delivery-phases` and
+  `deployment-homelab` (both describe work not done), `config-and-env` and
+  `notify-channels` (never checked key by key against the code). Flip each once
+  it is verified against the real implementation. P1 flipped `news-item`,
+  `news-sources`, `news-search`, `module-layout` and `crawl-cli` to `confirmed`
+  - note that the last two sections of `news-item` are still P3 and carry their
+  own inline 🟡 marker.
+- **`www.reddit.com` does not resolve from this homelab.** Both Reddit sources
+  are therefore dead here, whatever User-Agent is sent. It is a network fact,
+  not a code defect: failure isolation handles it, and the fixed feed stays
+  enabled so the run reports it rather than hiding it. Fixing it means the
+  homelab's DNS, not this repository.
+- **Google News items are redirector links.** They arrive as
+  `news.google.com/rss/articles/CBMi...`, so the same story from Google News and
+  from Hacker News will not collapse on `canonical_url` in P2. Accepted, of the
+  same class as the AMP limit already recorded.
+- **`docker/docker-compose.yml` still carries a stale P0 note** saying the
+  Dockerfile does not exist and only `caddy` is startable. That has been false
+  since the Dockerfile landed.
 - **No default-branch policy on GitHub**: the first pushed branch (`main`) is the
   default, so pull requests target `main` rather than `developing`.

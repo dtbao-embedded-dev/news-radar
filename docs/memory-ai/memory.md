@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-05 - 15 durable doc(s)._
+_Generated 2026-09-05 - 16 durable doc(s)._
 
 ## State (transient)
 
@@ -19,9 +19,45 @@ _Generated 2026-09-05 - 15 durable doc(s)._
 
 ## What works
 
-**P0 Foundation is complete and released as v0.1.0** (2026-09-05). See
-`architecture/delivery-phases.md` for the phase map and the finished-product
+**P0 Foundation is released as v0.1.0 and P1 Fetch is complete** (2026-09-05).
+See `architecture/delivery-phases.md` for the phase map and the finished-product
 definition all of it serves.
+
+### P1 - Fetch
+
+- **`python -m news_radar --once` pulls real news.** Measured in the container
+  on 2026-09-05: **597 raw items in 57 s, exit 0** - 208 from the eight fixed
+  feeds and 389 from seven keyword groups crossed with two search templates.
+  Both kinds of source contribute, which is exactly P1's definition of done.
+- **One dead source costs one line, never the run.** `www.reddit.com` does not
+  resolve from this homelab (`Name or service not known`, on the host and in the
+  container alike - it is DNS, not the 403 the design predicted). The run
+  reported it once, printed `r_embedded 0 item(s) [failed]`, and kept the other
+  21 sources. `feeds.read_source()` is the single place that guard lives;
+  `search.py` reuses it rather than repeating it.
+- **Every source is counted by name, zeros included.** A feed that silently
+  stops returning items looks identical to a quiet week inside a total, so the
+  cycle prints a line per configured source rather than one grand number.
+- **Three formats, dispatched on the declared type.** RSS 2.0 and Atom through
+  `feedparser`, HN Algolia's JSON by hand - never on the response content type.
+  Verified live against `lobste.rs` (25), `hackaday` (7) and Algolia (20),
+  including a Show HN post with no outbound url falling back to its permalink.
+- **Search queries are exact.** A multi-word primary term is quoted as a phrase
+  before encoding (`%22embedded+linux%22`), and the template's own locale
+  parameters survive character for character. `build_urls()` is pure, so the
+  request count is known before the first byte goes out.
+- **Five test files, none of which touch the network.** `test_item`,
+  `test_keywords` and `test_http` need only the standard library (the last runs
+  a local `http.server` to play a 403, a retryable 500, a gzipped body and a
+  handler slow enough to time out); `test_feeds` and `test_search` read
+  `tests/fixtures/`, one body per predicted edge case.
+- **`keywords.py` landed early.** It is P2-1, written in P1 because the search
+  generator needs each group's primary term and finding that correctly already
+  means skipping every other prefix. It parses the shipped
+  `config/frequency_words.txt` into its 7 groups with the right caps, labels,
+  required terms and regex.
+
+### P0 - Foundation
 
 - **v0.1.0 is published.** `python scripts/release.py 0.1.0` ran the whole chain
   without stopping: promoted the changelog, wrote `VERSION`, committed on
@@ -55,8 +91,9 @@ definition all of it serves.
   own extractor, and falls back to GitHub-generated notes when there is no
   section. Both paths were exercised locally against the real workflow code.
 - **CI runs the checks on every push and pull request.**
-  `.github/workflows/test.yml` runs every `tests/test_*.py` on Python 3.12 with
-  no install step. Verified locally by running the same loop, by proving a
+  `.github/workflows/test.yml` installs `requirements.txt`, then runs every
+  `tests/test_*.py` on Python 3.12 - the loop picks up a new test file without
+  the workflow being edited. Verified locally by running the same loop, by proving a
   failing check aborts it instead of passing silently, and by every green run
   since.
 - **`setup.py` starts the stack itself, verified end to end.** A successful run
@@ -82,26 +119,25 @@ definition all of it serves.
   start when an enabled channel has no secret (verified in the container: three
   problems listed, exit 1), and honours `SIGTERM` mid-interval - `docker stop`
   returned in under a second because the loop waits on an Event rather than
-  sleeping. `crawl()` is an honest placeholder: it logs what it would fetch and
-  that fetch is not implemented, and returns 0 items.
+  sleeping. `crawl()` was an honest placeholder at that point; P1 replaced it
+  with the real fetch layer.
 - **`python tests/test_config.py` passes.** Covers the default merge, the
   fatal-secret rule, and the validation gates, and asserts the committed
   `config.yaml.example` satisfies its own contract.
 
 ## What's left
 
-The pipeline itself. `src/news_radar/` holds the entrypoint and the config
-loader; every stage module is still **specified but not written**.
+Selection onwards. `src/news_radar/` now holds the entrypoint, the config
+loader, the item shape, the keyword parser and the whole fetch layer; from
+`filter.py` on, every stage module is still **specified but not written**.
 
-- **P1 Fetch** - HTTP client with a real User-Agent and per-host throttling, feed
-  parsing, the fixed-feed reader, the keyword-driven search-feed generator, and
-  per-source failure isolation.
-- **P2 Filter and rank** - keyword-file parser, the match engine with diacritic
-  folding, dedup, and the weighted ranking.
+- **P2 Filter and rank** - the match engine with diacritic folding, the global
+  filter, dedup, and the weighted ranking. P2-1 (the keyword parser) is already
+  done, and `item.fold()` and `item.dedup_key()` are waiting to be used.
 - **P3 Store and render** - SQLite store, the seen-set, and `output/index.html`.
 - **P4 Notify** - Telegram and Discord senders, the new-only diff, and backoff.
-- **P5 Deploy** - the `Dockerfile`, the schedule loop, and the Cloudflare Tunnel
-  route for `news.dtbao.org`.
+- **P5 Deploy** - the Cloudflare Tunnel route for `news.dtbao.org` and the first
+  unattended live run. The `Dockerfile` and the schedule loop are done.
 - **P6 Ops** - retention, heartbeat, failure alerting.
 
 ## Known issues
@@ -111,9 +147,25 @@ loader; every stage module is still **specified but not written**.
   does not delete the old objects: `91ea2d9` still answers over the API with the
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
-- **Eight bank docs are marked `inferred`.** They describe code that does not exist
-  yet. Flip each to `confirmed` as its phase lands and the doc is checked against
-  the real implementation.
+- **Four bank docs are still marked `inferred`**: `delivery-phases` and
+  `deployment-homelab` (both describe work not done), `config-and-env` and
+  `notify-channels` (never checked key by key against the code). Flip each once
+  it is verified against the real implementation. P1 flipped `news-item`,
+  `news-sources`, `news-search`, `module-layout` and `crawl-cli` to `confirmed`
+  - note that the last two sections of `news-item` are still P3 and carry their
+  own inline 🟡 marker.
+- **`www.reddit.com` does not resolve from this homelab.** Both Reddit sources
+  are therefore dead here, whatever User-Agent is sent. It is a network fact,
+  not a code defect: failure isolation handles it, and the fixed feed stays
+  enabled so the run reports it rather than hiding it. Fixing it means the
+  homelab's DNS, not this repository.
+- **Google News items are redirector links.** They arrive as
+  `news.google.com/rss/articles/CBMi...`, so the same story from Google News and
+  from Hacker News will not collapse on `canonical_url` in P2. Accepted, of the
+  same class as the AMP limit already recorded.
+- **`docker/docker-compose.yml` still carries a stale P0 note** saying the
+  Dockerfile does not exist and only `caddy` is startable. That has been false
+  since the Dockerfile landed.
 - **No default-branch policy on GitHub**: the first pushed branch (`main`) is the
   default, so pull requests target `main` rather than `developing`.
 
@@ -125,70 +177,52 @@ loader; every stage module is still **specified but not written**.
 
 ## Current focus
 
-**v0.1.0 is released** (2026-09-05) - P0 Foundation is closed and published.
-The next piece of work is **P1 Fetch**: getting real items out of the eight fixed
-feeds and the keyword-built search feeds, which is the first phase that produces
-something a human can look at.
+**P1 Fetch is done** (2026-09-05). `python -m news_radar --once` pulls **597 raw
+items** out of the eight fixed feeds and the fourteen keyword-built searches, in
+one container run, exit 0.
+
+The next piece of work is **P2 Filter and rank**: turning those 597 raw items
+into the grouped, deduped, ranked shortlist a human would actually read. P2-1
+(the keyword-file parser) is already done - it landed in P1 because the search
+generator needed each group's primary term.
 
 ## Recent changes
 
-- Memory bank filled out: architecture (phases, layout, deployment), data
-  (sources, item shape), interface (config, CLIs, notification channels),
-  behavior (the crawl algorithm), rule (release, setup, how to consult
-  TrendRadar), plus `adr-0001` recording the clean-room decision.
-- `config/config.yaml.example`, `config/frequency_words.txt`, the compose stack
-  and the Caddyfile added; `.gitignore` now keeps the real config, `docker/.env`
-  and `output/` out of the repository.
-- `scripts/setup.py` and `scripts/release.py` added, with
-  `tests/test_release.py`.
-- Release CI switched from manual dispatch to a `v*` tag trigger, taking its
-  notes from `CHANGELOG.md`.
-- A second workflow, `test.yml`, now runs `tests/test_*.py` on push and pull
-  request; `release.py --dry-run 0.1.0` was exercised against the real history.
-- Caddy's published host port moved to `NEWS_RADAR_HTTP_PORT` (default `8088`)
-  after 8080 turned out to be taken by ntfy on the homelab.
-- **The predecessor stack was removed on 2026-09-05.** Six containers - `ntfy`,
-  `rsshub`, `zenfeed-web`, `zenfeed`, `tunnel`, `apprise` - were still running
-  from `compose/docker-compose.yml`, a file that had been deleted and was never
-  in git. They carried the compose project name `news-radar`, so
-  `docker compose ... down` would have swept them along with our Caddy. All six
-  are gone; the volumes `ntfy-data` and `news-radar_caddy_data` were left in
-  place. `8080` is free again, and the default stays `8088` by choice.
-- **`Dockerfile`, `requirements.txt` and the `src/news_radar/` skeleton landed**
-  (2026-09-05), unblocking P1. Only `__init__.py`, `__main__.py` and `config.py`
-  were written - the stage modules are deliberately not stubbed, because an empty
-  file claiming to be `fetch/http.py` reads as implemented when it is not.
-- Removed the empty directories Docker had created under `config/` as
-  bind-mount targets for that stack: `zenfeed.yaml/`, `cloudflared.yml/` and
-  `apprise/newsradar.yml/`. Git never saw them - it does not track empty
-  directories - so they never appeared in `git status`.
-- `LICENSE` added: Apache-2.0, closing the decision `adr-0001` had left open.
-- README restructured: badges, standard section order, no hardcoded deployment
-  host, and no pointers into `docs/memory-ai` - the bank is working state for an
-  assistant, not documentation to send a user of the project to read.
-- `setup.py` now brings the stack up itself; `rule/changelog.md` added and
-  `release.py` rewritten to promote a hand-written `Unreleased` section instead
-  of generating one from commit subjects.
-- **History was rewritten once** to strip a `Co-Authored-By` trailer from the
-  root commit, which changed every hash and force-pushed all three branches. Any
-  clone made before 2026-09-05 is on orphaned history and needs
-  `git fetch && git reset --hard origin/<branch>`, not `git pull`.
+- **P1 landed in seven commits on `release/v0.1`** (2026-09-05):
+  `item.py` (the NewsItem shape, URL canonicalisation, dedup key, diacritic
+  folding), `keywords.py` (the whole group syntax), `fetch/http.py` (User-Agent,
+  timeout, retry, per-host throttle), `fetch/feeds.py` (RSS/Atom/Algolia JSON
+  into items, the fixed-feed reader, the single failure guard),
+  `fetch/search.py` (primary term x template into queries), and the `crawl()`
+  wiring that counts what came back.
+- **Five new test files, all offline.** `test_item`, `test_keywords` and
+  `test_http` are stdlib-only; `test_feeds` and `test_search` read
+  `tests/fixtures/`, one body per edge case the design predicted. Nothing in the
+  suite touches the network, so CI stays green without egress.
+- **`item.py` is a module the bank's tree did not have.** `NewsItem` is produced
+  by `fetch/` and read by every later stage, and `data/news-item.md` makes
+  `canonical_url` a required field - so canonicalisation and the dedup key are
+  P1 work, not P2. `architecture/module-layout.md` now shows it.
+- Bank restamped: `module-layout`, `delivery-phases`, `crawl-cli`,
+  `news-item`, `news-sources` and `news-search` are `confirmed` against real
+  code, and `interface/fetch-layer.md` is new.
+
+Before this session, in P0: the release tooling, the docker stack, the config
+loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **P1-1 HTTP client** - User-Agent from `cfg.user_agent()`, timeout, retry
-   with backoff, per-hostname minimum interval. Reddit's 403 on an anonymous UA
-   is the first thing to prove fixed. It lands in `fetch/http.py` and everything
-   else in P1 goes through it.
-2. **P1-2 and P1-3** - feed parsing via `feedparser`, then the fixed-feed reader
-   producing normalised `NewsItem`s. Fold **P1-6** (HN Algolia returns JSON, not
-   a feed) in here rather than leaving it last: it is a second format for the
-   same reader, not a separate stage. **P1-5** (per-source failure isolation) is
-   woven in from the start, not wrapped around afterwards.
-3. **P1-4** - the search-feed generator, expanding each keyword group into the
-   enabled search templates.
-4. **Verify with `python -m news_radar --once`** - P1 is done when it prints N
-   raw items from both the fixed feeds and the keyword-built searches.
+1. **P2-2 match engine** - decide which groups an item belongs to, using
+   `item.fold()` so `Điện tử` matches a keyword typed `dien tu`. `/regex/` runs
+   against the **original** title, not the folded one.
+2. **P2-3 global filter** applied before grouping - one `!` hit from
+   `[GLOBAL_FILTER]` drops the item entirely and no group sees it.
+3. **P2-4 dedup** - `item.dedup_key()` already exists; P2 collapses on it,
+   keeping the earliest `published_at` and the union of `source_id`s.
+4. **P2-5 and P2-6** - the weighted score from `rank.*` in config, then the
+   group's `@n` cap.
+5. **Verify with `python -m news_radar --once`** - P2 is done when the same
+   command prints grouped, deduped, ranked matches instead of 597 raw items.
 
 ## Active decisions
 
@@ -197,10 +231,13 @@ something a human can look at.
   where to look by problem and what may not cross back.
 - **Two runtime dependencies, total**: `pyyaml` and `feedparser`. HTTP, storage
   and templating come from the standard library. A third needs justifying in the
-  changelog.
+  changelog. P1 held the line - the transport is `urllib.request`.
+- **One guard, not one per caller.** `feeds.read_source()` is the only place a
+  source failure is caught; `search.py` calls it rather than repeating the
+  try/except. A second guard anywhere is a bug.
 - **The changelog records technical changes only**, written by hand into
-  `## Unreleased` in the same commit as the change. `release.py` reads no commit
-  subjects. The rule is `rule/changelog.md`.
+  `## Unreleased` in the same commit as the change. One entry per change, not
+  per commit: all of P1 is one `**crawl**` line.
 - **Both scripts stay stdlib-only** so they run on a bare checkout, before
   anything is installed.
 - **Self-hosted, not GitHub Pages.** The crawl and the site both run on the
@@ -212,7 +249,7 @@ something a human can look at.
 ## Memory
 
 ### [architecture] Delivery Phases  🟡 [inferred - verify]
-*`architecture/delivery-phases.md` - The finished product news-radar aims at, and the phase-by-phase task breakdown that gets there. - status: active - source: conversation - keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, scope, milestones, definition of done*
+*`architecture/delivery-phases.md` - The finished product news-radar aims at, and the phase-by-phase task breakdown that gets there. - status: active - source: conversation, CHANGELOG.md - keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, scope, milestones, definition of done*
 
 # Delivery Phases
 
@@ -265,7 +302,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 
 ## Task breakdown
 
-### P0 — Foundation *(this repo's current phase)*
+### P0 — Foundation *(done, v0.1.0)*
 
 | # | Task |
 |---|------|
@@ -278,22 +315,25 @@ Each phase is shippable on its own: it ends in something a human can run and see
 | P0-7 | CI: check workflow on push/PR + tag-triggered release workflow, `CHANGELOG.md`, `VERSION` |
 | P0-8 | Design bank: `rule/` — release procedure, setup procedure, how to consult TrendRadar |
 
-### P1 — Fetch
+### P1 — Fetch *(done — this repo's current phase is P2)*
 
 | # | Task |
 |---|------|
-| P1-1 | HTTP client: explicit User-Agent, timeout, retry with backoff, per-host minimum interval |
-| P1-2 | Feed parser: RSS 2.0 + Atom + the broken variants in the wild (use `feedparser`, do not hand-roll) |
-| P1-3 | Fixed-feed reader: read `platforms`/`feeds` from config, fetch each, tag every item with its source id |
-| P1-4 | Search-feed generator: expand each keyword group into the three search URL templates, fetch, tag |
-| P1-5 | Failure isolation: one dead source must never abort the crawl — log it, keep the rest |
-| P1-6 | JSON-API source support (HN Algolia returns JSON, not a feed) |
+| P1-1 | ~~HTTP client: explicit User-Agent, timeout, retry with backoff, per-host minimum interval~~ — `fetch/http.py` |
+| P1-2 | ~~Feed parser: RSS 2.0 + Atom + the broken variants in the wild~~ — `fetch/feeds.py`, via `feedparser` |
+| P1-3 | ~~Fixed-feed reader: read `feeds` from config, fetch each, tag every item with its source id~~ — `read_fixed_feeds()` |
+| P1-4 | ~~Search-feed generator: expand each keyword group into the search URL templates, fetch, tag~~ — `fetch/search.py` |
+| P1-5 | ~~Failure isolation: one dead source must never abort the crawl~~ — `read_source()`, the single guard |
+| P1-6 | ~~JSON-API source support (HN Algolia returns JSON, not a feed)~~ — folded into P1-2 as a third format |
+
+**P2-1 landed here too.** `keywords.py` parses the whole file already, because
+finding a group's primary term means skipping every other prefix anyway.
 
 ### P2 — Filter and rank
 
 | # | Task |
 |---|------|
-| P2-1 | Parse `frequency_words.txt`: groups, `+` required, `!` excluded, `@` cap, `/regex/`, display label |
+| P2-1 | ~~Parse `frequency_words.txt`: groups, `+` required, `!` excluded, `@` cap, `/regex/`, display label~~ — **done in P1**, `keywords.py` |
 | P2-2 | Match engine: decide which groups an item belongs to, case- and diacritic-insensitive |
 | P2-3 | Global filter section applied before grouping |
 | P2-4 | Dedup: collapse the same story arriving from several sources onto one dedup key |
@@ -344,8 +384,8 @@ Each phase is shippable on its own: it ends in something a human can run and see
 - No comment scraping, no full-article extraction: titles, links, timestamps only.
 - No mobile app; the page is responsive and that is the whole client story.
 
-### [architecture] Module Layout and Stack  🟡 [inferred - verify]
-*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: active - source: conversation - keywords: tree, layout, layering, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
+### [architecture] Module Layout and Stack
+*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: active - source: src/news_radar/, Dockerfile, requirements.txt - keywords: tree, layout, layering, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
 
 # Module Layout and Stack
 
@@ -375,10 +415,11 @@ news-radar/
 │   ├── __init__.py             # DONE - __version__, read from VERSION
 │   ├── __main__.py             # DONE - entrypoint + schedule loop
 │   ├── config.py               # DONE - load + validate config.yaml and env
-│   ├── keywords.py             # P2 - parse frequency_words.txt
-│   ├── fetch/                  # P1
+│   ├── item.py                 # DONE - NewsItem, canonical url, dedup key, fold
+│   ├── keywords.py             # DONE - parse frequency_words.txt (landed in P1)
+│   ├── fetch/                  # DONE - P1
 │   │   ├── http.py             # UA, timeout, retry, per-host throttle
-│   │   ├── feeds.py            # fixed RSS/Atom sources
+│   │   ├── feeds.py            # rss/atom/json -> items, fixed feeds, isolation
 │   │   └── search.py           # keyword -> search URL -> items
 │   ├── filter.py               # P2 - match items against keyword groups
 │   ├── rank.py                 # P2 - dedup + weighted ranking
@@ -389,7 +430,13 @@ news-radar/
 │       └── discord.py
 ├── tests/
 │   ├── test_config.py          # plain asserts, needs PyYAML
-│   └── test_release.py         # plain asserts, stdlib only
+│   ├── test_item.py            # plain asserts, stdlib only
+│   ├── test_keywords.py        # plain asserts, stdlib only
+│   ├── test_http.py            # plain asserts, stdlib only, local http.server
+│   ├── test_feeds.py           # plain asserts, needs feedparser + PyYAML
+│   ├── test_search.py          # plain asserts, needs feedparser + PyYAML
+│   ├── test_release.py         # plain asserts, stdlib only
+│   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
 ├── docs/memory-ai/             # this bank
 ├── .github/workflows/
@@ -409,14 +456,15 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | Layer | Modules | May import |
 |-------|---------|-----------|
 | 1 — transport | `fetch/http.py` | stdlib only |
-| 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords` |
-| 3 — selection | `filter.py`, `rank.py` | `keywords`, plain data types |
+| 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
+| 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
 | 4 — persistence | `store.py` | layer 3 output types |
 | 5 — output | `render.py`, `notify/*` | layers 3 and 4 |
 
 `__main__.py` is the only module that knows about all five; it wires them and owns
-the schedule loop. `config.py` and `keywords.py` are leaves — they import nothing
-from the package.
+the schedule loop. `config.py`, `item.py` and `keywords.py` are leaves — they
+import nothing from the package, which is why each has a test that needs neither
+PyYAML nor feedparser to run.
 
 `scripts/` is outside the package entirely and imports nothing from it: both
 scripts must run on a machine where the package's dependencies are not installed
@@ -554,8 +602,8 @@ nothing outside the process will kill it.
 | Crawl crashes on a bad item | Container exits | `restart: unless-stopped` plus a heartbeat so a crash loop is visible (P6-1) |
 | Clock skew | Freshness ranking goes wrong | `TZ` pinned in the container, not inherited from the host |
 
-### [data] News Sources and Search Paths  🟡 [inferred - verify]
-*`data/news-sources.md` - Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns. - status: draft - source: conversation - keywords: sources, feeds, RSS, Atom, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent*
+### [data] News Sources and Search Paths
+*`data/news-sources.md` - Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns. - status: active - source: config/config.yaml.example, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py - keywords: sources, feeds, RSS, Atom, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent*
 
 # News Sources and Search Paths
 
@@ -640,8 +688,8 @@ id - `hn` and `hn_algolia` are different hosts, the two Reddit entries are not.
    handled, it needs a parser in `fetch/` - that is a code change and a new task.
 3. Record it in the table above and restamp `updated`.
 
-### [data] News Item, Dedup Key and Output Layout  🟡 [inferred - verify]
-*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: draft - source: conversation - keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot*
+### [data] News Item, Dedup Key and Output Layout
+*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py - keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot*
 
 # News Item, Dedup Key and Output Layout
 
@@ -704,6 +752,10 @@ copy, an AMP variant) does **not** collapse. Title-similarity clustering is not
 implemented; it would need a threshold nobody has tuned yet.
 
 ## SQLite store
+
+> 🟡 `inferred` - this section and the next describe P3. `store.py` and
+> `render.py` do not exist yet; everything above them is confirmed against
+> `src/news_radar/item.py`.
 
 One file, `output/news.db`. Schema described as shape, not DDL.
 
@@ -1046,7 +1098,7 @@ acceptable failure, a silently dropped story is not.
 already pushed to Telegram as sent - see [[news-item]].
 
 ### [interface] Crawl CLI - python -m news_radar
-*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/config.py, Dockerfile - keywords: python -m news_radar, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
+*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/config.py, src/news_radar/fetch/, Dockerfile - keywords: python -m news_radar, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
 
 # Crawl CLI - `python -m news_radar`
 
@@ -1090,19 +1142,158 @@ into the same failure, losing the schedule.
 service that logs once every 30 minutes would otherwise sit in a block buffer and
 look hung under `docker logs`.
 
+## What one cycle does today
+
+`crawl()` builds one `Fetcher` (the per-host throttle state lives on it), parses
+the keyword file, reads every enabled fixed feed, then every enabled search
+template crossed with every keyword group, and returns the raw `NewsItem` list.
+See [[fetch-layer]] for the signatures it calls.
+
+It prints **one count line per configured source, zeros included** - a source
+that quietly stops returning items looks exactly like a quiet week in a total.
+Then one summary line, then the errors:
+
+```
+INFO  fixed feeds: 208 item(s) from 8 source(s)
+INFO    hn                   20 item(s)
+INFO    r_embedded            0 item(s)  [failed]
+INFO  search feeds: 389 item(s) from 7 group(s) x 2 template(s)
+INFO    google_news         253 item(s)
+WARN  source failed: r_embedded - URLError: ...
+INFO  fetched 597 raw item(s) in 57.3s, 1 source(s) failed
+```
+
+**An unusable keyword file costs the search feeds, not the run.** The fixed
+feeds do not need it, so `crawl()` logs the `KeywordError` on one line and
+continues with no groups. Losing half a cycle beats losing all of it.
+
 ## What it does not do yet
 
-`crawl()` is a placeholder. It logs how many feeds and search templates are
-enabled and which channels would be notified, then logs
-`fetch is not implemented yet (P1) - 0 items this cycle` and returns `0`. It
-returns a count rather than pretending: a loop that reports success while doing
-nothing is worse than one that says it is empty.
+Nothing is filtered, ranked, stored, published or notified: the cycle ends on
+`filtering and ranking are not implemented yet (P2)`. P2 lands the selection,
+P3 the store and the page, P4 the senders. The flags and exit codes above do
+not change with them.
 
-P1 replaces the body with the fetch layer, P2 the selection, P3 the store and the
-page, P4 the senders. The flags and exit codes above do not change with them.
+### [interface] Fetch Layer Contracts
+*`interface/fetch-layer.md` - Every public signature of the fetch layer and the two leaf modules it stands on - what each returns, what it raises, and what it deliberately does not. - status: active - source: src/news_radar/fetch/http.py, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py, src/news_radar/item.py, src/news_radar/keywords.py - keywords: Fetcher, HttpError, parse, read_source, read_fixed_feeds, build_urls, read_search_feeds, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle*
 
-### [behavior] How News Is Searched, Matched and Ranked  🟡 [inferred - verify]
-*`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: draft - source: conversation - keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*
+# Fetch Layer Contracts
+
+> Five modules, in dependency order: `item` and `keywords` are leaves that
+> import nothing from the package; `fetch/http` is stdlib-only transport;
+> `fetch/feeds` maps bodies onto items and is the **only** place a source
+> failure is caught; `fetch/search` expands keyword groups into queries and
+> reuses that guard.
+
+## `item.py` - the record and its pure helpers
+
+| Signature | Returns |
+|-----------|---------|
+| `NewsItem` | Frozen dataclass: `title`, `url`, `canonical_url`, `source_id`, `external_id`, `fetched_at`, `published_at=None`, `keyword_group=None` |
+| `new_item(title, url, source_id, fetched_at, external_id=None, published_at=None, keyword_group=None)` | A `NewsItem`. Strips HTML from the title, derives `canonical_url`, falls back to it for `external_id`. **Raises `ValueError` on an empty title** |
+| `dedup_key(item)` | `sha1(canonical_url)`, or `sha1("t:" + normalised_title)` when there is no usable URL |
+| `canonicalise_url(url)` | The canonical form, or `""` for an empty URL, a hostless one, or a non-http(s) scheme |
+| `fold(text)` | Lowercased, diacritics dropped, whitespace collapsed. **Punctuation kept** - matching is substring based |
+| `strip_html(text)` | Tags removed, then entities decoded, then whitespace collapsed |
+
+`fold()` special-cases `đ`/`Đ`: Unicode treats d-stroke as a letter and NFD
+never decomposes it, so without the pair `Điện tử` folds to `đien tu` and a
+keyword typed `dien tu` silently never matches.
+
+`strip_html()` removes tags **before** decoding entities. Decoding first would
+turn a title's literal `&lt;stdio.h&gt;` into markup and then delete it.
+
+## `keywords.py` - the group file
+
+| Signature | Returns |
+|-----------|---------|
+| `parse(path)` | `(groups, global_filter_terms)`. **Raises `KeywordError`** |
+| `KeywordGroup` | `primary`, `label`, `terms`, `required`, `excluded`, `regexes` (compiled), `cap` |
+
+`label` defaults to `primary` when the group has no `=> Label` line, and is what
+a search item's `keyword_group` is set to. `KeywordError` carries `path:line`
+and is raised for a group with no plain term, a non-numeric `@n`, an
+unterminated or invalid `/regex/`, an unreadable file, and a file with no group
+at all. A `#` starts a comment only at the start of a line, so the term
+`C# programming` survives.
+
+## `fetch/http.py` - the transport
+
+```
+Fetcher(user_agent, timeout_s=15, max_retries=2, interval_ms=2000, backoff_s=1.0)
+    .get(url) -> bytes          raises HttpError
+HttpError(message, status=None, url=None)
+```
+
+- **One instance per cycle.** The `{hostname: last_request}` throttle state
+  lives on it, so every source in the run shares one idea of how recently a
+  host was asked. Keyed by **hostname**: `hn` and `hn_algolia` are different
+  hosts and do not queue behind each other; the fixed Reddit feed and the
+  Reddit search are the same host and do.
+- **An empty `user_agent` raises `ValueError` at construction.** That is
+  Reddit's 403 with an extra step, refused where it can still be fixed.
+- **Retried:** `408, 425, 429, 500, 502, 503, 504`, timeouts and connection
+  errors, `max_retries` times with `backoff_s * 2**(n-1)` between attempts.
+  **Not retried:** every other 4xx. A 403 answers the same however often it is
+  asked.
+- `Accept-Encoding: gzip, deflate` is sent and the response decoded by its
+  `Content-Encoding` header. A body that claims an encoding it does not have is
+  returned raw rather than losing the source.
+
+## `fetch/feeds.py` - bodies into items
+
+```
+FORMATS = ("rss", "atom", "hn_algolia_json")       DEFAULT_FORMAT = "rss"
+
+parse(body, fmt, source_id, keyword_group=None, fetched_at=None) -> list[NewsItem]
+read_source(fetcher, source, keyword_group=None, fetched_at=None) -> (items, error|None)
+read_fixed_feeds(fetcher, cfg, fetched_at=None) -> (items, errors)
+```
+
+- **Dispatch is on the declared format, never on the response content type.**
+  `rss` and `atom` share a branch: feedparser normalises both into `entries[]`.
+- `parse()` **never raises on bad content** - a truncated body, an error page,
+  HTML served instead of a feed, or JSON that is not the Algolia shape all
+  yield `[]`. Only an unknown `fmt` raises `ValueError`, because that is a
+  config mistake and not a source having a bad day.
+- `read_source()` is the **single** place a source failure is caught. It
+  returns `([], (source_id, reason))` on any exception and never raises.
+  `search.py` calls it too, so the guard exists once.
+- **An empty parse is a soft failure**: `([], None)` plus an INFO line. Google
+  News answers a throttled query with an empty feed, and calling that an error
+  would redden a run for a source that is merely quiet.
+- `source` is a mapping with `id`, `url` and an optional `format`.
+- `errors` is a list of `(source_id, reason)` tuples.
+
+## `fetch/search.py` - keyword groups into queries
+
+```
+KW_PLACEHOLDER = "{kw}"
+
+build_urls(groups, templates) -> list[(url, template, group)]
+read_search_feeds(fetcher, cfg, groups, fetched_at=None) -> (items, errors)
+```
+
+- `build_urls()` is **pure**: no request is made, so the request count is known
+  before the first byte goes out. It is `len(groups) x len(templates)` - seven
+  groups and two templates is 14 requests, on top of the eight fixed feeds.
+- **A multi-word primary term is quoted as a phrase before encoding**:
+  `embedded linux` travels as `%22embedded+linux%22`. Unquoted it is two words
+  to a search engine and comes back as everything ever written about Linux.
+- Only `{kw}` is substituted; the template's own query string (`hl=vi&gl=VN&
+  ceid=VN:vi`) survives character for character.
+- A template whose URL lost its `{kw}` contributes nothing and logs a warning -
+  `config.validate()` rejects it first, this is the second line of defence.
+- Templates are iterated **outermost**, so a run's requests arrive grouped by
+  host, which is what the per-host throttle is for.
+- Items are tagged with the template id as `source_id` and the group's `label`
+  as `keyword_group`. They are still matched normally in P2: the engine's idea
+  of relevance does not get a free pass into the report.
+- Errors are recorded per `(template, group)`: one throttled query must not
+  cost the other groups their results.
+
+### [behavior] How News Is Searched, Matched and Ranked
+*`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*
 
 # How News Is Searched, Matched and Ranked
 
@@ -1121,8 +1312,10 @@ page, P4 the senders. The flags and exit codes above do not change with them.
 4. The result is one flat list of `(url, source_id, keyword_group | None)`.
 
 Cost is predictable and worth stating out loud: `len(feeds) + len(groups) x
-len(enabled templates)`. Eight feeds, twelve groups and two enabled templates is
-32 requests per run, not eight.
+len(enabled templates)`. Measured on the shipped config: eight feeds, seven
+groups and two enabled templates is **22 requests and 35-57 s per run**, not
+eight requests. `build_urls()` is pure, so that number is known before the first
+byte goes out.
 
 ## Stage 2 - fetch
 
@@ -1204,6 +1397,9 @@ costs an afternoon to rediscover.
 | **Diacritics in Vietnamese titles** | `Điện` never matches a keyword typed `dien` | Fold at stage 4; store the original for display |
 | **A feed with no `pubDate`** | Freshness term undefined | `published_at = None`, freshness term `0`, never "now" |
 | **The same story from an AMP or syndicated URL** | Two rows, two notifications | Accepted limit - canonicalisation does not resolve it, and title clustering is not implemented |
+| **Google News returns its own redirector links** | Items come back as `news.google.com/rss/articles/CBMi...`, never the publisher URL, so the same story from Google News and from Hacker News does **not** collapse on `canonical_url` | Accepted limit of the same class as the AMP case. Resolving it means following each redirect - one extra request per item, against a host that already throttles |
+| **The Reddit sources are unreachable on this network** | Not a 403: `www.reddit.com` fails DNS resolution (`Name or service not known`) both on the homelab host and inside the container | Failure isolation covers it - one warning line, the run keeps the other 21 sources. The User-Agent requirement above is still correct wherever Reddit does resolve |
+| **An Algolia hit with an empty title** | `new_item()` raises and the hit is dropped | Counted at DEBUG per source, so a feed that suddenly ships titleless entries is visible instead of silently shrinking |
 | **A source hangs** | The whole run hangs; nothing outside the process kills it | `request_timeout_s` is the only bound that exists - it must always be set |
 | **Clock skew on the host** | Freshness ranking inverts | `TZ` is pinned in the container; ages are computed in UTC |
 

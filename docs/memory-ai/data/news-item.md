@@ -2,10 +2,10 @@
 title: News Item, Dedup Key and Output Layout
 category: data
 purpose: The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/.
-status: draft
-updated: 2026-09-04
-source: conversation
-confidence: inferred
+status: active
+updated: 2026-09-05
+source: src/news_radar/item.py, src/news_radar/fetch/feeds.py
+confidence: confirmed
 keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot
 order: 2
 ---
@@ -71,6 +71,10 @@ copy, an AMP variant) does **not** collapse. Title-similarity clustering is not
 implemented; it would need a threshold nobody has tuned yet.
 
 ## SQLite store
+
+> 🟡 `inferred` - this section and the next describe P3. `store.py` and
+> `render.py` do not exist yet; everything above them is confirmed against
+> `src/news_radar/item.py`.
 
 One file, `output/news.db`. Schema described as shape, not DDL.
 

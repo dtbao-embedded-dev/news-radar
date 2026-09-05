@@ -2,10 +2,10 @@
 title: News Sources and Search Paths
 category: data
 purpose: Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns.
-status: draft
-updated: 2026-09-04
-source: conversation
-confidence: inferred
+status: active
+updated: 2026-09-05
+source: config/config.yaml.example, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py
+confidence: confirmed
 keywords: sources, feeds, RSS, Atom, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent
 order: 1
 ---

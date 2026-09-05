@@ -4,7 +4,7 @@ category: architecture
 purpose: The finished product news-radar aims at, and the phase-by-phase task breakdown that gets there.
 status: active
 updated: 2026-09-05
-source: conversation
+source: conversation, CHANGELOG.md
 confidence: inferred
 keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, scope, milestones, definition of done
 order: 1
@@ -61,7 +61,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 
 ## Task breakdown
 
-### P0 — Foundation *(this repo's current phase)*
+### P0 — Foundation *(done, v0.1.0)*
 
 | # | Task |
 |---|------|
@@ -74,22 +74,25 @@ Each phase is shippable on its own: it ends in something a human can run and see
 | P0-7 | CI: check workflow on push/PR + tag-triggered release workflow, `CHANGELOG.md`, `VERSION` |
 | P0-8 | Design bank: `rule/` — release procedure, setup procedure, how to consult TrendRadar |
 
-### P1 — Fetch
+### P1 — Fetch *(done — this repo's current phase is P2)*
 
 | # | Task |
 |---|------|
-| P1-1 | HTTP client: explicit User-Agent, timeout, retry with backoff, per-host minimum interval |
-| P1-2 | Feed parser: RSS 2.0 + Atom + the broken variants in the wild (use `feedparser`, do not hand-roll) |
-| P1-3 | Fixed-feed reader: read `platforms`/`feeds` from config, fetch each, tag every item with its source id |
-| P1-4 | Search-feed generator: expand each keyword group into the three search URL templates, fetch, tag |
-| P1-5 | Failure isolation: one dead source must never abort the crawl — log it, keep the rest |
-| P1-6 | JSON-API source support (HN Algolia returns JSON, not a feed) |
+| P1-1 | ~~HTTP client: explicit User-Agent, timeout, retry with backoff, per-host minimum interval~~ — `fetch/http.py` |
+| P1-2 | ~~Feed parser: RSS 2.0 + Atom + the broken variants in the wild~~ — `fetch/feeds.py`, via `feedparser` |
+| P1-3 | ~~Fixed-feed reader: read `feeds` from config, fetch each, tag every item with its source id~~ — `read_fixed_feeds()` |
+| P1-4 | ~~Search-feed generator: expand each keyword group into the search URL templates, fetch, tag~~ — `fetch/search.py` |
+| P1-5 | ~~Failure isolation: one dead source must never abort the crawl~~ — `read_source()`, the single guard |
+| P1-6 | ~~JSON-API source support (HN Algolia returns JSON, not a feed)~~ — folded into P1-2 as a third format |
+
+**P2-1 landed here too.** `keywords.py` parses the whole file already, because
+finding a group's primary term means skipping every other prefix anyway.
 
 ### P2 — Filter and rank
 
 | # | Task |
 |---|------|
-| P2-1 | Parse `frequency_words.txt`: groups, `+` required, `!` excluded, `@` cap, `/regex/`, display label |
+| P2-1 | ~~Parse `frequency_words.txt`: groups, `+` required, `!` excluded, `@` cap, `/regex/`, display label~~ — **done in P1**, `keywords.py` |
 | P2-2 | Match engine: decide which groups an item belongs to, case- and diacritic-insensitive |
 | P2-3 | Global filter section applied before grouping |
 | P2-4 | Dedup: collapse the same story arriving from several sources onto one dedup key |

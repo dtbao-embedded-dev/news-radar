@@ -5,13 +5,15 @@
 
 Standard library only, and it never leaves the machine: a local http.server
 plays every source behaviour that matters - a 403 like Reddit's, a 500 worth
-retrying, a body that arrives gzipped, and a handler slow enough to time out.
+retrying, a body that arrives gzipped, a handler slow enough to time out, and
+the two shapes a throttled notification channel answers with.
 """
 
 from __future__ import annotations
 
 import gzip
 import http.server
+import json
 import pathlib
 import sys
 import threading
@@ -24,6 +26,7 @@ from news_radar.fetch import http as mod  # noqa: E402
 FAILURES = []
 HITS = {}
 SEEN_HEADERS = {}
+SEEN_BODIES = {}
 
 
 def check(name, condition, detail=""):
@@ -77,6 +80,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # /slow is answered after the client has already timed out and hung
             # up. That is the point of the case; the abort is not a failure.
             pass
+
+    def do_POST(self):
+        """The notification side: what Telegram and Discord answer with.
+
+        The two 429 shapes are both real - Telegram puts the delay in
+        `parameters.retry_after` and Discord at the top level, and neither of
+        them is guaranteed to also send the header.
+        """
+        path = self.path
+        HITS[path] = HITS.get(path, 0) + 1
+        SEEN_HEADERS[path] = dict(self.headers)
+        SEEN_BODIES[path] = self.rfile.read(
+            int(self.headers.get("Content-Length") or 0))
+
+        if path == "/post/429-header":
+            self._reply(429, b'{"ok":false}', {"Retry-After": "0"})
+            return
+        if path == "/post/429-body":
+            self._reply(429, b'{"ok":false,"parameters":{"retry_after":0}}')
+            return
+        if path == "/post/429-huge":
+            self._reply(429, b'{"retry_after":9000}', {"Retry-After": "9000"})
+            return
+        if path == "/post/400":
+            self._reply(400, b'{"ok":false,"description":"chat not found"}')
+            return
+        self._reply(200, b'{"ok":true}')
+
+    def _reply(self, status, body, headers=()):
+        self.send_response(status)
+        for name, value in dict(headers).items():
+            self.send_header(name, value)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -185,11 +224,73 @@ eq("the first request to a host is not delayed at all",
 check("...measurably so", time.monotonic() - start < 1.0)
 
 
+# --- POST, which is how a notification channel is talked to ---------------
+
+HITS.clear()
+f6 = mod.Fetcher(user_agent=UA, timeout_s=5, max_retries=2, backoff_s=0.01,
+                 interval_ms=0)
+
+eq("a 200 answer to a POST comes back as bytes",
+   f6.post_json(url("/post/ok"), {"chat_id": 7, "text": "hi"}),
+   b'{"ok":true}')
+eq("the payload arrives as JSON",
+   json.loads(SEEN_BODIES["/post/ok"]), {"chat_id": 7, "text": "hi"})
+eq("a POST declares its content type",
+   SEEN_HEADERS["/post/ok"].get("Content-Type"), "application/json")
+eq("a POST carries the same User-Agent as a GET",
+   SEEN_HEADERS["/post/ok"].get("User-Agent"), UA)
+
+# 429 is the one status where the server says how long to wait, and both
+# channels do. Sleeping our own exponential guess instead is how a bot gets
+# itself banned rather than throttled.
+try:
+    f6.post_json(url("/post/429-header"), {})
+    FAILURES.append("a persistent 429 on POST did not raise")
+except mod.HttpError as exc:
+    eq("the POST 429 carries the status", exc.status, 429)
+    eq("Retry-After is read off the header", exc.retry_after, 0.0)
+eq("a 429 POST is retried like a 429 GET", HITS.get("/post/429-header"), 3)
+
+try:
+    f6.post_json(url("/post/429-body"), {})
+    FAILURES.append("a 429 with the delay only in the body did not raise")
+except mod.HttpError as exc:
+    eq("Telegram's parameters.retry_after is read too", exc.retry_after, 0.0)
+
+# A hostile or merely optimistic server asking for fifteen minutes would stall
+# the cycle past its own interval; the run is better off failing this channel
+# and moving on.
+f7 = mod.Fetcher(user_agent=UA, timeout_s=5, max_retries=0, interval_ms=0)
+try:
+    f7.post_json(url("/post/429-huge"), {})
+    FAILURES.append("a 429 asking for 9000s did not raise")
+except mod.HttpError as exc:
+    eq("Retry-After is capped", exc.retry_after, mod.RETRY_AFTER_MAX)
+
+HITS.clear()
+try:
+    f6.post_json(url("/post/400"), {})
+    FAILURES.append("a 400 on POST did not raise")
+except mod.HttpError as exc:
+    eq("the 400 carries the status", exc.status, 400)
+    check("the 400 keeps the body, which is where the reason is",
+          b"chat not found" in exc.body, repr(exc.body))
+# A bad token, a bad chat id or a malformed body answers the same way however
+# many times it is asked.
+eq("a 400 is not retried", HITS.get("/post/400"), 1)
+
+
 # --- what a caller may not do ---------------------------------------------
 
 try:
     f.get("ftp://example.com/feed.xml")
     FAILURES.append("a non-http scheme was fetched")
+except mod.HttpError:
+    pass
+
+try:
+    f.post_json("ftp://example.com/hook", {})
+    FAILURES.append("a non-http scheme was posted to")
 except mod.HttpError:
     pass
 

@@ -292,12 +292,18 @@ check("the daily message defaults to the morning",
 check("an absent ai section costs an existing config nothing",
       cfgmod.load(write(MINIMAL), env=SECRETS).get("ai.enabled") is False)
 
-# Enabled with no key is the notification rule applied to a third thing: a
-# stack that starts and silently never summarises is the same failure as one
-# that starts and silently never notifies.
-msg = check_raises("enabling the summary with no key is refused", cfgmod.load,
-                   write(MINIMAL + "\nai:\n  enabled: true\n"), env=SECRETS)
-check("the missing-key message names the variable", "OPENAI_API_KEY" in msg, msg)
+# A key is deliberately NOT required, unlike a notification channel's token. A
+# channel genuinely cannot work without its secret; an endpoint on the LAN
+# answers perfectly well without one, and refusing to start would be this file
+# telling the operator their own server does not exist. A *remote* endpoint with
+# no key answers 401, which `summarize()` logs every cycle - visible, not silent.
+no_key = cfgmod.load(write(MINIMAL + """
+ai:
+  enabled: true
+  api_url: http://sglang.invalid:30000/v1/chat/completions
+"""), env=SECRETS)
+check("the summary may be enabled with no key at all",
+      no_key.get("ai.enabled") is True)
 
 msg = check_raises("a non-http api_url is refused", cfgmod.load,
                    write(MINIMAL + "\nai:\n  api_url: localhost:11434/v1\n"),
@@ -306,7 +312,7 @@ check("the api_url message names the key", "api_url" in msg, msg)
 
 msg = check_raises("an api_url blanked while enabled is refused", cfgmod.load,
                    write(MINIMAL + '\nai:\n  enabled: true\n  api_url: ""\n'),
-                   env=dict(SECRETS, OPENAI_API_KEY="k"))
+                   env=SECRETS)
 check("the blank api_url message names the key", "api_url" in msg, msg)
 
 msg = check_raises("hour 24 does not exist", cfgmod.load,

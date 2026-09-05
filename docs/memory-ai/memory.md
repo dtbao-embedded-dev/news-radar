@@ -28,7 +28,8 @@ phase map and the finished-product definition all of it serves.
   notification contracts, the crawl algorithm with its known edge cases, and the
   release and setup procedures.
 - **`python scripts/setup.py` works on Windows and Linux.** Verified on this
-  machine: it checks Python 3.12 and Docker Compose v5.4.0, creates
+  machine (Python 3.12, Docker Compose v2): it enforces the Python 3.11+ floor
+  and the presence of Compose v2, creates
   `config/config.yaml` and `docker/.env` from their templates without ever
   overwriting an existing file, prompts for missing secrets while preserving the
   `.env` comments, and exits non-zero while a required secret is blank.

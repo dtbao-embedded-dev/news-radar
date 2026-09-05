@@ -47,6 +47,20 @@ DEFAULTS = {
         "backup_dir": "backups",
         "backup_keep": 7,
     },
+    # The AI summary (P6-4). Off, and therefore free: an existing config.yaml
+    # that says nothing about `ai` upgrades into this version and behaves
+    # exactly as it did before. The endpoint is spelled as a whole url rather
+    # than a base, because the OpenAI *wire format* is what is being spoken -
+    # OpenRouter, DeepSeek, Groq and a local Ollama all answer it, and only
+    # some of them put it under `/v1`.
+    "ai": {
+        "enabled": False,
+        "api_url": "https://api.openai.com/v1/chat/completions",
+        "model": "gpt-4o-mini",
+        "max_per_topic": 5,
+        "timeout_s": 60,
+        "notify_at_hour": 8,
+    },
     "notification": {
         "enabled": True,
         "channels": {
@@ -222,6 +236,34 @@ def validate(cfg, env=None):
             problems.append(
                 "ops.{} must be an http(s) url or empty, got {!r}".format(
                     name, url))
+
+    # The summary's own numbers. `max_per_topic` has no zero case worth having:
+    # zero titles a topic is a prompt with nothing in it and a bill for asking.
+    for name, low, high in (("max_per_topic", 1, None),
+                            ("timeout_s", 1, None),
+                            ("notify_at_hour", 0, 23)):
+        value = cfg.get("ai." + name)
+        if (not isinstance(value, int) or isinstance(value, bool)
+                or value < low or (high is not None and value > high)):
+            problems.append("ai.{} must be an integer {}, got {!r}".format(
+                name, ">= {}".format(low) if high is None
+                else "between {} and {}".format(low, high), value))
+
+    api_url = cfg.get("ai.api_url") or ""
+    if api_url and not _is_http_url(api_url):
+        problems.append(
+            "ai.api_url must be an http(s) url, got {!r}".format(api_url))
+
+    # Enabled with no key is the notification rule applied to a third thing: a
+    # stack that starts and silently never summarises is the same failure as
+    # one that starts and silently never notifies.
+    if cfg.get("ai.enabled"):
+        if not api_url:
+            problems.append("ai.enabled is true but ai.api_url is empty")
+        if not (env.get("OPENAI_API_KEY") or "").strip():
+            problems.append(
+                "ai.enabled is true but OPENAI_API_KEY is not set - set it in "
+                "docker/.env or turn the summary off")
 
     # The one rule the whole project cares most about.
     for channel in cfg.enabled_channels():

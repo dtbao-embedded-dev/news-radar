@@ -120,6 +120,30 @@ ops:
   backup_dir: backups
   backup_keep: 7         # one file per day, newest N kept; 0 = no backup
 
+ai:
+  # The one thing in this file that costs money, so it ships off. On, it writes
+  # one line per keyword group - the group's name and at most two sentences
+  # about what actually stood out in it - at the top of the page every cycle,
+  # and sends that same line-per-topic summary to the notification channels
+  # once a local day. A group with nothing notable is left out entirely rather
+  # than given a sentence saying so.
+  enabled: false
+
+  # The OpenAI *wire format*, not the vendor. Anything that answers
+  # /v1/chat/completions works, and one of them has no bill:
+  #   api_url: https://openrouter.ai/api/v1/chat/completions
+  #   api_url: https://api.deepseek.com/v1/chat/completions
+  #   api_url: http://ollama:11434/v1/chat/completions   # local, no key needed
+  api_url: https://api.openai.com/v1/chat/completions
+  model: gpt-4o-mini
+
+  # Needs OPENAI_API_KEY in docker/.env whenever enabled is true - including
+  # for a local Ollama, which ignores the value but is still asked for one.
+
+  max_per_topic: 5       # top-scored stories per group that reach the prompt
+  timeout_s: 60          # a completion is slower than a feed; 15s is not enough
+  notify_at_hour: 8      # local hour the once-a-day message goes out (0-23)
+
 notification:
   enabled: true
   channels:

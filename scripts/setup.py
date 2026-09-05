@@ -38,6 +38,10 @@ TEMPLATES = [
 ENV_FILE = Path("docker/.env")
 COMPOSE_FILE = Path("docker/docker-compose.yml")
 
+# Gitignored, placed by hand from the Cloudflare Tunnel's credentials. Its
+# presence is what turns the `tunnel` compose profile on - see compose_argv().
+TUNNEL_CREDENTIALS = Path("docker/tunnel-credentials.json")
+
 # Mirrors the fallback in docker-compose.yml; 8080 is commonly taken already.
 DEFAULT_HTTP_PORT = "8088"
 
@@ -215,17 +219,29 @@ def ensure_secrets(dry_run, interactive, verify=False):
 # --------------------------------------------------------------------------
 
 
-def compose_argv():
+def compose_argv(root=None):
     """The `up -d` argv for whatever can actually start in this checkout.
 
-    The crawl service builds from a Dockerfile that lands in P5. While that
-    file is absent a full `up -d` dies on the build, so bring up the web half
-    alone; the narrowing disappears by itself once the Dockerfile exists.
+    Two narrowings, both read off the filesystem rather than asked about:
+
+    - No `Dockerfile` means the crawl service cannot build and a full `up -d`
+      would die on it, so bring up the web half alone.
+    - The `cloudflared` service sits behind the `tunnel` compose profile and
+      mounts a credentials file that is never committed. The profile goes on
+      only when that file is there; a checkout without one starts exactly what
+      it started before rather than a container crash-looping on the mount.
+
+    `root` exists so the rules can be exercised against a throwaway tree - see
+    tests/test_setup.py. It defaults to this checkout.
     """
+    root = ROOT if root is None else root
     # as_posix(): the same printed command works when pasted into any shell,
     # including a Windows one, instead of growing backslashes there.
-    argv = ["docker", "compose", "-f", COMPOSE_FILE.as_posix(), "up", "-d"]
-    if not (ROOT / "Dockerfile").is_file():
+    argv = ["docker", "compose", "-f", COMPOSE_FILE.as_posix()]
+    if (root / TUNNEL_CREDENTIALS).is_file():
+        argv += ["--profile", "tunnel"]
+    argv += ["up", "-d"]
+    if not (root / "Dockerfile").is_file():
         argv.append("caddy")
     return argv
 

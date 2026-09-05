@@ -18,6 +18,19 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **crawl**: the selection layer - `python -m news_radar --once` now prints a
+  grouped, deduped, ranked shortlist instead of a raw item count. Every item is
+  checked against the `[GLOBAL_FILTER]` exclusions first and dropped outright if
+  one hits, then matched against each keyword group: plain terms compare on a
+  folded title, so a keyword typed `dien tu` finds `Điện tử`, while a `/regex/`
+  runs against the original title. `+` terms are all required and any `!` term
+  blocks that group alone. Copies of one story collapse onto a single dedup key,
+  keeping the earliest timestamp and the union of the sources that carried it,
+  and each group is ordered by source weight, how many sources carried the story
+  and how fresh it is - weights from `rank.*` - then cut to the group's `@n`,
+  falling back to `report.max_per_group`. A story with no timestamp scores zero
+  for freshness and one dated in the future scores no more than one published
+  now. Nothing is stored, published or notified yet
 - **crawl**: the fetch layer - `python -m news_radar --once` now pulls real
   items from the eight fixed feeds and from a search built out of every
   keyword group in `frequency_words.txt`, and prints a count per source.

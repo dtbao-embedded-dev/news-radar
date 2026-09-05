@@ -24,7 +24,9 @@ from .config import ConfigError, load
 from .fetch.feeds import read_fixed_feeds
 from .fetch.http import Fetcher
 from .fetch.search import read_search_feeds
+from .filter import select
 from .keywords import KeywordError, parse as parse_keywords
+from .rank import collapse, rank_groups
 
 log = logging.getLogger("news_radar")
 
@@ -69,25 +71,55 @@ def _report_counts(items, sources, errors):
                  "  [failed]" if source_id in failed else "")
 
 
+def _source_weights(cfg):
+    """{source_id: rank_weight} over every configured source, enabled or not.
+
+    Layer 3 may not import `config`, so the map is built here and handed down.
+    Disabled entries are included on purpose: an item is scored by where it came
+    from, and a source switched off after this cycle started still carries the
+    weight the operator gave it.
+    """
+    weights = {}
+    for entry in (cfg.get("feeds") or []) + (cfg.get("search_templates") or []):
+        source_id = entry.get("id")
+        if isinstance(source_id, str):
+            weights[source_id] = entry.get("rank_weight", 1.0)
+    return weights
+
+
+def _report_groups(ranked):
+    """The shortlist itself: one line per group, then the stories it kept.
+
+    Empty groups are printed too. A keyword that has gone quiet looks exactly
+    like a keyword nobody wrote about, and the difference is the whole reason
+    to read the log.
+    """
+    for label, stories in ranked.items():
+        log.info("  %s - %d item(s)", label, len(stories))
+        for story in stories:
+            log.info("    %.2f  %s  [%s]", story.score, story.item.title,
+                     ", ".join(story.source_ids))
+
+
 def crawl(cfg):
     """One pass: fetch, filter, rank, store, render, notify.
 
-    P1 has landed the fetch half. Filtering, ranking, storage, the page and the
-    senders are still ahead, so the cycle ends by saying what it has rather
-    than claiming a report it did not produce.
+    P1 and P2 have landed: this returns the ranked shortlist, grouped by
+    keyword group. Storage, the page and the senders are still ahead, so the
+    cycle ends by printing the shortlist rather than claiming it published one.
     """
     started = time.monotonic()
     fetched_at = dt.datetime.now(dt.timezone.utc)
     fetcher = _fetcher(cfg)
 
     try:
-        groups, _global_filter = parse_keywords(cfg.get("keywords.file"))
+        groups, global_filter = parse_keywords(cfg.get("keywords.file"))
     except KeywordError as exc:
         # The fixed feeds do not need the keyword file; only the search feeds
         # do. Losing half the run is better than losing all of it, and the
         # reason is on one line rather than in a traceback.
         log.error("keyword file unusable, search feeds skipped this cycle: %s", exc)
-        groups = []
+        groups, global_filter = [], []
 
     feed_items, feed_errors = read_fixed_feeds(fetcher, cfg, fetched_at=fetched_at)
     search_items, search_errors = read_search_feeds(
@@ -112,9 +144,20 @@ def crawl(cfg):
 
     log.info("fetched %d raw item(s) in %.1fs, %d source(s) failed",
              len(items), time.monotonic() - started, len(errors))
-    log.warning("filtering and ranking are not implemented yet (P2) - "
-                "nothing is stored, published or notified this cycle")
-    return items
+
+    matched = select(items, groups, global_filter)
+    stories = collapse(matched)
+    ranked = rank_groups(stories, groups, cfg.get("rank") or {},
+                         _source_weights(cfg), fetched_at,
+                         default_cap=cfg.get("report.max_per_group", 0))
+
+    log.info("matched %d item(s) -> %d story(ies) after dedup -> %d kept "
+             "across %d group(s)", len(matched), len(stories),
+             sum(len(s) for s in ranked.values()), len(ranked))
+    _report_groups(ranked)
+    log.warning("storage, the page and the senders are not implemented yet "
+                "(P3, P4) - nothing is published or notified this cycle")
+    return ranked
 
 
 def run(cfg, once=False):

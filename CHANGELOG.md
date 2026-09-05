@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.0 - 2026-09-05
+
 ### Fixes
 
 - **release**: `release.py` forces UTF-8 on stdout before it prints anything.

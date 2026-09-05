@@ -59,10 +59,13 @@ definition all of it serves.
   no install step. Verified locally by running the same loop, by proving a
   failing check aborts it instead of passing silently, and by every green run
   since.
-- **`setup.py` starts the stack itself.** A successful run ends with
-  `docker compose up -d`, not a command printed for the operator to copy. Install
-  is two steps, not three. The success path has not been exercised on a machine
-  with the Docker daemon running; the failure path was, and reports non-zero.
+- **`setup.py` starts the stack itself, verified end to end.** A successful run
+  ends with `docker compose up -d`, not a command printed for the operator to
+  copy. Install is two steps, not three. Exercised on this machine on 2026-09-05
+  with real credentials in `docker/.env`: exit 0, `[ok] stack is up -
+  http://localhost:8088`, and Caddy answering `200` there. The failure paths were
+  exercised too - a stopped daemon reports `docker compose exited 1` and returns
+  non-zero, and a blank secret stops the run before docker is touched at all.
 - **The docker stack is defined and Caddy actually runs.** Verified by starting
   it: Caddy serves `output/` with the `Cache-Control` headers from our Caddyfile.
 - **The repository has a license.** Apache-2.0, in `LICENSE`, chosen because

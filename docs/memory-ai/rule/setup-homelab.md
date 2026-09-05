@@ -3,7 +3,7 @@ title: Setting Up on the Homelab
 category: rule
 purpose: The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux.
 status: active
-updated: 2026-09-04
+updated: 2026-09-05
 source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile
 confidence: confirmed
 keywords: setup, setup.py, docker compose, homelab, cloudflare tunnel, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088
@@ -35,6 +35,12 @@ cd news-radar
 python scripts/setup.py
 docker compose -f docker/docker-compose.yml up -d
 ```
+
+**Until P5 lands, start `caddy` alone:** `docker compose -f
+docker/docker-compose.yml up -d caddy`. The crawl service builds from a
+`Dockerfile` that does not exist yet, so the full `up -d` dies on the build.
+`setup.py` prints whichever of the two commands actually applies, deciding on
+whether the `Dockerfile` is present.
 
 **Step 2 in detail.** `setup.py` checks Python and Docker, then creates the two
 files that are deliberately not in git:

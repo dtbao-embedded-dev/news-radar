@@ -1188,6 +1188,12 @@ python scripts/setup.py
 docker compose -f docker/docker-compose.yml up -d
 ```
 
+**Until P5 lands, start `caddy` alone:** `docker compose -f
+docker/docker-compose.yml up -d caddy`. The crawl service builds from a
+`Dockerfile` that does not exist yet, so the full `up -d` dies on the build.
+`setup.py` prints whichever of the two commands actually applies, deciding on
+whether the `Dockerfile` is present.
+
 **Step 2 in detail.** `setup.py` checks Python and Docker, then creates the two
 files that are deliberately not in git:
 

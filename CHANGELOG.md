@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.1.0 - 2026-09-05
+
 ### Features
 
 - **setup**: one homelab bootstrap script, same behaviour on Windows and Linux

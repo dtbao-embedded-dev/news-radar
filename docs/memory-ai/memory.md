@@ -835,7 +835,8 @@ Preflight, all before any write:
 1. `<version>` parses as `vMAJOR.MINOR.PATCH`.
 2. The working tree is clean.
 3. The current branch matches `release/*`.
-4. Tag `v<version>` does not already exist locally or on the remote.
+4. Tag `v<version>` does not already exist locally or on the push remote -
+   the one `--remote` names, not always `origin`.
 5. Branches `developing` and `main` exist.
 
 A failed preflight exits non-zero with nothing changed. Under `--dry-run` the

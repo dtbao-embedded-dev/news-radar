@@ -3,7 +3,7 @@ title: Script CLIs - setup.py and release.py
 category: interface
 purpose: The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees.
 status: active
-updated: 2026-09-04
+updated: 2026-09-05
 source: scripts/setup.py, scripts/release.py
 confidence: confirmed
 keywords: setup.py, release.py, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI
@@ -71,7 +71,8 @@ Preflight, all before any write:
 1. `<version>` parses as `vMAJOR.MINOR.PATCH`.
 2. The working tree is clean.
 3. The current branch matches `release/*`.
-4. Tag `v<version>` does not already exist locally or on the remote.
+4. Tag `v<version>` does not already exist locally or on the push remote -
+   the one `--remote` names, not always `origin`.
 5. Branches `developing` and `main` exist.
 
 A failed preflight exits non-zero with nothing changed. Under `--dry-run` the

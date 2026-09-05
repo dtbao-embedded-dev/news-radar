@@ -99,34 +99,44 @@ class Fetcher:
         """Fetch one URL. Returns the body as bytes, or raises HttpError."""
         return self._request(url)
 
-    def post_json(self, url, payload):
+    def post_json(self, url, payload, headers=None):
         """POST a JSON body. Returns the response body, or raises HttpError.
 
         Retried on the same statuses a GET is, which means a 5xx can deliver
         the same message twice. That is the trade the notification contract
         already takes: a duplicate is the acceptable failure, a silently
         dropped story is not.
+
+        `headers` exists for one caller: an OpenAI-compatible endpoint
+        authenticates with `Authorization: Bearer <key>`, and neither channel
+        webhook needs a header at all. It is merged *underneath* what this
+        class decides rather than over it, so a caller can add a header and can
+        never take one away - losing the User-Agent to a typo is the 403 on
+        both Reddit sources, arriving from a different direction.
         """
         return self._request(url, data=json.dumps(payload).encode("utf-8"),
-                             content_type="application/json")
+                             content_type="application/json", headers=headers)
 
-    def _request(self, url, data=None, content_type=None):
+    def _request(self, url, data=None, content_type=None, headers=None):
         """One attempt loop for both verbs. `data` is what makes it a POST."""
         parts = urlsplit(url)
         if parts.scheme not in ("http", "https") or not parts.hostname:
             raise HttpError("not an http(s) url: {!r}".format(url), url=url)
 
-        headers = {
+        # The caller's headers go in first so the three below overwrite them:
+        # what the transport decided about itself is not the caller's to undo.
+        sent = dict(headers or {})
+        sent.update({
             "User-Agent": self.user_agent,
             "Accept": "application/rss+xml, application/atom+xml, "
                       "application/xml, application/json;q=0.9, */*;q=0.8",
             # Google News and Reddit both send gzip whether or not it is asked
             # for; asking makes the saving deliberate and the decoding ours.
             "Accept-Encoding": "gzip, deflate",
-        }
+        })
         if content_type:
-            headers["Content-Type"] = content_type
-        request = urllib.request.Request(url, data=data, headers=headers)
+            sent["Content-Type"] = content_type
+        request = urllib.request.Request(url, data=data, headers=sent)
 
         last_error = None
         for attempt in range(self.max_retries + 1):

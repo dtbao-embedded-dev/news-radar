@@ -87,6 +87,34 @@ fetcher = Fetcher(user_agent=UA, timeout_s=5, max_retries=1, backoff_s=0.01,
                   interval_ms=0)
 
 
+# --- pick: the group order, and the seen-set diff --------------------------
+
+# The store returns a mapping; the keyword file fixes the order. Rendering the
+# mapping's own order would shuffle the sections between runs.
+BY_LABEL = {"Rust": [row("R1", "r1"), row("R2", "r2")],
+            "ESP32": [row("E1", "e1")],
+            "Quiet": []}
+LABELS = ["ESP32", "Rust", "Quiet", "Never"]
+
+picked = notify.pick(BY_LABEL, LABELS)
+eq("the keyword file's order wins, not the mapping's",
+   [label for label, _ in picked], ["ESP32", "Rust"])
+eq("a group with nothing in it is dropped, not sent empty",
+   [label for label, _ in picked], ["ESP32", "Rust"])
+eq("every row of a kept group travels", len(picked[1][1]), 2)
+
+# The diff. `keys` is what the seen-set said is still unsent on this channel.
+diffed = notify.pick(BY_LABEL, LABELS, {"r2"})
+eq("only the unsent stories survive the diff",
+   [(label, [r["dedup_key"] for r in rows]) for label, rows in diffed],
+   [("Rust", ["r2"])])
+eq("a group emptied by the diff disappears with it", len(diffed), 1)
+eq("nothing unsent means nothing at all - not an empty message",
+   notify.pick(BY_LABEL, LABELS, set()), [])
+eq("an empty key set is not the same as no diff at all",
+   len(notify.pick(BY_LABEL, LABELS, None)), 2)
+
+
 # --- the shared chunker ---------------------------------------------------
 
 # Two small groups belong in one message; the split exists for size, not for

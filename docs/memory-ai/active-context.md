@@ -38,6 +38,10 @@ something a human can look at.
   `docker compose ... down` would have swept them along with our Caddy. All six
   are gone; the volumes `ntfy-data` and `news-radar_caddy_data` were left in
   place. `8080` is free again, and the default stays `8088` by choice.
+- **`Dockerfile`, `requirements.txt` and the `src/news_radar/` skeleton landed**
+  (2026-09-05), unblocking P1. Only `__init__.py`, `__main__.py` and `config.py`
+  were written - the stage modules are deliberately not stubbed, because an empty
+  file claiming to be `fetch/http.py` reads as implemented when it is not.
 - Removed the empty directories Docker had created under `config/` as
   bind-mount targets for that stack: `zenfeed.yaml/`, `cloudflared.yml/` and
   `apprise/newsradar.yml/`. Git never saw them - it does not track empty
@@ -56,16 +60,19 @@ something a human can look at.
 
 ## Next steps
 
-1. **Add the `Dockerfile` and the `src/news_radar/` package skeleton** - the
-   compose stack cannot start its crawl service until this exists, so it blocks
-   every later verification. `setup.py` already narrows itself to `caddy` while
-   the file is absent and widens on its own once it exists.
-2. **P1-1 HTTP client** - User-Agent from config, timeout, retry with backoff,
-   per-hostname minimum interval. Reddit's 403 on an anonymous UA is the first
-   thing to prove fixed.
-3. **P1-2 and P1-3** - feed parsing via `feedparser`, then the fixed-feed reader
-   producing normalised `NewsItem`s with per-source failure isolation.
-4. **P1-4** - the search-feed generator, including the JSON shape from HN Algolia.
+1. **P1-1 HTTP client** - User-Agent from `cfg.user_agent()`, timeout, retry
+   with backoff, per-hostname minimum interval. Reddit's 403 on an anonymous UA
+   is the first thing to prove fixed. It lands in `fetch/http.py` and everything
+   else in P1 goes through it.
+2. **P1-2 and P1-3** - feed parsing via `feedparser`, then the fixed-feed reader
+   producing normalised `NewsItem`s. Fold **P1-6** (HN Algolia returns JSON, not
+   a feed) in here rather than leaving it last: it is a second format for the
+   same reader, not a separate stage. **P1-5** (per-source failure isolation) is
+   woven in from the start, not wrapped around afterwards.
+3. **P1-4** - the search-feed generator, expanding each keyword group into the
+   enabled search templates.
+4. **Verify with `python -m news_radar --once`** - P1 is done when it prints N
+   raw items from both the fixed feeds and the keyword-built searches.
 
 ## Active decisions
 

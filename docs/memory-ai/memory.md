@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-05 - 14 durable doc(s)._
+_Generated 2026-09-05 - 15 durable doc(s)._
 
 ## State (transient)
 
@@ -72,10 +72,26 @@ definition all of it serves.
   the clean-room decision left it free (`adr-0001`). The README states it and
   carries a badge.
 
+- **The full stack starts, both services.** `Dockerfile` (base pinned by
+  digest), `requirements.txt`, and the `src/news_radar/` skeleton exist, so
+  `docker compose up -d` builds and runs the crawl service alongside Caddy.
+  Verified on 2026-09-05: `setup.py` widened from `up -d caddy` to `up -d` on its
+  own once the Dockerfile appeared, both containers report `Up`, and the crawl
+  service logs its cycle then waits.
+- **`python -m news_radar` runs.** Loads and validates the config, refuses to
+  start when an enabled channel has no secret (verified in the container: three
+  problems listed, exit 1), and honours `SIGTERM` mid-interval - `docker stop`
+  returned in under a second because the loop waits on an Event rather than
+  sleeping. `crawl()` is an honest placeholder: it logs what it would fetch and
+  that fetch is not implemented, and returns 0 items.
+- **`python tests/test_config.py` passes.** Covers the default merge, the
+  fatal-secret rule, and the validation gates, and asserts the committed
+  `config.yaml.example` satisfies its own contract.
+
 ## What's left
 
-Everything the product actually does. The application layer is **specified but
-not written** - `src/news_radar/` does not exist yet.
+The pipeline itself. `src/news_radar/` holds the entrypoint and the config
+loader; every stage module is still **specified but not written**.
 
 - **P1 Fetch** - HTTP client with a real User-Agent and per-host throttling, feed
   parsing, the fixed-feed reader, the keyword-driven search-feed generator, and
@@ -90,9 +106,6 @@ not written** - `src/news_radar/` does not exist yet.
 
 ## Known issues
 
-- **The `news-radar` compose service cannot start.** It builds from a `Dockerfile`
-  that lands in P5. Until then only `caddy` can start; the compose file says so
-  and `setup.py` narrows itself to `caddy` on its own while the file is absent.
 - **The pre-rewrite root commit is still reachable on GitHub.** History was
   rewritten on 2026-09-05 to drop a `Co-Authored-By` trailer, but a force push
   does not delete the old objects: `91ea2d9` still answers over the API with the
@@ -141,6 +154,10 @@ something a human can look at.
   `docker compose ... down` would have swept them along with our Caddy. All six
   are gone; the volumes `ntfy-data` and `news-radar_caddy_data` were left in
   place. `8080` is free again, and the default stays `8088` by choice.
+- **`Dockerfile`, `requirements.txt` and the `src/news_radar/` skeleton landed**
+  (2026-09-05), unblocking P1. Only `__init__.py`, `__main__.py` and `config.py`
+  were written - the stage modules are deliberately not stubbed, because an empty
+  file claiming to be `fetch/http.py` reads as implemented when it is not.
 - Removed the empty directories Docker had created under `config/` as
   bind-mount targets for that stack: `zenfeed.yaml/`, `cloudflared.yml/` and
   `apprise/newsradar.yml/`. Git never saw them - it does not track empty
@@ -159,16 +176,19 @@ something a human can look at.
 
 ## Next steps
 
-1. **Add the `Dockerfile` and the `src/news_radar/` package skeleton** - the
-   compose stack cannot start its crawl service until this exists, so it blocks
-   every later verification. `setup.py` already narrows itself to `caddy` while
-   the file is absent and widens on its own once it exists.
-2. **P1-1 HTTP client** - User-Agent from config, timeout, retry with backoff,
-   per-hostname minimum interval. Reddit's 403 on an anonymous UA is the first
-   thing to prove fixed.
-3. **P1-2 and P1-3** - feed parsing via `feedparser`, then the fixed-feed reader
-   producing normalised `NewsItem`s with per-source failure isolation.
-4. **P1-4** - the search-feed generator, including the JSON shape from HN Algolia.
+1. **P1-1 HTTP client** - User-Agent from `cfg.user_agent()`, timeout, retry
+   with backoff, per-hostname minimum interval. Reddit's 403 on an anonymous UA
+   is the first thing to prove fixed. It lands in `fetch/http.py` and everything
+   else in P1 goes through it.
+2. **P1-2 and P1-3** - feed parsing via `feedparser`, then the fixed-feed reader
+   producing normalised `NewsItem`s. Fold **P1-6** (HN Algolia returns JSON, not
+   a feed) in here rather than leaving it last: it is a second format for the
+   same reader, not a separate stage. **P1-5** (per-source failure isolation) is
+   woven in from the start, not wrapped around afterwards.
+3. **P1-4** - the search-feed generator, expanding each keyword group into the
+   enabled search templates.
+4. **Verify with `python -m news_radar --once`** - P1 is done when it prints N
+   raw items from both the fixed feeds and the keyword-built searches.
 
 ## Active decisions
 
@@ -304,7 +324,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 
 | # | Task |
 |---|------|
-| P5-1 | Dockerfile for the crawl service; pin the base image |
+| P5-1 | ~~Dockerfile for the crawl service; pin the base image~~ - **done early**, it blocked every P1 verification |
 | P5-2 | Compose: crawl service with an internal schedule loop + Caddy serving `output/` |
 | P5-3 | Cloudflare Tunnel route for `news.dtbao.org` |
 | P5-4 | First live run on the homelab, verified from outside the LAN |
@@ -325,7 +345,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 - No mobile app; the page is responsive and that is the whole client story.
 
 ### [architecture] Module Layout and Stack  🟡 [inferred - verify]
-*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: draft - source: conversation - keywords: tree, layout, layering, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
+*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: active - source: conversation - keywords: tree, layout, layering, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
 
 # Module Layout and Stack
 
@@ -349,23 +369,27 @@ news-radar/
 ├── scripts/
 │   ├── setup.py                # homelab bootstrap, stdlib only
 │   └── release.py              # release automation, stdlib only
-├── src/news_radar/             # P1..P4
-│   ├── __main__.py             # entrypoint: python -m news_radar
-│   ├── config.py               # load + validate config.yaml and env
-│   ├── keywords.py             # parse frequency_words.txt
-│   ├── fetch/
+├── Dockerfile                  # crawl service image, base pinned by digest
+├── requirements.txt            # the two runtime dependencies, pinned
+├── src/news_radar/
+│   ├── __init__.py             # DONE - __version__, read from VERSION
+│   ├── __main__.py             # DONE - entrypoint + schedule loop
+│   ├── config.py               # DONE - load + validate config.yaml and env
+│   ├── keywords.py             # P2 - parse frequency_words.txt
+│   ├── fetch/                  # P1
 │   │   ├── http.py             # UA, timeout, retry, per-host throttle
 │   │   ├── feeds.py            # fixed RSS/Atom sources
 │   │   └── search.py           # keyword -> search URL -> items
-│   ├── filter.py               # match items against keyword groups
-│   ├── rank.py                 # dedup + weighted ranking
-│   ├── store.py                # SQLite persistence + seen-set
-│   ├── render.py               # output/index.html
-│   └── notify/
+│   ├── filter.py               # P2 - match items against keyword groups
+│   ├── rank.py                 # P2 - dedup + weighted ranking
+│   ├── store.py                # P3 - SQLite persistence + seen-set
+│   ├── render.py               # P3 - output/index.html
+│   └── notify/                 # P4
 │       ├── telegram.py
 │       └── discord.py
 ├── tests/
-│   └── test_release.py         # plain asserts, no framework
+│   ├── test_config.py          # plain asserts, needs PyYAML
+│   └── test_release.py         # plain asserts, stdlib only
 ├── output/                     # gitignored: index.html, news.db, per-day files
 ├── docs/memory-ai/             # this bank
 ├── .github/workflows/
@@ -1020,6 +1044,62 @@ acceptable failure, a silently dropped story is not.
 
 `reported` is keyed per channel, so enabling Discord later does not mark stories
 already pushed to Telegram as sent - see [[news-item]].
+
+### [interface] Crawl CLI - python -m news_radar
+*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/config.py, Dockerfile - keywords: python -m news_radar, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
+
+# Crawl CLI - `python -m news_radar`
+
+> The application entrypoint and the image's `ENTRYPOINT`. It owns the schedule
+> loop and nothing else; every stage it calls lives in its own module.
+
+```
+python -m news_radar [--once] [--config PATH] [--debug]
+```
+
+| Flag | Effect |
+|------|--------|
+| *(none)* | Loop forever on `schedule.interval_minutes`, crawling immediately unless `schedule.run_on_start` is `false` |
+| `--once` | One cycle, then exit. This is the command a phase is verified with - P1 is done when it prints N raw items |
+| `--config PATH` | Config file to read. Default: `$NEWS_RADAR_CONFIG`, then `config/config.yaml` |
+| `--debug` | `DEBUG` logging. `advanced.debug: true` in the config does the same |
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | The cycle ran, or the loop was stopped by a signal |
+| `1` | The configuration is unusable; every problem is listed, and nothing was started |
+
+## Behaviour that matters
+
+**Config problems are reported together and are fatal.** `config.load()` collects
+every problem and raises once, so an operator fixes them in one pass instead of
+one per restart. There is no fallback to an all-default config: a radar that
+hunts nothing and reports to nobody looks like success. See [[config-and-env]].
+
+**The sleep is interruptible.** The loop waits on a `threading.Event` rather than
+`time.sleep`, and `SIGTERM`/`SIGINT` set it. `docker stop` allows 10 seconds
+before `SIGKILL`; a plain sleep of `interval_minutes` would be killed every time.
+Measured: `docker stop` returns in under a second mid-interval.
+
+**One bad cycle does not end the service.** `crawl()` is called inside a
+`try/except`; a traceback is logged and the next cycle runs. Letting it escape
+would exit the process, and `restart: unless-stopped` would restart straight back
+into the same failure, losing the schedule.
+
+**Logging goes to stdout, unbuffered.** The image sets `PYTHONUNBUFFERED=1`; a
+service that logs once every 30 minutes would otherwise sit in a block buffer and
+look hung under `docker logs`.
+
+## What it does not do yet
+
+`crawl()` is a placeholder. It logs how many feeds and search templates are
+enabled and which channels would be notified, then logs
+`fetch is not implemented yet (P1) - 0 items this cycle` and returns `0`. It
+returns a count rather than pretending: a loop that reports success while doing
+nothing is worse than one that says it is empty.
+
+P1 replaces the body with the fetch layer, P2 the selection, P3 the store and the
+page, P4 the senders. The flags and exit codes above do not change with them.
 
 ### [behavior] How News Is Searched, Matched and Ranked  🟡 [inferred - verify]
 *`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: draft - source: conversation - keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*

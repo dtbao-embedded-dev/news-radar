@@ -2,7 +2,7 @@
 title: Module Layout and Stack
 category: architecture
 purpose: The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take.
-status: draft
+status: active
 updated: 2026-09-05
 source: conversation
 confidence: inferred
@@ -32,23 +32,27 @@ news-radar/
 ├── scripts/
 │   ├── setup.py                # homelab bootstrap, stdlib only
 │   └── release.py              # release automation, stdlib only
-├── src/news_radar/             # P1..P4
-│   ├── __main__.py             # entrypoint: python -m news_radar
-│   ├── config.py               # load + validate config.yaml and env
-│   ├── keywords.py             # parse frequency_words.txt
-│   ├── fetch/
+├── Dockerfile                  # crawl service image, base pinned by digest
+├── requirements.txt            # the two runtime dependencies, pinned
+├── src/news_radar/
+│   ├── __init__.py             # DONE - __version__, read from VERSION
+│   ├── __main__.py             # DONE - entrypoint + schedule loop
+│   ├── config.py               # DONE - load + validate config.yaml and env
+│   ├── keywords.py             # P2 - parse frequency_words.txt
+│   ├── fetch/                  # P1
 │   │   ├── http.py             # UA, timeout, retry, per-host throttle
 │   │   ├── feeds.py            # fixed RSS/Atom sources
 │   │   └── search.py           # keyword -> search URL -> items
-│   ├── filter.py               # match items against keyword groups
-│   ├── rank.py                 # dedup + weighted ranking
-│   ├── store.py                # SQLite persistence + seen-set
-│   ├── render.py               # output/index.html
-│   └── notify/
+│   ├── filter.py               # P2 - match items against keyword groups
+│   ├── rank.py                 # P2 - dedup + weighted ranking
+│   ├── store.py                # P3 - SQLite persistence + seen-set
+│   ├── render.py               # P3 - output/index.html
+│   └── notify/                 # P4
 │       ├── telegram.py
 │       └── discord.py
 ├── tests/
-│   └── test_release.py         # plain asserts, no framework
+│   ├── test_config.py          # plain asserts, needs PyYAML
+│   └── test_release.py         # plain asserts, stdlib only
 ├── output/                     # gitignored: index.html, news.db, per-day files
 ├── docs/memory-ai/             # this bank
 ├── .github/workflows/

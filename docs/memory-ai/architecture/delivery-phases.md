@@ -120,7 +120,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 
 | # | Task |
 |---|------|
-| P5-1 | Dockerfile for the crawl service; pin the base image |
+| P5-1 | ~~Dockerfile for the crawl service; pin the base image~~ - **done early**, it blocked every P1 verification |
 | P5-2 | Compose: crawl service with an internal schedule loop + Caddy serving `output/` |
 | P5-3 | Cloudflare Tunnel route for `news.dtbao.org` |
 | P5-4 | First live run on the homelab, verified from outside the LAN |

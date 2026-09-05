@@ -62,10 +62,26 @@ definition all of it serves.
   the clean-room decision left it free (`adr-0001`). The README states it and
   carries a badge.
 
+- **The full stack starts, both services.** `Dockerfile` (base pinned by
+  digest), `requirements.txt`, and the `src/news_radar/` skeleton exist, so
+  `docker compose up -d` builds and runs the crawl service alongside Caddy.
+  Verified on 2026-09-05: `setup.py` widened from `up -d caddy` to `up -d` on its
+  own once the Dockerfile appeared, both containers report `Up`, and the crawl
+  service logs its cycle then waits.
+- **`python -m news_radar` runs.** Loads and validates the config, refuses to
+  start when an enabled channel has no secret (verified in the container: three
+  problems listed, exit 1), and honours `SIGTERM` mid-interval - `docker stop`
+  returned in under a second because the loop waits on an Event rather than
+  sleeping. `crawl()` is an honest placeholder: it logs what it would fetch and
+  that fetch is not implemented, and returns 0 items.
+- **`python tests/test_config.py` passes.** Covers the default merge, the
+  fatal-secret rule, and the validation gates, and asserts the committed
+  `config.yaml.example` satisfies its own contract.
+
 ## What's left
 
-Everything the product actually does. The application layer is **specified but
-not written** - `src/news_radar/` does not exist yet.
+The pipeline itself. `src/news_radar/` holds the entrypoint and the config
+loader; every stage module is still **specified but not written**.
 
 - **P1 Fetch** - HTTP client with a real User-Agent and per-host throttling, feed
   parsing, the fixed-feed reader, the keyword-driven search-feed generator, and
@@ -80,9 +96,6 @@ not written** - `src/news_radar/` does not exist yet.
 
 ## Known issues
 
-- **The `news-radar` compose service cannot start.** It builds from a `Dockerfile`
-  that lands in P5. Until then only `caddy` can start; the compose file says so
-  and `setup.py` narrows itself to `caddy` on its own while the file is absent.
 - **The pre-rewrite root commit is still reachable on GitHub.** History was
   rewritten on 2026-09-05 to drop a `Co-Authored-By` trailer, but a force push
   does not delete the old objects: `91ea2d9` still answers over the API with the

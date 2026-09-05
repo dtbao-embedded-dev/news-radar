@@ -29,11 +29,31 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **sources**: a second Google News template, `google_news_en`, and it is not a
+  duplicate of the Vietnamese one - the locale decides which press is searched
+  at all. Measured on 2026-09-05 across the six shipped groups, `hl=vi&gl=VN`
+  returned 48 usable stories and **every one of them was in the AI group**: the
+  Vietnamese press does not write about ESP32, RTOS or RISC-V, so five of the
+  six requests a cycle were coming back empty. `hl=en&gl=US` returns 218 across
+  all six. Both ship enabled, because dropping the Vietnamese one would take
+  the local AI coverage with it - eighteen search requests a cycle now instead
+  of twelve. Measured but **not** changed: HN Algolia stays on `search_by_date`.
+  Relevance-sorted without a window answers with stories a median 2450 days old,
+  and relevance with a seven-day window halves the usable yield (77 stories to
+  35) because seven days of HN does not hold twenty posts about ESP32
+- **sources**: `typoTolerance=false` on the HN Algolia template. Algolia's
+  default typo tolerance was matching 41,612 stories for `RTOS` where `ESP32`
+  matches 1,308, and `FreeToken` posts for `FreeRTOS`; `search_by_date` then
+  returned the most recent of that noise, so the RTOS group came back **0
+  usable of 20** every cycle and had done since it was written. Off, it is
+  strictly better on all six shipped groups - 97 usable stories a cycle instead
+  of 77, and RTOS goes from 0 to 18. The keyword file needed no change: with
+  typo tolerance off, `RTOS` beats a longer `FreeRTOS` on both engines, 30
+  stories to 14
 - **keywords**: the shipped `frequency_words.txt` now hunts AI. Two groups
   replace three: **AI** for the news and **AI Repos** for open-source projects,
   while `Embedded Linux`, `Rust on MCU` and `Security` are gone - six groups
-  instead of seven, so twelve search requests a cycle instead of fourteen.
-  Neither AI group could be written as plain terms, and that is worth knowing
+  instead of seven. Neither AI group could be written as plain terms, and that is worth knowing
   before editing them: matching is **substring, not word-boundary**, so a term
   `AI` would match said, maintain, chain, fail, email, training and Ukraine.
   The boundary therefore lives in a `/regex/`, which is run against the

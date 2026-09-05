@@ -40,6 +40,21 @@ one makes the file and the tags disagree.
   on each channel: Telegram gets no `parse_mode` at all, so a stray `<` in an
   exception message cannot cost the one message you must not lose, while Discord
   is escaped because it renders Markdown in plain content whether asked to or not
+- **ops**: the store has a backup - one dated copy per day under `backups/`,
+  taken with SQLite's own online-backup API rather than by copying the file,
+  because the crawl holds the connection open and a `-wal` mid-flush can produce
+  a filesystem copy that opens cleanly and is missing the last write. It is
+  written under a `.part` name and renamed into place, so an interrupted backup
+  is never left looking like a good one, and the newest `ops.backup_keep` are
+  kept - the filename *is* the rotation key, so nothing has to parse a name back
+  into a date. Two orderings carry the weight: the copy is taken **immediately
+  before** the prune and inside the same guard, so a store that cannot be backed
+  up is never pruned either; and `backups/` sits outside `storage.data_dir`
+  entirely, mounted only into the crawl service, because Caddy serves that
+  directory to the public web and a dated copy of the whole archive in it would
+  be one Caddyfile line from being downloadable by anyone with the URL. Restore
+  stays a documented three-command procedure rather than a flag on the one
+  process that must not be running while it happens
 - **ops**: the archive has a ceiling - the shipped `config.yaml` now sets
   `storage.retention_days: 90` instead of `0`, so `news.db` and `output/days/`
   stop growing without bound. The *default* for an absent key stays `0`: an

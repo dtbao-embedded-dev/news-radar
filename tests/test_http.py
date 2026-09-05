@@ -240,6 +240,21 @@ eq("a POST declares its content type",
 eq("a POST carries the same User-Agent as a GET",
    SEEN_HEADERS["/post/ok"].get("User-Agent"), UA)
 
+# An OpenAI-compatible endpoint authenticates with a header, and it is the only
+# reason `post_json()` takes any. What the caller adds must reach the server
+# without displacing anything the transport decided for itself - a bearer token
+# that cost the User-Agent would answer 403 on the feeds' behalf.
+eq("a 200 answer to an authenticated POST comes back as bytes",
+   f6.post_json(url("/post/auth"), {"model": "m"},
+                headers={"Authorization": "Bearer t"}),
+   b'{"ok":true}')
+eq("a caller-supplied header reaches the server",
+   SEEN_HEADERS["/post/auth"].get("Authorization"), "Bearer t")
+eq("a caller-supplied header leaves the User-Agent alone",
+   SEEN_HEADERS["/post/auth"].get("User-Agent"), UA)
+eq("a caller-supplied header leaves the content type alone",
+   SEEN_HEADERS["/post/auth"].get("Content-Type"), "application/json")
+
 # 429 is the one status where the server says how long to wait, and both
 # channels do. Sleeping our own exponential guess instead is how a bot gets
 # itself banned rather than throttled.

@@ -3,7 +3,7 @@ title: Delivery Phases
 category: architecture
 purpose: The finished product news-radar aims at, and the phase-by-phase task breakdown that gets there.
 status: active
-updated: 2026-09-04
+updated: 2026-09-05
 source: conversation
 confidence: inferred
 keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, scope, milestones, definition of done
@@ -71,7 +71,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 | P0-4 | Config templates and docker skeleton: `config.yaml.example`, `frequency_words.txt`, `docker-compose.yml`, `Caddyfile`, `.env.example` |
 | P0-5 | `scripts/setup.py` — one script, same behaviour on Windows and Linux |
 | P0-6 | `scripts/release.py` + `tests/test_release.py` |
-| P0-7 | CI: tag-triggered release workflow, `CHANGELOG.md`, `VERSION` |
+| P0-7 | CI: check workflow on push/PR + tag-triggered release workflow, `CHANGELOG.md`, `VERSION` |
 | P0-8 | Design bank: `rule/` — release procedure, setup procedure, how to consult TrendRadar |
 
 ### P1 — Fetch

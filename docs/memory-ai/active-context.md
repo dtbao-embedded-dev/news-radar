@@ -1,6 +1,6 @@
 ---
 title: Active Context
-updated: 2026-09-04
+updated: 2026-09-05
 ---
 
 # Active Context
@@ -26,6 +26,8 @@ feeds, which is the first phase that produces something a human can look at.
   `tests/test_release.py`.
 - Release CI switched from manual dispatch to a `v*` tag trigger, taking its
   notes from `CHANGELOG.md`.
+- A second workflow, `test.yml`, now runs `tests/test_*.py` on push and pull
+  request; `release.py --dry-run 0.1.0` was exercised against the real history.
 - Caddy's published host port moved to `NEWS_RADAR_HTTP_PORT` (default `8088`)
   after 8080 turned out to be taken by ntfy on the homelab.
 

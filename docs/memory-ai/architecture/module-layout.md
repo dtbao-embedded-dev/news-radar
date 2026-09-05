@@ -3,7 +3,7 @@ title: Module Layout and Stack
 category: architecture
 purpose: The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take.
 status: draft
-updated: 2026-09-04
+updated: 2026-09-05
 source: conversation
 confidence: inferred
 keywords: tree, layout, layering, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
@@ -51,7 +51,9 @@ news-radar/
 │   └── test_release.py         # plain asserts, no framework
 ├── output/                     # gitignored: index.html, news.db, per-day files
 ├── docs/memory-ai/             # this bank
-├── .github/workflows/release.yml
+├── .github/workflows/
+│   ├── test.yml                # runs tests/test_*.py on push and PR
+│   └── release.yml             # tag -> GitHub Release
 ├── CHANGELOG.md
 ├── VERSION
 └── README.md

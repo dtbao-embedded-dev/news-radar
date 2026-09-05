@@ -1,6 +1,6 @@
 ---
 title: Progress
-updated: 2026-09-04
+updated: 2026-09-05
 ---
 
 # Progress
@@ -33,6 +33,10 @@ phase map and the finished-product definition all of it serves.
   on `v*`, cuts the version's section out of `CHANGELOG.md` using `release.py`'s
   own extractor, and falls back to GitHub-generated notes when there is no
   section. Both paths were exercised locally against the real workflow code.
+- **CI runs the checks on every push and pull request.**
+  `.github/workflows/test.yml` runs every `tests/test_*.py` on Python 3.12 with
+  no install step. Verified locally by running the same loop, and by proving a
+  failing check aborts it instead of passing silently.
 - **The docker stack is defined and Caddy actually runs.** Verified by starting
   it: Caddy serves `output/` with the `Cache-Control` headers from our Caddyfile.
 
@@ -63,7 +67,7 @@ not written** - `src/news_radar/` does not exist yet.
 - **Host port 8080 is taken by ntfy on this homelab.** Caddy is published on
   `NEWS_RADAR_HTTP_PORT`, default `8088`. A probe of `localhost:8080` answers
   from ntfy, which looks like success and is not.
-- **Nine bank docs are marked `inferred`.** They describe code that does not exist
+- **Eight bank docs are marked `inferred`.** They describe code that does not exist
   yet. Flip each to `confirmed` as its phase lands and the doc is checked against
   the real implementation.
 - **No default-branch policy on GitHub**: the first pushed branch (`main`) is the

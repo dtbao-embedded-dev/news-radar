@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-04 - 13 durable doc(s)._
+_Generated 2026-09-05 - 13 durable doc(s)._
 
 ## State (transient)
 
@@ -43,6 +43,10 @@ phase map and the finished-product definition all of it serves.
   on `v*`, cuts the version's section out of `CHANGELOG.md` using `release.py`'s
   own extractor, and falls back to GitHub-generated notes when there is no
   section. Both paths were exercised locally against the real workflow code.
+- **CI runs the checks on every push and pull request.**
+  `.github/workflows/test.yml` runs every `tests/test_*.py` on Python 3.12 with
+  no install step. Verified locally by running the same loop, and by proving a
+  failing check aborts it instead of passing silently.
 - **The docker stack is defined and Caddy actually runs.** Verified by starting
   it: Caddy serves `output/` with the `Cache-Control` headers from our Caddyfile.
 
@@ -73,7 +77,7 @@ not written** - `src/news_radar/` does not exist yet.
 - **Host port 8080 is taken by ntfy on this homelab.** Caddy is published on
   `NEWS_RADAR_HTTP_PORT`, default `8088`. A probe of `localhost:8080` answers
   from ntfy, which looks like success and is not.
-- **Nine bank docs are marked `inferred`.** They describe code that does not exist
+- **Eight bank docs are marked `inferred`.** They describe code that does not exist
   yet. Flip each to `confirmed` as its phase lands and the doc is checked against
   the real implementation.
 - **No default-branch policy on GitHub**: the first pushed branch (`main`) is the
@@ -104,6 +108,8 @@ feeds, which is the first phase that produces something a human can look at.
   `tests/test_release.py`.
 - Release CI switched from manual dispatch to a `v*` tag trigger, taking its
   notes from `CHANGELOG.md`.
+- A second workflow, `test.yml`, now runs `tests/test_*.py` on push and pull
+  request; `release.py --dry-run 0.1.0` was exercised against the real history.
 - Caddy's published host port moved to `NEWS_RADAR_HTTP_PORT` (default `8088`)
   after 8080 turned out to be taken by ntfy on the homelab.
 
@@ -201,7 +207,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 | P0-4 | Config templates and docker skeleton: `config.yaml.example`, `frequency_words.txt`, `docker-compose.yml`, `Caddyfile`, `.env.example` |
 | P0-5 | `scripts/setup.py` — one script, same behaviour on Windows and Linux |
 | P0-6 | `scripts/release.py` + `tests/test_release.py` |
-| P0-7 | CI: tag-triggered release workflow, `CHANGELOG.md`, `VERSION` |
+| P0-7 | CI: check workflow on push/PR + tag-triggered release workflow, `CHANGELOG.md`, `VERSION` |
 | P0-8 | Design bank: `rule/` — release procedure, setup procedure, how to consult TrendRadar |
 
 ### P1 — Fetch
@@ -314,7 +320,9 @@ news-radar/
 │   └── test_release.py         # plain asserts, no framework
 ├── output/                     # gitignored: index.html, news.db, per-day files
 ├── docs/memory-ai/             # this bank
-├── .github/workflows/release.yml
+├── .github/workflows/
+│   ├── test.yml                # runs tests/test_*.py on push and PR
+│   └── release.yml             # tag -> GitHub Release
 ├── CHANGELOG.md
 ├── VERSION
 └── README.md
@@ -1043,7 +1051,7 @@ costs an afternoon to rediscover.
 | **Clock skew on the host** | Freshness ranking inverts | `TZ` is pinned in the container; ages are computed in UTC |
 
 ### [rule] Release Flow
-*`rule/release-flow.md` - How a version is cut - the branch model, running release.py, what CI does with the tag, and what to do when it fails midway. - status: active - source: scripts/release.py, .github/workflows/release.yml, CHANGELOG.md - keywords: release, release.py, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release*
+*`rule/release-flow.md` - How a version is cut - the branch model, running release.py, what CI does with the tag, and what to do when it fails midway. - status: active - source: scripts/release.py, .github/workflows/release.yml, .github/workflows/test.yml, CHANGELOG.md - keywords: release, release.py, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release*
 
 # Release Flow
 
@@ -1111,6 +1119,11 @@ CI takes over from the tag: `.github/workflows/release.yml` triggers on a pushed
 `release.py`'s own extractor, so there is no second parser) and publishes it as
 the GitHub Release notes. A version with no changelog section still publishes,
 falling back to GitHub-generated notes and logging a warning.
+
+The other half of CI runs before that: `.github/workflows/test.yml` runs every
+`tests/test_*.py` on Python 3.12 on each push and pull request, with no install
+step because the checks are standard library only. It is what keeps a broken
+`release.py` from reaching a tag - the release workflow imports that same file.
 
 ## Rules
 

@@ -18,6 +18,18 @@ one makes the file and the tags disagree.
 
 ### Fixes
 
+- **deploy**: the crawl service sets its own `dns:` (1.1.1.1, 8.8.8.8) instead
+  of borrowing the host's resolver, which brings `r_embedded` back from the
+  dead. It had been failing **every cycle** with `Name or service not known` -
+  one of the eight fixed feeds gone, and nothing louder than one warning line a
+  cycle to say so. The name was the whole problem: `www.reddit.com` did not
+  resolve on the homelab **host** either, while `reddit.com` resolved and then
+  301'd to the name that would not. Two dead ends were tried and are recorded so
+  nobody tries them twice - `reddit.com` inherits the redirect, and
+  `old.reddit.com` resolves and then answers 350 kB of HTML instead of the feed.
+  A public resolver answers correctly, and the crawl talks to a dozen hosts it
+  does not control, so owning its resolution is right regardless. Verified
+  2026-09-05: 63,997 bytes of Atom, 25 items parsed
 - **notify**: the daily AI summary is sent **before** the story messages, not
   after. A cycle can push dozens of story messages - eighteen of them on
   2026-09-05, when a keyword change made 43 stories newly unsent - and a

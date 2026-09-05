@@ -4,9 +4,9 @@ category: interface
 purpose: The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process.
 status: active
 updated: 2026-09-05
-source: src/news_radar/__main__.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile
+source: src/news_radar/__main__.py, src/news_radar/ops.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile
 confidence: confirmed
-keywords: python -m news_radar, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl
+keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl
 order: 4
 ---
 
@@ -47,6 +47,20 @@ Measured: `docker stop` returns in under a second mid-interval.
 `try/except`; a traceback is logged and the next cycle runs. Letting it escape
 would exit the process, and `restart: unless-stopped` would restart straight back
 into the same failure, losing the schedule.
+
+**A bad cycle is now also reported, not only logged.** `crawl()` returns
+`(ranked, problems)`: the shortlist, and the reasons this cycle should not be
+called a success. Four things put a string in that list - a storage or render
+failure (`_publish()` returned `None`), an unusable keyword file, every enabled
+source failing at once (`_dead_sources()`), and the published page not answering.
+An exception escaping `crawl()` becomes a fifth, built by `run()`. Problems are
+**collected rather than raised**, for the same reason `_publish()` is guarded: a
+cycle that half-worked should publish the half that worked *and* say so.
+
+The list then drives two things, in this order: an empty list licenses the
+heartbeat ping, and `ops.Health` turns two non-empty ones in a row into one
+alert. See [[notify-channels]] for the alert itself and [[config-and-env]] for
+`ops.*`.
 
 **Logging goes to stdout, unbuffered.** The image sets `PYTHONUNBUFFERED=1`; a
 service that logs once every 30 minutes would otherwise sit in a block buffer and
@@ -126,8 +140,38 @@ not a bug. See [[notify-channels]].
 is guarded whole *and* once per channel, so a revoked webhook leaves Telegram
 still attempted.
 
+**The cycle ends by checking the site and pinging the switch**, in that order and
+only then. Measured on 2026-09-05:
+
+```
+INFO  heartbeat: https://news.dtbao.org/ answered
+INFO  heartbeat: pinged
+```
+
+and on a cycle that failed:
+
+```
+WARN  heartbeat: cycle unhealthy, the ping is withheld
+ERROR problem: the published site is unreachable: <url> - HTTP 404 Not Found
+INFO  health: 1 consecutive failed cycle(s), alerting at 2
+```
+
+and on the second such cycle, where the alert actually goes out:
+
+```
+WARN  alerted 2 of 2 channel(s) [telegram, discord]: news-radar: 2 cycles in a
+      row have failed. | - the published site is unreachable: ...
+```
+
+A third consecutive failure prints `health: 3 consecutive failed cycle(s)` and
+sends nothing. Both `ops.*` urls ship empty, so on a fresh clone none of these
+lines appear at all and the cycle ends after the senders.
+
 ## What it does not do yet
 
-Nothing here. P5 was deployment - the Cloudflare Tunnel connector and the first
-unattended live run - and it changed neither the flags nor the exit codes above;
-P6 is ops, and is not expected to either.
+Nothing here. P6 added `ops.*` config keys and changed `crawl()`'s **return
+shape** from `ranked` to `(ranked, problems)`, but the flags, the exit codes and
+the container contract above are untouched: `--once` still exits `0` on a cycle
+that ran, whether or not that cycle had problems. A non-zero exit for a bad cycle
+would fight `restart: unless-stopped` - the process is supposed to survive a bad
+cycle and report it, not die of it.

@@ -20,9 +20,55 @@ _Generated 2026-09-05 - 18 durable doc(s)._
 ## What works
 
 **P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, P3 Store
-and render, P4 Notify and P5 Deploy are complete** (2026-09-05).
-See `architecture/delivery-phases.md` for the phase map and the finished-product
-definition all of it serves.
+and render, P4 Notify and P5 Deploy are complete, and P6 Ops is built**
+(2026-09-05). See `architecture/delivery-phases.md` for the phase map and the
+finished-product definition all of it serves.
+
+### P6 - Ops
+
+- **A failing cycle now reaches the phone, and it says so exactly twice.**
+  Measured in the container on 2026-09-05 against a deliberately 404-ing
+  `site_url`, three cycles one minute apart, one process throughout:
+  cycle 1 logged `health: 1 consecutive failed cycle(s), alerting at 2` and sent
+  nothing; cycle 2 logged
+  `alerted 2 of 2 channel(s) [telegram, discord]` carrying the reason; cycle 3
+  logged `health: 3 consecutive failed cycle(s)` and sent **nothing**. A separate
+  run flipped the site healthy on the third cycle and got one recovery message
+  and a ping. Two messages per outage of any length - that is P6-2's definition
+  of done.
+- **The ping is a claim that the cycle worked, and it is withheld the moment it
+  would be false.** `heartbeat: cycle unhealthy, the ping is withheld` fired on
+  every failed cycle above, and `heartbeat: pinged` only on the clean one. The
+  dead-man's switch is what covers the three failures nothing inside the
+  container can report - a killed container, a host that lost power, a daemon
+  that never came back. From inside, all three look identical: silence.
+- **The site check is what finally notices the tunnel.** The crawl fetches its
+  own published page before pinging, so `news.dtbao.org` answering Cloudflare
+  `1033` while every other log line says success is now a failed cycle rather
+  than a thing you find out about days later. Verified live at 19:41 on
+  2026-09-05: `heartbeat: https://news.dtbao.org/ answered`.
+- **A refused ping is a warning, never an alert.** A monitor outage means the
+  radar is fine and the thing that would have told you so is what broke;
+  alerting on that is how you train yourself to ignore the alert.
+- **The store has a backup, and it is taken before anything is deleted.**
+  Measured 2026-09-05: `backup: wrote backups/news-2026-09-05.db, 0 older
+  copy(ies) dropped, 1 kept`, 253952 bytes, and the copy opens as a real store -
+  `PRAGMA integrity_check` **ok**, `user_version` 1, 90 items, 618 matches, 14
+  runs. The `--once` a minute later correctly wrote nothing: one copy per day,
+  not 48.
+- **`backups/` is outside the served directory, not merely excluded from it.**
+  `output/` is what Caddy roots on, and a dated copy of the whole archive sitting
+  there would be one Caddyfile line from being downloadable. The bind mount is on
+  the crawl service only; `caddy` has no mount for that path at all.
+- **The archive has a ceiling.** The shipped template moves to
+  `retention_days: 90`. The *default* for an absent key stays `0`, so upgrading a
+  deployment that never mentioned the key cannot make it start deleting rows
+  nobody chose to lose.
+- **One more stdlib-only test file.** `tests/test_ops.py` needs only
+  `http.server`; twelve of the fourteen test files now run on a bare Windows
+  checkout, and only `test_feeds` and `test_search` still need `feedparser`.
+- **Still two runtime dependencies.** P6 added none - the ping and the site check
+  are the `Fetcher` that already existed, and the backup is `sqlite3`.
 
 ### P5 - Deploy
 
@@ -263,15 +309,28 @@ definition all of it serves.
 
 ## What's left
 
-Ops, and the unattended week that proves it. **Every module the design bank
-specifies is now written**: the entrypoint, the config loader, the item shape,
-the keyword parser, the whole fetch layer, the whole selection layer, the store,
-the renderer and both senders - and the whole thing is now reachable at
-`https://news.dtbao.org`.
+**Time, not code.** Every module the design bank specifies is now written: the
+entrypoint, the config loader, the item shape, the keyword parser, the whole
+fetch layer, the whole selection layer, the store, the renderer, both senders and
+the ops layer - and the whole thing is reachable at `https://news.dtbao.org`.
 
-- **P6 Ops** - retention, heartbeat, failure alerting, backup of the store.
-- **Seven days unattended** is P6's definition of done, and nothing has run
-  unattended for longer than a cycle yet.
+- **Seven days unattended is the one thing still open.** It is P6's definition of
+  done, and the clock starts when this branch merges: nothing has yet run
+  unattended for longer than a cycle. What to look at on day seven: the crawl
+  container still `Up` with no restart, `backups/` holding one file per day and
+  no more, the page's day list not older than 90 entries, and however many alerts
+  arrived being ones you would have wanted.
+- **`ops.heartbeat_url` is still empty**, so nothing outside the stack is
+  expecting a ping yet. Until a healthchecks.io or Uptime Kuma url goes into
+  `config/config.yaml`, the half of P6-1 that survives the container being killed
+  is built but not armed. The site check and the alerting work without it.
+- **P6-4, the AI summary, was deliberately not built** - see
+  [[delivery-phases]] for why. It is the only planned task that serves none of
+  the six finished-product statements.
+- **Nobody has yet watched a real outage they did not cause.** Every alert so far
+  came from a `site_url` pointed at a 404 on purpose. Whether `ALERT_AFTER = 2` is
+  the right chattiness against real feed flakiness is a question only the seven
+  days can answer.
 
 ## Known issues
 
@@ -280,10 +339,13 @@ the renderer and both senders - and the whole thing is now reachable at
   defect, but it is worth stating plainly: only `news.db*` and directory
   listings are withheld, both by the Caddyfile, and there is no Cloudflare
   Access policy in front of the hostname.
-- **A tunnel restart is the one thing that takes the site down.** The crawl keeps
-  running and `output/` stays correct, but `news.dtbao.org` answers Cloudflare
-  `1033` until a connector registers again. `restart: unless-stopped` covers a
-  crash; nothing yet alerts on it - that is P6-1.
+- **A tunnel restart still takes the site down, but it is no longer silent.**
+  The crawl keeps running and `output/` stays correct, while `news.dtbao.org`
+  answers Cloudflare `1033` until a connector registers again. P6-1 closed the
+  invisible half: `ops.site_url` fetches the published page every cycle, so the
+  connector going away is now a failed cycle, a withheld ping, and - after two
+  of them - a message. Nothing restarts the connector for you; `restart:
+  unless-stopped` covers a crash and not a deregistration.
 - **Google News (vi) has almost no recent embedded coverage.** P2's
   relevance-first problem is fixed - `when:7d` on Google News and
   `search_by_date` on HN Algolia mean the freshness term finally fires, and ten
@@ -304,14 +366,20 @@ the renderer and both senders - and the whole thing is now reachable at
   does not delete the old objects: `91ea2d9` still answers over the API with the
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
-- **One bank doc is still marked `inferred`**: `config-and-env`, never checked
-  key by key against the code. Flip it once it is verified against the real
-  implementation. `delivery-phases` and `deployment-homelab` were flipped to
-  `confirmed` by P5 and rewritten against the real stack.
-  `notify-channels` was flipped to `confirmed` by P4 and rewritten against the
-  real modules; `news-item`, `news-sources`, `news-search`, `module-layout`,
-  `crawl-cli`, `fetch-layer`, `selection-layer` and `storage-layer` are
-  `confirmed` too, and the bank carries no inline gap markers at all.
+- **Every bank doc is now `confirmed`.** `config-and-env` was the last one marked
+  `inferred`; P6 checked it key by key against `config.py` and flipped it. The
+  check earned its keep: four rows were printing the *template's* value in the
+  Default column where the code's default is different - `feeds[]` and
+  `search_templates[]` default to `[]` rather than the 8 and 3 the template
+  ships, `search_templates[].enabled` defaults to `true` rather than "varies",
+  and `search_templates[].rank_weight` to `1.0` rather than `0.8`. A default is
+  what an *absent* key falls back to, and reading the template's value as the
+  default is how someone later concludes an upgrade inherits a feed list it does
+  not. `delivery-phases` and `deployment-homelab` were flipped by P5,
+  `notify-channels` by P4; `news-item`, `news-sources`, `news-search`,
+  `module-layout`, `crawl-cli`, `fetch-layer`, `selection-layer` and
+  `storage-layer` were already `confirmed`, and the bank carries no inline gap
+  markers at all.
 - **`www.reddit.com` does not resolve from this homelab.** Both Reddit sources
   are therefore dead here, whatever User-Agent is sent. It is a network fact,
   not a code defect: failure isolation handles it, and the fixed feed stays
@@ -343,16 +411,49 @@ the renderer and both senders - and the whole thing is now reachable at
 
 ## Current focus
 
-**P5 Deploy is done** (2026-09-05). `https://news.dtbao.org` serves the report:
-`GET /` answers **200** with today's page, `GET /news.db` and `GET /days/`
-answer **404**. The request leaves the LAN and comes back through the Cloudflare
-edge, which is the phase's definition of done.
+**P6 Ops is built** (2026-09-05). A cycle that fails now says so - twice per
+outage, on Telegram and Discord - and a cycle that stops happening at all trips a
+dead-man's switch that lives outside this stack. The store gets a dated backup
+before anything is pruned, and the archive has a 90-day ceiling.
 
-The next piece of work is **P6 Ops**: heartbeat, failure alerting, backup of the
-store, and the seven unattended days that prove it.
+**What is left of P6 is time, not code.** Seven days unattended with no manual
+intervention and no disk growth is the phase's definition of done, and the clock
+starts when this branch merges.
 
 ## Recent changes
 
+- **P6 landed in twenty-one commits on `release/v0.1`** (2026-09-05):
+  `src/news_radar/ops.py` (new - `heartbeat()`, `Health`, `ALERT_AFTER`),
+  `store.py` (`backup()`), `notify/telegram.py` and `notify/discord.py`
+  (`alert()`), `__main__.py` (`crawl()` returns `(ranked, problems)`,
+  `_dead_sources()`, `ALERTERS`, `_alert()`), `config.py` (the `ops` section),
+  `config/config.yaml.example`, `docker/docker-compose.yml`, `.gitignore`,
+  `Dockerfile`, and `tests/test_ops.py` (new).
+- **A ping is a claim that the cycle worked**, and that one sentence decided the
+  whole shape of P6-1. The published page is fetched *before* the ping and any
+  problem anywhere withholds it, so silence is the signal - which is the only
+  thing that can survive the container being killed.
+- **The site check is what closes the tunnel gap.** `progress.md` had carried
+  "nothing yet alerts on it" as a known issue since P5; the crawl now fetches
+  `https://news.dtbao.org/` every cycle, so a connector that deregistered is a
+  failed cycle rather than something you find out about days later.
+- **Two messages per outage, not one every thirty minutes.** `ALERT_AFTER = 2`
+  and the recovery message are the whole of `ops.Health`. An alert that repeats
+  alongside the thing it is reporting is one you learn to swipe away, and the
+  next real one goes with it.
+- **The live run found a hole the tests could not.** A *successful* alert logged
+  nothing at all - the only trace in `docker logs` was an unexplained two-second
+  gap. `_alert()` now logs `alerted N of M channel(s)` at WARNING, which is also
+  what proved both channels accepted the message.
+- **`backups/` is outside `output/`, not merely excluded from it.** Caddy roots
+  on `output/`; a dated copy of the whole archive there would be one Caddyfile
+  line from public. The bind mount is on the crawl service only.
+- **The retention default and the retention template deliberately disagree.**
+  `config.py` keeps `0` so an upgrade never starts deleting rows nobody chose to
+  lose; the shipped template says `90` because someone chose it.
+- **P6-4 (AI summary) was dropped on its own terms** - the only planned task that
+  serves none of the six finished-product statements, against an API key and a
+  third runtime dependency. Recorded in [[delivery-phases]] rather than deleted.
 - **P5 landed in four commits on `release/v0.1`** (2026-09-05):
   `docker/cloudflared.yml` (new, the ingress), `docker/docker-compose.yml` (the
   `cloudflared` service behind `profiles: ["tunnel"]`), `.gitignore`,
@@ -396,20 +497,58 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **P6-1 heartbeat** - a run that fails silently must be visible. A tunnel that
-   stops registering is the same class of problem: the page goes to `1033` while
-   everything else looks healthy.
-2. **P6-2 failure alerting** into the same Telegram and Discord channels.
-3. **Watch the messages for a few days.** Two things are worth eyeballing that
-   no test can assert: whether 5 Discord messages per cycle is pleasant or
-   noisy, and whether any real headline trips an escaping case the fixtures
-   missed.
-4. **Retention has still never run against a window with anything to drop** -
-   `retention_days` is `0` in the shipped config, so nothing prunes until
-   someone sets it.
+1. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
+   of P6-1 that survives the container being killed is built but not armed. A
+   healthchecks.io ping url or an Uptime Kuma push url in `config/config.yaml`
+   (gitignored) is the whole change - no code, no restart of anything else.
+2. **Let it run seven days.** That is P6's definition of done and the only thing
+   still open. On day seven: the crawl container still `Up` with no restart,
+   `backups/` holding one file per day and no more, the day list capped at 90,
+   and however many alerts arrived being ones you would have wanted.
+3. **Watch whether `ALERT_AFTER = 2` is the right chattiness.** Every alert so
+   far came from a `site_url` pointed at a 404 on purpose; real feed flakiness
+   has not been through it yet.
+4. **Retention will actually delete something for the first time** once the
+   store holds anything older than 90 days. A backup is written immediately
+   before each prune, so the first one has a copy standing in front of it.
+5. **Still worth eyeballing from P4**: whether 5 Discord messages per cycle is
+   pleasant or noisy, and whether any real headline trips an escaping case the
+   fixtures missed.
 
 ## Active decisions
 
+- **A ping is a claim that the cycle worked.** It is never made before the
+  published page has answered, and any problem anywhere in the cycle withholds
+  it. A heartbeat that fires regardless of outcome is worse than none: it
+  actively reports health that is not there.
+- **Silence is the signal, and it has to be read from outside.** A killed
+  container, a host that lost power and a daemon that never came back are
+  indistinguishable from inside the process. That is why P6-1 is a dead-man's
+  switch rather than an internal check.
+- **A refused ping is a warning, never an alert.** The radar is fine and the
+  thing that would have told you so is what broke. Alerting on it is how you
+  train yourself to ignore the alert.
+- **Two messages per outage, whatever its length** - one at `ALERT_AFTER = 2`
+  consecutive failures, one on the first clean cycle after. `Health` lives in
+  memory and dies with the process on purpose: a container that restarted has
+  lost the context that made the first alert true, and re-arming means a
+  crash-looping stack says so again rather than going quiet forever.
+- **No backup, no deletion.** `store.backup()` runs immediately before
+  `store.prune()` inside the same guard, so a store that cannot be copied is
+  never pruned.
+- **`ops.backup_dir` is never under `storage.data_dir`.** Caddy roots on that
+  directory; a dated copy of the whole archive in it would be one Caddyfile line
+  from public. `store.py` cannot enforce this - it does not know what is being
+  served - so it is a config rule.
+- **A default is what an *absent* key falls back to, and must be the harmless
+  value.** `storage.retention_days` defaults to `0` and the template ships `90`:
+  an upgrade that never mentioned the key must not start deleting rows nobody
+  chose to lose. The same rule flushed four wrong Default-column rows out of
+  `config-and-env` when it was verified.
+- **No `HEALTHCHECK` in the Dockerfile, deliberately.** It would only colour a
+  column in `docker ps` - nothing restarts an unhealthy container without an
+  autoheal sidecar, and that is a new moving part for a failure this stack has
+  not had.
 - **A story is marked sent only after the message carrying it was accepted.** A
   crash between the send and the write re-sends next cycle; a duplicate is the
   acceptable failure where a silently dropped story is not. `mark_reported()`
@@ -513,7 +652,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 | P3 | Store and render: persist and publish a page | `output/index.html` opens in a browser and shows today's matches; history survives a restart |
 | P4 | Notify: push the new ones | A crawl with new matches lands exactly one message in Telegram and one in Discord; a crawl with none sends nothing |
 | P5 | Deploy: run it for real on the homelab | https://news.dtbao.org serves the current report, refreshed unattended |
-| P6 | Ops: keep it alive without babysitting | Seven days unattended with no manual intervention and no disk growth |
+| P6 | Ops: keep it alive without babysitting | Seven days unattended with no manual intervention and no disk growth — **the code is built, the seven days are running** |
 
 ## Task breakdown
 
@@ -589,7 +728,7 @@ window is a `config.yaml` change, not a code one.
 crash between the two re-sends; a duplicate is the acceptable failure where a
 silently dropped story is not. Signatures are in [[notify-channels]].
 
-### P5 — Deploy *(done - this repo's current phase is P6)*
+### P5 — Deploy *(done)*
 
 | # | Task |
 |---|------|
@@ -604,14 +743,38 @@ restart with whatever else a host connector is carrying. The tunnel id lives in
 a committed `docker/cloudflared.yml`; only the credentials file is a secret.
 Details in [[deployment-homelab]], the procedure in [[setup-homelab]].
 
-### P6 — Ops
+### P6 — Ops *(built; the seven unattended days are still running)*
 
 | # | Task |
 |---|------|
-| P6-1 | Heartbeat: a run that fails silently must be visible |
-| P6-2 | Failure alerting into the same Telegram/Discord channels |
-| P6-3 | Backup and restore of the SQLite store |
-| P6-4 | Optional AI summary of the day's matches |
+| P6-1 | ~~Heartbeat: a run that fails silently must be visible~~ - `ops.heartbeat()`, a site check then a dead-man's-switch ping |
+| P6-2 | ~~Failure alerting into the same Telegram/Discord channels~~ - `ops.Health` + `alert()` on both channels |
+| P6-3 | ~~Backup and restore of the SQLite store~~ - `store.backup()`, restore documented in [[storage-layer]] |
+| P6-4 | Optional AI summary of the day's matches - **deliberately not built** |
+
+**A ping is a claim that the cycle worked**, and everything in P6-1 exists to
+keep that claim from being made falsely: the published page is fetched *before*
+the ping, and any problem anywhere in the cycle withholds it. That is what makes
+silence the signal - a killed container, a host that lost power and a daemon that
+never came back are indistinguishable from inside, so something outside has to be
+the one expecting a request. The reverse asymmetry is deliberate too: a monitor
+that refuses the ping is a warning, never an alert.
+
+**Two messages per outage, whatever its length.** `ALERT_AFTER = 2` consecutive
+failed cycles send one message naming the reasons; the first clean cycle after
+sends one saying it recovered. A broken thing repeats every thirty minutes, and
+an alert that repeats with it is one you learn to swipe away - taking the next
+real one with it.
+
+**P6-4 was dropped on its own terms.** It is the only task in the whole plan that
+serves none of the six finished-product statements, and it would cost an API key,
+a third runtime dependency and a per-run bill against a two-dependency rule the
+project has held since P0. It stays listed rather than deleted: the reason to
+skip it is worth more than the task was.
+
+**What is left is time, not code.** Seven days unattended with no manual
+intervention and no disk growth is P6's definition of done, and nothing has yet
+run unattended for longer than a cycle. `progress.md` carries the clock.
 
 ## What is deliberately not in scope
 
@@ -620,7 +783,7 @@ Details in [[deployment-homelab]], the procedure in [[setup-homelab]].
 - No mobile app; the page is responsive and that is the whole client story.
 
 ### [architecture] Module Layout and Stack
-*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: active - source: src/news_radar/, Dockerfile, requirements.txt - keywords: tree, layout, layering, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
+*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: active - source: src/news_radar/, Dockerfile, requirements.txt - keywords: tree, layout, layering, ops.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
 
 # Module Layout and Stack
 
@@ -658,12 +821,13 @@ news-radar/
 │   │   └── search.py           # keyword -> search URL -> items
 │   ├── filter.py               # DONE - global filter + match against groups
 │   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
-│   ├── store.py                # DONE - SQLite persistence, seen-set, retention
+│   ├── store.py                # DONE - SQLite persistence, seen-set, retention, backup
 │   ├── render.py               # DONE - output/index.html + days/<date>.html
+│   ├── ops.py                  # DONE - P6: heartbeat, Health, ALERT_AFTER
 │   └── notify/                 # DONE - P4
 │       ├── __init__.py         # SendResult, pick, chunk, clip
-│       ├── telegram.py         # bot API, HTML, 4000
-│       └── discord.py          # webhook, Markdown, 2000
+│       ├── telegram.py         # bot API, HTML, 4000; alert() has no parse_mode
+│       └── discord.py          # webhook, Markdown, 2000; alert() is escaped
 ├── tests/
 │   ├── test_config.py          # plain asserts, needs PyYAML
 │   ├── test_item.py            # plain asserts, stdlib only
@@ -700,7 +864,16 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
 | 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
 | 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
-| 5 — output | `render.py`, `notify/*` | layers 3 and 4; `notify/*` also layer 1 |
+| 5 — output | `render.py`, `notify/*`, `ops.py` | layers 3 and 4; `notify/*` and `ops.py` also layer 1 |
+
+`ops.py` sits in layer 5 for the same reason `notify/*` does and imports layer 1
+for the same reason too - the heartbeat's site check and its ping are GETs, and
+they want the User-Agent, the timeout, the retry and the per-host gap the
+`Fetcher` already has. It imports no config and reads no clock: both urls and the
+verdict on the cycle arrive as arguments that `__main__.py` builds, which is why
+`tests/test_ops.py` runs against a local `http.server` with nothing installed.
+See [[config-and-env]] for the keys and [[delivery-phases]] for why the ping is
+withheld rather than sent on a bad cycle.
 
 `notify/*` reaching back to layer 1 is the one deliberate widening: a POST needs
 the same User-Agent, timeout, retry and per-host gap a GET does, and honouring a
@@ -1115,8 +1288,8 @@ output/
 Everything under `output/` is gitignored. It is derived data: deleting the whole
 directory costs the archive, not the configuration.
 
-### [interface] Config Keys, Keyword File and Environment  🟡 [inferred - verify]
-*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: draft - source: config/config.yaml.example, config/frequency_words.txt - keywords: config.yaml, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
+### [interface] Config Keys, Keyword File and Environment
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt - keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
 
 # Config Keys, Keyword File and Environment
 
@@ -1129,23 +1302,31 @@ directory costs the archive, not the configuration.
 Loaded from `NEWS_RADAR_CONFIG`, default `config/config.yaml`. Any key omitted
 falls back to the default below.
 
+**The Default column is `config.py`'s `DEFAULTS`, not what the template ships**,
+and the two disagree on purpose in four places (marked inline). A default is what
+an *absent* key falls back to, so it has to be the harmless value: an upgrade
+that never mentioned `storage.retention_days` must not start deleting rows, and a
+clone with no `feeds` should fail the "nothing to hunt" gate rather than silently
+inherit somebody's feed list. The template is free to be opinionated because
+someone chose it.
+
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `app.timezone` | str | `Asia/Ho_Chi_Minh` | Timezone used when rendering timestamps; storage stays UTC |
 | `schedule.interval_minutes` | int | `30` | Sleep between crawls in the in-process loop |
 | `schedule.run_on_start` | bool | `true` | Crawl immediately on container start instead of waiting one interval |
-| `feeds[]` | list | 8 entries | Fixed feeds - see [[news-sources]] |
+| `feeds[]` | list | `[]` *(template ships 8)* | Fixed feeds - see [[news-sources]] |
 | `feeds[].id` | str | - | Stable id; used in `sources`, in the report, and as the `reported` key |
 | `feeds[].name` | str | - | Display name on the page |
 | `feeds[].url` | str | - | Feed URL |
 | `feeds[].enabled` | bool | `true` | Skip without deleting the entry |
 | `feeds[].rank_weight` | float | `1.0` | Per-source multiplier in the source term of the score |
-| `search_templates[]` | list | 3 entries | Keyword-driven searches - see [[news-sources]] |
+| `search_templates[]` | list | `[]` *(template ships 3)* | Keyword-driven searches - see [[news-sources]] |
 | `search_templates[].id` | str | - | Stable id |
 | `search_templates[].url` | str | - | Must contain `{kw}`; the only substitution performed |
 | `search_templates[].format` | str | `rss` | `rss`, `atom`, or `hn_algolia_json` |
-| `search_templates[].enabled` | bool | varies | `reddit_search` ships disabled - it duplicates the fixed Reddit feed heavily |
-| `search_templates[].rank_weight` | float | `0.8` | Search hits rank below front-page hits by default |
+| `search_templates[].enabled` | bool | `true` | `reddit_search` ships **disabled** in the template - it duplicates the fixed Reddit feed heavily |
+| `search_templates[].rank_weight` | float | `1.0` *(template ships `0.8`)* | Search hits rank below front-page hits in the shipped template |
 | `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file |
 | `report.mode` | str | `incremental` | `incremental` (only new), `current` (this run's matches), `daily` (whole day) |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
@@ -1155,7 +1336,11 @@ falls back to the default below.
 | `rank.weight_freshness` | float | `0.2` | Weight of the freshness term |
 | `rank.freshness_half_life_hours` | float | `12` | Age at which the freshness term halves |
 | `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
-| `storage.retention_days` | int | `0` | `0` = keep everything; otherwise prune rows and day files past the window |
+| `storage.retention_days` | int | `0` **(template ships `90`)** | `0` = keep everything; otherwise prune rows and day files past the window. The default and the template disagree on purpose - an absent key must never make an upgrade start deleting, while a fresh install should have a ceiling |
+| `ops.heartbeat_url` | str | `""` | Dead-man's switch pinged after every clean cycle (healthchecks.io / Uptime Kuma push). `""` = no ping |
+| `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. This is what notices the tunnel connector going away. `""` = no check |
+| `ops.backup_dir` | str | `backups` | Where the daily store backup is written. **Never under `storage.data_dir`** - that directory is served to the public web |
+| `ops.backup_keep` | int | `7` | Newest N backups kept; `0` = back nothing up |
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |
@@ -1340,7 +1525,7 @@ chain it drives.
   config template is copied verbatim, not parsed.
 
 ### [interface] Notification Channels - Telegram and Discord
-*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set*
+*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: alert, Health, ALERT_AFTER, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set*
 
 # Notification Channels - Telegram and Discord
 
@@ -1412,6 +1597,7 @@ The same row `store.day_matches()` and `store.run_matches()` return - see
 |-----------|---------|
 | `build(groups, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
 | `send(fetcher, groups, token, chat_id)` | `SendResult` |
+| `alert(fetcher, text, token, chat_id)` | `bool` - one operational message, **no `parse_mode`** |
 
 Formatting: `<b>label</b>` per group, then
 `• <a href="url">title</a> <i>sources</i>` per story.
@@ -1445,6 +1631,7 @@ Formatting: `<b>label</b>` per group, then
 |-----------|---------|
 | `build(groups, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
 | `send(fetcher, groups, webhook_url)` | `SendResult` |
+| `alert(fetcher, text, webhook_url)` | `bool` - one operational message, Markdown-escaped |
 
 Formatting: `**label**` per group, then ``• [title](url) `sources` `` per story.
 
@@ -1526,8 +1713,34 @@ Recorded rather than quietly dropped:
   channel read its own environment. Passing them in is what lets both channels be
   exercised with no environment at all.
 
+## `alert()` - the operational message, and why it is not a `send()`
+
+P6-2 pushes *failures* down the same two channels the stories use, and the
+payload has nothing in common with a story but the transport. `alert()` takes one
+string, posts it once, and answers `True`/`False` rather than a `SendResult`:
+there is no seen-set to diff, no group order to preserve, nothing to chunk (an
+alert that overran a channel limit would be a bug in `ops.Health`, not a case to
+split), and nothing to mark as reported.
+
+**The two channels escape it differently, and neither reuses its own `send()`
+rule.** Telegram is posted with **no `parse_mode` at all** - `send()` needs HTML
+because a story is a link, but an alert is a sentence, and HTML mode's only
+contribution here would be a way for a stray `<` in an exception message to cost
+the whole message. The one message you must not lose is the one saying something
+is broken. Discord *is* escaped, because it renders Markdown in plain `content`
+whether asked to or not, and an exception carrying `*` or `_` would arrive
+reformatted or half-eaten.
+
+**When it fires** is decided entirely by `ops.Health` and never here:
+`ALERT_AFTER = 2` consecutive failed cycles send one message naming the reasons,
+and the first clean cycle after sends one saying it recovered. Two messages for
+an outage of any length. `__main__._alert()` guards each channel separately, for
+a harder reason than `_notify()` has: it runs *because* something already went
+wrong, which makes it the least surprising place in the program for a second
+thing to go wrong, and nothing it does may end the schedule loop.
+
 ### [interface] Crawl CLI - python -m news_radar
-*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile - keywords: python -m news_radar, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
+*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/ops.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile - keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
 
 # Crawl CLI - `python -m news_radar`
 
@@ -1566,6 +1779,20 @@ Measured: `docker stop` returns in under a second mid-interval.
 `try/except`; a traceback is logged and the next cycle runs. Letting it escape
 would exit the process, and `restart: unless-stopped` would restart straight back
 into the same failure, losing the schedule.
+
+**A bad cycle is now also reported, not only logged.** `crawl()` returns
+`(ranked, problems)`: the shortlist, and the reasons this cycle should not be
+called a success. Four things put a string in that list - a storage or render
+failure (`_publish()` returned `None`), an unusable keyword file, every enabled
+source failing at once (`_dead_sources()`), and the published page not answering.
+An exception escaping `crawl()` becomes a fifth, built by `run()`. Problems are
+**collected rather than raised**, for the same reason `_publish()` is guarded: a
+cycle that half-worked should publish the half that worked *and* say so.
+
+The list then drives two things, in this order: an empty list licenses the
+heartbeat ping, and `ops.Health` turns two non-empty ones in a row into one
+alert. See [[notify-channels]] for the alert itself and [[config-and-env]] for
+`ops.*`.
 
 **Logging goes to stdout, unbuffered.** The image sets `PYTHONUNBUFFERED=1`; a
 service that logs once every 30 minutes would otherwise sit in a block buffer and
@@ -1645,11 +1872,41 @@ not a bug. See [[notify-channels]].
 is guarded whole *and* once per channel, so a revoked webhook leaves Telegram
 still attempted.
 
+**The cycle ends by checking the site and pinging the switch**, in that order and
+only then. Measured on 2026-09-05:
+
+```
+INFO  heartbeat: https://news.dtbao.org/ answered
+INFO  heartbeat: pinged
+```
+
+and on a cycle that failed:
+
+```
+WARN  heartbeat: cycle unhealthy, the ping is withheld
+ERROR problem: the published site is unreachable: <url> - HTTP 404 Not Found
+INFO  health: 1 consecutive failed cycle(s), alerting at 2
+```
+
+and on the second such cycle, where the alert actually goes out:
+
+```
+WARN  alerted 2 of 2 channel(s) [telegram, discord]: news-radar: 2 cycles in a
+      row have failed. | - the published site is unreachable: ...
+```
+
+A third consecutive failure prints `health: 3 consecutive failed cycle(s)` and
+sends nothing. Both `ops.*` urls ship empty, so on a fresh clone none of these
+lines appear at all and the cycle ends after the senders.
+
 ## What it does not do yet
 
-Nothing here. P5 was deployment - the Cloudflare Tunnel connector and the first
-unattended live run - and it changed neither the flags nor the exit codes above;
-P6 is ops, and is not expected to either.
+Nothing here. P6 added `ops.*` config keys and changed `crawl()`'s **return
+shape** from `ranked` to `(ranked, problems)`, but the flags, the exit codes and
+the container contract above are untouched: `--once` still exits `0` on a cycle
+that ran, whether or not that cycle had problems. A non-zero exit for a bad cycle
+would fight `restart: unless-stopped` - the process is supposed to survive a bad
+cycle and report it, not die of it.
 
 ### [interface] Fetch Layer Contracts
 *`interface/fetch-layer.md` - Every public signature of the fetch layer and the two leaf modules it stands on - what each returns, what it raises, and what it deliberately does not. - status: active - source: src/news_radar/fetch/http.py, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py, src/news_radar/item.py, src/news_radar/keywords.py - keywords: Fetcher, HttpError, post_json, Retry-After, RETRY_AFTER_MAX, parse, read_source, read_fixed_feeds, build_urls, read_search_feeds, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle*
@@ -1859,7 +2116,7 @@ The scoring formula itself, and the two timestamp rules it enforces (unknown
 scores `0`, future is clamped to age `0`), are in [[news-search]] stage 6.
 
 ### [interface] Storage and Render Layer Contracts
-*`interface/storage-layer.md` - Every public signature of the store and render modules - what each writes, what the page is built from, and the row shape that travels between them. - status: active - source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py - keywords: open_db, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot*
+*`interface/storage-layer.md` - Every public signature of the store and render modules - what each writes, what the page is built from, and the row shape that travels between them. - status: active - source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py - keywords: backup, restore, open_db, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot*
 
 # Storage and Render Layer Contracts
 
@@ -1883,7 +2140,8 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `run_matches(conn, run_id)` | `{label: [row]}` | The same row shape for one run - what a notification is built from |
 | `unreported(conn, dedup_keys, channel)` | `[dedup_key]` | The seen-set diff, in the caller's order. `[]` for an empty input |
 | `mark_reported(conn, dedup_keys, channel, when)` | `None` | Idempotent - `INSERT OR IGNORE` |
-| `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)` |
+| `backup(conn, backup_dir, now, keep)` | `(path \| None, removed)` | One `news-<UTC date>.db` per day via `conn.backup()`. A second call the same day returns `(None, 0)`. `keep <= 0` writes nothing and creates no directory |
+| `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)`. The shipped `config.yaml` sets `90`; the fallback for an **absent** key stays `0` |
 | `to_db(moment)` / `from_db(text)` | `str \| None` / `datetime \| None` | The one serialisation, both ways |
 
 `StoreError` is raised only when the file's `user_version` is **higher** than
@@ -1987,7 +2245,7 @@ fallback is exact there - a zone that *does* observe DST would need `tzdata`.
 ## What `__main__._publish()` wires
 
 `open_db` → `start_run` → `save` → `local_tz` + `day_bounds` → `day_matches` →
-`render.write` → `prune` → `finish_run`, the whole sequence inside one
+`render.write` → `backup` → `prune` → `finish_run`, the whole sequence inside one
 `try/except`, returning the **`run_id`** (or `None`) so the senders can read the
 run back - see [[notify-channels]]. A locked database, a full disk or a read-only volume costs the
 page, never the fetch: the cycle logs the traceback and still returns the
@@ -2001,6 +2259,39 @@ news" rather than "the radar is broken", which is the wrong lie to tell.
 
 See [[selection-layer]] for what produces `ranked`, and [[news-item]] for the
 dedup key everything here is filed under.
+
+## Backup and restore
+
+`backup()` runs **immediately before `prune()`**, inside the same guard, and the
+ordering is the point: if the copy cannot be written, the deletion below it never
+runs either. No backup, no deletion.
+
+Taken with SQLite's own `conn.backup()` rather than by copying the file - the
+crawl service holds the connection open and a `-wal` may be mid-flush, so a
+filesystem copy can produce a database that opens cleanly and is missing the last
+write. The copy is written under `news-<date>.db.part` and renamed into place, so
+an interrupted backup is never left looking like a good one.
+
+**`ops.backup_dir` must never be under `storage.data_dir`.** Caddy serves that
+directory to the public web, and a dated copy of the whole archive sitting in it
+would be one Caddyfile line from being downloadable by anyone with the URL. The
+shipped value is `backups`, bind-mounted to the crawl service only; `caddy` has
+no mount for that path at all. `store.py` cannot enforce this - it does not know
+what is being served - so it is a config rule, stated here and in the template.
+
+**Restore is a manual procedure, deliberately.** A `--restore` flag would be more
+code than the problem needs and would live on the one process that must not be
+running while it happens:
+
+```bash
+docker compose -f docker/docker-compose.yml stop news-radar
+cp backups/news-<date>.db output/news.db     # -wal / -shm are not restored
+docker compose -f docker/docker-compose.yml start news-radar
+```
+
+The next cycle rewrites `index.html` from the restored store. Day snapshots under
+`output/days/` are **not** in the backup: they are rendered output, and every one
+of them is reproducible from the rows that are.
 
 ### [behavior] How News Is Searched, Matched and Ranked
 *`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*

@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-05
 source: src/news_radar/, Dockerfile, requirements.txt
 confidence: confirmed
-keywords: tree, layout, layering, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
+keywords: tree, layout, layering, ops.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
 order: 2
 ---
 
@@ -46,12 +46,13 @@ news-radar/
 │   │   └── search.py           # keyword -> search URL -> items
 │   ├── filter.py               # DONE - global filter + match against groups
 │   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
-│   ├── store.py                # DONE - SQLite persistence, seen-set, retention
+│   ├── store.py                # DONE - SQLite persistence, seen-set, retention, backup
 │   ├── render.py               # DONE - output/index.html + days/<date>.html
+│   ├── ops.py                  # DONE - P6: heartbeat, Health, ALERT_AFTER
 │   └── notify/                 # DONE - P4
 │       ├── __init__.py         # SendResult, pick, chunk, clip
-│       ├── telegram.py         # bot API, HTML, 4000
-│       └── discord.py          # webhook, Markdown, 2000
+│       ├── telegram.py         # bot API, HTML, 4000; alert() has no parse_mode
+│       └── discord.py          # webhook, Markdown, 2000; alert() is escaped
 ├── tests/
 │   ├── test_config.py          # plain asserts, needs PyYAML
 │   ├── test_item.py            # plain asserts, stdlib only
@@ -88,7 +89,16 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
 | 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
 | 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
-| 5 — output | `render.py`, `notify/*` | layers 3 and 4; `notify/*` also layer 1 |
+| 5 — output | `render.py`, `notify/*`, `ops.py` | layers 3 and 4; `notify/*` and `ops.py` also layer 1 |
+
+`ops.py` sits in layer 5 for the same reason `notify/*` does and imports layer 1
+for the same reason too - the heartbeat's site check and its ping are GETs, and
+they want the User-Agent, the timeout, the retry and the per-host gap the
+`Fetcher` already has. It imports no config and reads no clock: both urls and the
+verdict on the cycle arrive as arguments that `__main__.py` builds, which is why
+`tests/test_ops.py` runs against a local `http.server` with nothing installed.
+See [[config-and-env]] for the keys and [[delivery-phases]] for why the ping is
+withheld rather than sent on a bad cycle.
 
 `notify/*` reaching back to layer 1 is the one deliberate widening: a POST needs
 the same User-Agent, timeout, retry and per-host gap a GET does, and honouring a

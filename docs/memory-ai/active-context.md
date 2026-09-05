@@ -9,16 +9,49 @@ updated: 2026-09-05
 
 ## Current focus
 
-**P5 Deploy is done** (2026-09-05). `https://news.dtbao.org` serves the report:
-`GET /` answers **200** with today's page, `GET /news.db` and `GET /days/`
-answer **404**. The request leaves the LAN and comes back through the Cloudflare
-edge, which is the phase's definition of done.
+**P6 Ops is built** (2026-09-05). A cycle that fails now says so - twice per
+outage, on Telegram and Discord - and a cycle that stops happening at all trips a
+dead-man's switch that lives outside this stack. The store gets a dated backup
+before anything is pruned, and the archive has a 90-day ceiling.
 
-The next piece of work is **P6 Ops**: heartbeat, failure alerting, backup of the
-store, and the seven unattended days that prove it.
+**What is left of P6 is time, not code.** Seven days unattended with no manual
+intervention and no disk growth is the phase's definition of done, and the clock
+starts when this branch merges.
 
 ## Recent changes
 
+- **P6 landed in twenty-one commits on `release/v0.1`** (2026-09-05):
+  `src/news_radar/ops.py` (new - `heartbeat()`, `Health`, `ALERT_AFTER`),
+  `store.py` (`backup()`), `notify/telegram.py` and `notify/discord.py`
+  (`alert()`), `__main__.py` (`crawl()` returns `(ranked, problems)`,
+  `_dead_sources()`, `ALERTERS`, `_alert()`), `config.py` (the `ops` section),
+  `config/config.yaml.example`, `docker/docker-compose.yml`, `.gitignore`,
+  `Dockerfile`, and `tests/test_ops.py` (new).
+- **A ping is a claim that the cycle worked**, and that one sentence decided the
+  whole shape of P6-1. The published page is fetched *before* the ping and any
+  problem anywhere withholds it, so silence is the signal - which is the only
+  thing that can survive the container being killed.
+- **The site check is what closes the tunnel gap.** `progress.md` had carried
+  "nothing yet alerts on it" as a known issue since P5; the crawl now fetches
+  `https://news.dtbao.org/` every cycle, so a connector that deregistered is a
+  failed cycle rather than something you find out about days later.
+- **Two messages per outage, not one every thirty minutes.** `ALERT_AFTER = 2`
+  and the recovery message are the whole of `ops.Health`. An alert that repeats
+  alongside the thing it is reporting is one you learn to swipe away, and the
+  next real one goes with it.
+- **The live run found a hole the tests could not.** A *successful* alert logged
+  nothing at all - the only trace in `docker logs` was an unexplained two-second
+  gap. `_alert()` now logs `alerted N of M channel(s)` at WARNING, which is also
+  what proved both channels accepted the message.
+- **`backups/` is outside `output/`, not merely excluded from it.** Caddy roots
+  on `output/`; a dated copy of the whole archive there would be one Caddyfile
+  line from public. The bind mount is on the crawl service only.
+- **The retention default and the retention template deliberately disagree.**
+  `config.py` keeps `0` so an upgrade never starts deleting rows nobody chose to
+  lose; the shipped template says `90` because someone chose it.
+- **P6-4 (AI summary) was dropped on its own terms** - the only planned task that
+  serves none of the six finished-product statements, against an API key and a
+  third runtime dependency. Recorded in [[delivery-phases]] rather than deleted.
 - **P5 landed in four commits on `release/v0.1`** (2026-09-05):
   `docker/cloudflared.yml` (new, the ingress), `docker/docker-compose.yml` (the
   `cloudflared` service behind `profiles: ["tunnel"]`), `.gitignore`,
@@ -62,20 +95,58 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **P6-1 heartbeat** - a run that fails silently must be visible. A tunnel that
-   stops registering is the same class of problem: the page goes to `1033` while
-   everything else looks healthy.
-2. **P6-2 failure alerting** into the same Telegram and Discord channels.
-3. **Watch the messages for a few days.** Two things are worth eyeballing that
-   no test can assert: whether 5 Discord messages per cycle is pleasant or
-   noisy, and whether any real headline trips an escaping case the fixtures
-   missed.
-4. **Retention has still never run against a window with anything to drop** -
-   `retention_days` is `0` in the shipped config, so nothing prunes until
-   someone sets it.
+1. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
+   of P6-1 that survives the container being killed is built but not armed. A
+   healthchecks.io ping url or an Uptime Kuma push url in `config/config.yaml`
+   (gitignored) is the whole change - no code, no restart of anything else.
+2. **Let it run seven days.** That is P6's definition of done and the only thing
+   still open. On day seven: the crawl container still `Up` with no restart,
+   `backups/` holding one file per day and no more, the day list capped at 90,
+   and however many alerts arrived being ones you would have wanted.
+3. **Watch whether `ALERT_AFTER = 2` is the right chattiness.** Every alert so
+   far came from a `site_url` pointed at a 404 on purpose; real feed flakiness
+   has not been through it yet.
+4. **Retention will actually delete something for the first time** once the
+   store holds anything older than 90 days. A backup is written immediately
+   before each prune, so the first one has a copy standing in front of it.
+5. **Still worth eyeballing from P4**: whether 5 Discord messages per cycle is
+   pleasant or noisy, and whether any real headline trips an escaping case the
+   fixtures missed.
 
 ## Active decisions
 
+- **A ping is a claim that the cycle worked.** It is never made before the
+  published page has answered, and any problem anywhere in the cycle withholds
+  it. A heartbeat that fires regardless of outcome is worse than none: it
+  actively reports health that is not there.
+- **Silence is the signal, and it has to be read from outside.** A killed
+  container, a host that lost power and a daemon that never came back are
+  indistinguishable from inside the process. That is why P6-1 is a dead-man's
+  switch rather than an internal check.
+- **A refused ping is a warning, never an alert.** The radar is fine and the
+  thing that would have told you so is what broke. Alerting on it is how you
+  train yourself to ignore the alert.
+- **Two messages per outage, whatever its length** - one at `ALERT_AFTER = 2`
+  consecutive failures, one on the first clean cycle after. `Health` lives in
+  memory and dies with the process on purpose: a container that restarted has
+  lost the context that made the first alert true, and re-arming means a
+  crash-looping stack says so again rather than going quiet forever.
+- **No backup, no deletion.** `store.backup()` runs immediately before
+  `store.prune()` inside the same guard, so a store that cannot be copied is
+  never pruned.
+- **`ops.backup_dir` is never under `storage.data_dir`.** Caddy roots on that
+  directory; a dated copy of the whole archive in it would be one Caddyfile line
+  from public. `store.py` cannot enforce this - it does not know what is being
+  served - so it is a config rule.
+- **A default is what an *absent* key falls back to, and must be the harmless
+  value.** `storage.retention_days` defaults to `0` and the template ships `90`:
+  an upgrade that never mentioned the key must not start deleting rows nobody
+  chose to lose. The same rule flushed four wrong Default-column rows out of
+  `config-and-env` when it was verified.
+- **No `HEALTHCHECK` in the Dockerfile, deliberately.** It would only colour a
+  column in `docker ps` - nothing restarts an unhealthy container without an
+  autoheal sidecar, and that is a new moving part for a failure this stack has
+  not had.
 - **A story is marked sent only after the message carrying it was accepted.** A
   crash between the send and the write re-sends next cycle; a duplicate is the
   acceptable failure where a silently dropped story is not. `mark_reported()`

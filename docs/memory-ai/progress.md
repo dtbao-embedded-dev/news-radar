@@ -10,9 +10,55 @@ updated: 2026-09-05
 ## What works
 
 **P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, P3 Store
-and render, P4 Notify and P5 Deploy are complete** (2026-09-05).
-See `architecture/delivery-phases.md` for the phase map and the finished-product
-definition all of it serves.
+and render, P4 Notify and P5 Deploy are complete, and P6 Ops is built**
+(2026-09-05). See `architecture/delivery-phases.md` for the phase map and the
+finished-product definition all of it serves.
+
+### P6 - Ops
+
+- **A failing cycle now reaches the phone, and it says so exactly twice.**
+  Measured in the container on 2026-09-05 against a deliberately 404-ing
+  `site_url`, three cycles one minute apart, one process throughout:
+  cycle 1 logged `health: 1 consecutive failed cycle(s), alerting at 2` and sent
+  nothing; cycle 2 logged
+  `alerted 2 of 2 channel(s) [telegram, discord]` carrying the reason; cycle 3
+  logged `health: 3 consecutive failed cycle(s)` and sent **nothing**. A separate
+  run flipped the site healthy on the third cycle and got one recovery message
+  and a ping. Two messages per outage of any length - that is P6-2's definition
+  of done.
+- **The ping is a claim that the cycle worked, and it is withheld the moment it
+  would be false.** `heartbeat: cycle unhealthy, the ping is withheld` fired on
+  every failed cycle above, and `heartbeat: pinged` only on the clean one. The
+  dead-man's switch is what covers the three failures nothing inside the
+  container can report - a killed container, a host that lost power, a daemon
+  that never came back. From inside, all three look identical: silence.
+- **The site check is what finally notices the tunnel.** The crawl fetches its
+  own published page before pinging, so `news.dtbao.org` answering Cloudflare
+  `1033` while every other log line says success is now a failed cycle rather
+  than a thing you find out about days later. Verified live at 19:41 on
+  2026-09-05: `heartbeat: https://news.dtbao.org/ answered`.
+- **A refused ping is a warning, never an alert.** A monitor outage means the
+  radar is fine and the thing that would have told you so is what broke;
+  alerting on that is how you train yourself to ignore the alert.
+- **The store has a backup, and it is taken before anything is deleted.**
+  Measured 2026-09-05: `backup: wrote backups/news-2026-09-05.db, 0 older
+  copy(ies) dropped, 1 kept`, 253952 bytes, and the copy opens as a real store -
+  `PRAGMA integrity_check` **ok**, `user_version` 1, 90 items, 618 matches, 14
+  runs. The `--once` a minute later correctly wrote nothing: one copy per day,
+  not 48.
+- **`backups/` is outside the served directory, not merely excluded from it.**
+  `output/` is what Caddy roots on, and a dated copy of the whole archive sitting
+  there would be one Caddyfile line from being downloadable. The bind mount is on
+  the crawl service only; `caddy` has no mount for that path at all.
+- **The archive has a ceiling.** The shipped template moves to
+  `retention_days: 90`. The *default* for an absent key stays `0`, so upgrading a
+  deployment that never mentioned the key cannot make it start deleting rows
+  nobody chose to lose.
+- **One more stdlib-only test file.** `tests/test_ops.py` needs only
+  `http.server`; twelve of the fourteen test files now run on a bare Windows
+  checkout, and only `test_feeds` and `test_search` still need `feedparser`.
+- **Still two runtime dependencies.** P6 added none - the ping and the site check
+  are the `Fetcher` that already existed, and the backup is `sqlite3`.
 
 ### P5 - Deploy
 
@@ -253,15 +299,28 @@ definition all of it serves.
 
 ## What's left
 
-Ops, and the unattended week that proves it. **Every module the design bank
-specifies is now written**: the entrypoint, the config loader, the item shape,
-the keyword parser, the whole fetch layer, the whole selection layer, the store,
-the renderer and both senders - and the whole thing is now reachable at
-`https://news.dtbao.org`.
+**Time, not code.** Every module the design bank specifies is now written: the
+entrypoint, the config loader, the item shape, the keyword parser, the whole
+fetch layer, the whole selection layer, the store, the renderer, both senders and
+the ops layer - and the whole thing is reachable at `https://news.dtbao.org`.
 
-- **P6 Ops** - retention, heartbeat, failure alerting, backup of the store.
-- **Seven days unattended** is P6's definition of done, and nothing has run
-  unattended for longer than a cycle yet.
+- **Seven days unattended is the one thing still open.** It is P6's definition of
+  done, and the clock starts when this branch merges: nothing has yet run
+  unattended for longer than a cycle. What to look at on day seven: the crawl
+  container still `Up` with no restart, `backups/` holding one file per day and
+  no more, the page's day list not older than 90 entries, and however many alerts
+  arrived being ones you would have wanted.
+- **`ops.heartbeat_url` is still empty**, so nothing outside the stack is
+  expecting a ping yet. Until a healthchecks.io or Uptime Kuma url goes into
+  `config/config.yaml`, the half of P6-1 that survives the container being killed
+  is built but not armed. The site check and the alerting work without it.
+- **P6-4, the AI summary, was deliberately not built** - see
+  [[delivery-phases]] for why. It is the only planned task that serves none of
+  the six finished-product statements.
+- **Nobody has yet watched a real outage they did not cause.** Every alert so far
+  came from a `site_url` pointed at a 404 on purpose. Whether `ALERT_AFTER = 2` is
+  the right chattiness against real feed flakiness is a question only the seven
+  days can answer.
 
 ## Known issues
 
@@ -270,10 +329,13 @@ the renderer and both senders - and the whole thing is now reachable at
   defect, but it is worth stating plainly: only `news.db*` and directory
   listings are withheld, both by the Caddyfile, and there is no Cloudflare
   Access policy in front of the hostname.
-- **A tunnel restart is the one thing that takes the site down.** The crawl keeps
-  running and `output/` stays correct, but `news.dtbao.org` answers Cloudflare
-  `1033` until a connector registers again. `restart: unless-stopped` covers a
-  crash; nothing yet alerts on it - that is P6-1.
+- **A tunnel restart still takes the site down, but it is no longer silent.**
+  The crawl keeps running and `output/` stays correct, while `news.dtbao.org`
+  answers Cloudflare `1033` until a connector registers again. P6-1 closed the
+  invisible half: `ops.site_url` fetches the published page every cycle, so the
+  connector going away is now a failed cycle, a withheld ping, and - after two
+  of them - a message. Nothing restarts the connector for you; `restart:
+  unless-stopped` covers a crash and not a deregistration.
 - **Google News (vi) has almost no recent embedded coverage.** P2's
   relevance-first problem is fixed - `when:7d` on Google News and
   `search_by_date` on HN Algolia mean the freshness term finally fires, and ten
@@ -294,14 +356,20 @@ the renderer and both senders - and the whole thing is now reachable at
   does not delete the old objects: `91ea2d9` still answers over the API with the
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
-- **One bank doc is still marked `inferred`**: `config-and-env`, never checked
-  key by key against the code. Flip it once it is verified against the real
-  implementation. `delivery-phases` and `deployment-homelab` were flipped to
-  `confirmed` by P5 and rewritten against the real stack.
-  `notify-channels` was flipped to `confirmed` by P4 and rewritten against the
-  real modules; `news-item`, `news-sources`, `news-search`, `module-layout`,
-  `crawl-cli`, `fetch-layer`, `selection-layer` and `storage-layer` are
-  `confirmed` too, and the bank carries no inline gap markers at all.
+- **Every bank doc is now `confirmed`.** `config-and-env` was the last one marked
+  `inferred`; P6 checked it key by key against `config.py` and flipped it. The
+  check earned its keep: four rows were printing the *template's* value in the
+  Default column where the code's default is different - `feeds[]` and
+  `search_templates[]` default to `[]` rather than the 8 and 3 the template
+  ships, `search_templates[].enabled` defaults to `true` rather than "varies",
+  and `search_templates[].rank_weight` to `1.0` rather than `0.8`. A default is
+  what an *absent* key falls back to, and reading the template's value as the
+  default is how someone later concludes an upgrade inherits a feed list it does
+  not. `delivery-phases` and `deployment-homelab` were flipped by P5,
+  `notify-channels` by P4; `news-item`, `news-sources`, `news-search`,
+  `module-layout`, `crawl-cli`, `fetch-layer`, `selection-layer` and
+  `storage-layer` were already `confirmed`, and the bank carries no inline gap
+  markers at all.
 - **`www.reddit.com` does not resolve from this homelab.** Both Reddit sources
   are therefore dead here, whatever User-Agent is sent. It is a network fact,
   not a code defect: failure isolation handles it, and the fixed feed stays

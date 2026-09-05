@@ -2,10 +2,10 @@
 title: Config Keys, Keyword File and Environment
 category: interface
 purpose: Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads.
-status: draft
+status: active
 updated: 2026-09-05
-source: config/config.yaml.example, config/frequency_words.txt
-confidence: inferred
+source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt
+confidence: confirmed
 keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
 order: 1
 ---
@@ -21,23 +21,31 @@ order: 1
 Loaded from `NEWS_RADAR_CONFIG`, default `config/config.yaml`. Any key omitted
 falls back to the default below.
 
+**The Default column is `config.py`'s `DEFAULTS`, not what the template ships**,
+and the two disagree on purpose in four places (marked inline). A default is what
+an *absent* key falls back to, so it has to be the harmless value: an upgrade
+that never mentioned `storage.retention_days` must not start deleting rows, and a
+clone with no `feeds` should fail the "nothing to hunt" gate rather than silently
+inherit somebody's feed list. The template is free to be opinionated because
+someone chose it.
+
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `app.timezone` | str | `Asia/Ho_Chi_Minh` | Timezone used when rendering timestamps; storage stays UTC |
 | `schedule.interval_minutes` | int | `30` | Sleep between crawls in the in-process loop |
 | `schedule.run_on_start` | bool | `true` | Crawl immediately on container start instead of waiting one interval |
-| `feeds[]` | list | 8 entries | Fixed feeds - see [[news-sources]] |
+| `feeds[]` | list | `[]` *(template ships 8)* | Fixed feeds - see [[news-sources]] |
 | `feeds[].id` | str | - | Stable id; used in `sources`, in the report, and as the `reported` key |
 | `feeds[].name` | str | - | Display name on the page |
 | `feeds[].url` | str | - | Feed URL |
 | `feeds[].enabled` | bool | `true` | Skip without deleting the entry |
 | `feeds[].rank_weight` | float | `1.0` | Per-source multiplier in the source term of the score |
-| `search_templates[]` | list | 3 entries | Keyword-driven searches - see [[news-sources]] |
+| `search_templates[]` | list | `[]` *(template ships 3)* | Keyword-driven searches - see [[news-sources]] |
 | `search_templates[].id` | str | - | Stable id |
 | `search_templates[].url` | str | - | Must contain `{kw}`; the only substitution performed |
 | `search_templates[].format` | str | `rss` | `rss`, `atom`, or `hn_algolia_json` |
-| `search_templates[].enabled` | bool | varies | `reddit_search` ships disabled - it duplicates the fixed Reddit feed heavily |
-| `search_templates[].rank_weight` | float | `0.8` | Search hits rank below front-page hits by default |
+| `search_templates[].enabled` | bool | `true` | `reddit_search` ships **disabled** in the template - it duplicates the fixed Reddit feed heavily |
+| `search_templates[].rank_weight` | float | `1.0` *(template ships `0.8`)* | Search hits rank below front-page hits in the shipped template |
 | `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file |
 | `report.mode` | str | `incremental` | `incremental` (only new), `current` (this run's matches), `daily` (whole day) |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |

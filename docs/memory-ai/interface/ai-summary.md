@@ -50,7 +50,7 @@ not the vendor: OpenRouter, DeepSeek, Groq and a local Ollama all answer
 | Field | Value |
 |-------|-------|
 | Method | `POST` to `ai.api_url` |
-| Header | `Authorization: Bearer $OPENAI_API_KEY` |
+| Header | `Authorization: Bearer $OPENAI_API_KEY`, **omitted entirely when the key is unset or blank** |
 | Body | `{"model": ai.model, "messages": [{"role": "user", "content": <prompt>}], "temperature": 0.3}` |
 | Read back | `choices[0].message.content`, stripped |
 | Timeout | `ai.timeout_s` (default 60) - a dedicated `Fetcher`, because `advanced.request_timeout_s` is the feeds' 15 s |
@@ -58,6 +58,19 @@ not the vendor: OpenRouter, DeepSeek, Groq and a local Ollama all answer
 `temperature` is low but not zero: a summary read every day should not be the
 same four sentences with the nouns swapped, and nothing here needs
 reproducibility.
+
+## A key is optional
+
+An SGLang, vLLM or Ollama on the LAN authenticates nobody, so an empty
+`OPENAI_API_KEY` sends **no `Authorization` header at all** rather than
+`Bearer ` - which is at best ignored and at worst a 401 from whatever sits in
+front of the endpoint. `config.py` matches: `ai.enabled: true` with no key
+starts fine, and only `ai.api_url` is required. That parts company with the
+notification channels on purpose - a channel genuinely cannot work without its
+secret, while refusing to start here would be the config file telling the
+operator their own server does not exist. The visibility the fatal check was
+protecting survives anyway: a hosted endpoint with no key answers 401, logged at
+WARNING every cycle.
 
 ## The prompt is per topic, and a quiet topic is not in it
 
@@ -88,7 +101,7 @@ message that does not go out:
 
 | Cause | Handling |
 |-------|----------|
-| Empty `api_key` or empty `api_url` | Returns before any request |
+| Empty `api_url` | Returns before any request |
 | No story in any group | Returns before any request; logs at INFO |
 | `HttpError` - refused, timed out, 4xx, 5xx | WARNING, `None` |
 | A 200 that is not JSON (a proxy's HTML error page) | WARNING, `None` |

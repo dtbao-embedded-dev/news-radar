@@ -128,12 +128,19 @@ outside it, from the real environment.
 | `TELEGRAM_BOT_TOKEN` | when Telegram is enabled | - | `notify/telegram.py` |
 | `TELEGRAM_CHAT_ID` | when Telegram is enabled | - | `notify/telegram.py` |
 | `DISCORD_WEBHOOK_URL` | when Discord is enabled | - | `notify/discord.py` |
-| `OPENAI_API_KEY` | when `ai.enabled` is true | - | `__main__.py`, handed to `summarize.summarize()`. Asked for even by a local Ollama, which ignores the value |
+| `OPENAI_API_KEY` | only if the endpoint wants one | - | `__main__.py`, handed to `summarize.summarize()`. Unset (or blank) sends **no `Authorization` header at all**, which is what a LAN SGLang/vLLM/Ollama expects |
 | `NEWS_RADAR_CONFIG` | no | `config/config.yaml` | `config.py` |
 | `TZ` | no | `Asia/Ho_Chi_Minh` | container clock; `app.timezone` still wins for rendering |
 
 Startup validation: a channel that is `enabled: true` with its variable missing is
-a **fatal config error**, not a warning - and `ai.enabled: true` with no
-`OPENAI_API_KEY` is the same rule applied to a third thing. Silently not sending is the failure mode
+a **fatal config error**, not a warning.
+
+**`ai` is the deliberate exception.** `ai.enabled: true` with no `OPENAI_API_KEY`
+starts fine, because a channel genuinely cannot work without its secret while an
+endpoint on the LAN authenticates nobody - refusing to start would be the config
+file telling the operator their own server does not exist. What the fatal check
+was really protecting is visibility, and that is covered: a hosted endpoint with
+no key answers 401, and `summarize()` logs it at WARNING every cycle. Only
+`ai.api_url` is required when the summary is on. Silently not sending is the failure mode
 this project most wants to avoid. `scripts/setup.py` checks the same rule before
 the container is ever started - see [[cli-scripts]].

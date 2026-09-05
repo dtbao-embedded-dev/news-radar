@@ -18,6 +18,17 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **ops**: the archive has a ceiling - the shipped `config.yaml` now sets
+  `storage.retention_days: 90` instead of `0`, so `news.db` and `output/days/`
+  stop growing without bound. The *default* for an absent key stays `0`: an
+  existing deployment that never mentioned the key must not start deleting rows
+  because it was upgraded. A new `ops` section carries the four keys the rest of
+  this entry needs - `heartbeat_url`, `site_url`, `backup_dir` and
+  `backup_keep` - and all four ship inert or safe, so a config written before
+  this version runs unchanged. A mistyped heartbeat url is refused at startup
+  rather than at the moment it was supposed to save you: a url that silently
+  never reaches its monitor is one more place for exactly the failure the
+  heartbeat exists to catch
 - **deploy**: the tunnel - `https://news.dtbao.org` now serves the report. The
   Cloudflare Tunnel connector runs as a `cloudflared` service inside the compose
   stack rather than on the host, which is what lets the origin be `caddy:8080`

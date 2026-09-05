@@ -90,8 +90,10 @@ python tests/test_release.py
 Plain asserts, no test framework, no fixtures. CI runs every `tests/test_*.py`
 on each push and pull request.
 
-Commit subjects follow Conventional Commits — they *are* the changelog, so a
-subject that does not parse shows up under "Other".
+Commit subjects follow Conventional Commits. The changelog is separate and
+hand-written: when a change alters what the software does or how it is built,
+add a line to the `Unreleased` section of `CHANGELOG.md` in the same commit.
+Documentation, chores, CI and tests do not get an entry.
 
 ## Releasing
 
@@ -100,10 +102,11 @@ python scripts/release.py 0.2.0 --dry-run   # see the whole plan, change nothing
 python scripts/release.py 0.2.0             # cut it
 ```
 
-Writes the changelog from the commit subjects since the last tag, commits
+Renames the `Unreleased` section of `CHANGELOG.md` to the version, commits
 `chore(release): v0.2.0` on `release/*`, merges into `developing` then `main`,
 tags, returns to the release branch, and pushes. CI turns the tag into a GitHub
-Release using that changelog section.
+Release using that changelog section. A release with nothing recorded under
+`Unreleased` is refused.
 
 Branch model: `main` (released) ← `developing` (integration) ← `release/<minor>`
 (day-to-day work). `--dry-run` prints the exact git chain before anything runs;

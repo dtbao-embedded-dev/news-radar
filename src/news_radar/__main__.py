@@ -14,6 +14,7 @@ import argparse
 import collections
 import datetime as dt
 import logging
+import os
 import signal
 import sys
 import threading
@@ -27,7 +28,8 @@ from .fetch.search import read_search_feeds
 from .filter import select
 from .keywords import KeywordError, parse as parse_keywords
 from .rank import collapse, rank_groups
-from . import render, store
+from . import notify, render, store
+from .notify import discord, telegram
 
 log = logging.getLogger("news_radar")
 
@@ -103,7 +105,10 @@ def _report_groups(ranked):
 
 
 def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
-    """Persist the run and rewrite the page. Returns True when both happened.
+    """Persist the run and rewrite the page. Returns the run id, or None.
+
+    The id is what the senders read the run back by, so a cycle whose storage
+    failed notifies nothing rather than notifying a run that was never written.
 
     Guarded as a whole, for the same reason the keyword file is: a full disk, a
     locked database or a read-only volume must not throw away the 597 items that
@@ -148,10 +153,99 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
         log.info("stored %d match row(s) as run %s; the page shows %d "
                  "story(ies) across %d group(s) today", rows, run_id,
                  sum(len(v) for v in day.values()), len(day))
-        return True
+        return run_id
     except Exception:
         log.exception("storing or rendering failed, the fetched items are kept")
-        return False
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _send_telegram(fetcher, groups, env):
+    return telegram.send(fetcher, groups, env.get("TELEGRAM_BOT_TOKEN"),
+                         env.get("TELEGRAM_CHAT_ID"))
+
+
+def _send_discord(fetcher, groups, env):
+    return discord.send(fetcher, groups, env.get("DISCORD_WEBHOOK_URL"))
+
+
+# Channel name (as `notification.channels` spells it) -> how to send on it. The
+# secrets are read here and handed down, so a channel module needs no
+# environment to be exercised.
+SENDERS = {telegram.NAME: _send_telegram, discord.NAME: _send_discord}
+
+
+def _rows_to_send(cfg, conn, run_id, fetched_at):
+    """The store rows `report.mode` selects, before the seen-set diff.
+
+    `daily` reads the whole local day, the other two read this run. Both come
+    out of the store rather than out of `ranked`, so the story that goes out is
+    the same row, with the same score, as the one on the page.
+    """
+    if cfg.get("report.mode") == "daily":
+        tz = render.local_tz(cfg.get("app.timezone") or "UTC")
+        return store.day_matches(conn, *render.day_bounds(fetched_at, tz))
+    return store.run_matches(conn, run_id)
+
+
+def _send_channel(conn, cfg, fetcher, name, rows, labels, now):
+    """One channel: diff, send, and mark only what was accepted."""
+    keys = None
+    if cfg.get("report.mode") != "current":
+        # `current` re-sends the run's whole shortlist by design. The other two
+        # modes ask the seen-set, which is per channel: a story pushed to
+        # Telegram is still unsent on Discord.
+        every = [row["dedup_key"] for label in labels
+                 for row in rows.get(label) or []]
+        keys = set(store.unreported(conn, every, name))
+
+    groups = notify.pick(rows, labels, keys)
+    if not groups:
+        log.info("  %-8s nothing new to send", name)
+        return
+
+    result = SENDERS[name](fetcher, groups, os.environ)
+    if result.keys:
+        # Only now, and only what was accepted. A crash between the send and
+        # this line re-sends next cycle - a duplicate is the acceptable
+        # failure, a silently dropped story is not.
+        store.mark_reported(conn, result.keys, name, now)
+
+    log.info("  %-8s %d message(s), %d story(ies)%s", name, result.sent,
+             result.stories, ", {} refused".format(result.failed)
+             if result.failed else "")
+
+
+def _notify(cfg, fetcher, run_id, labels, fetched_at):
+    """Push the run's new stories to every enabled channel.
+
+    Two levels of guard, and both are in the contract. The outer one keeps a
+    locked store or an unreadable run from costing the page, which is already
+    written by the time this runs. The inner one is per channel: a dead webhook
+    must leave the *other* channel still attempted, so it cannot be allowed to
+    unwind the loop.
+    """
+    channels = [c for c in cfg.enabled_channels() if c in SENDERS]
+    if not channels:
+        log.info("no notification channel is enabled, nothing is sent")
+        return
+
+    log.info("notifying %d channel(s) in %s mode", len(channels),
+             cfg.get("report.mode"))
+    conn = None
+    try:
+        conn = store.open_db(cfg.get("storage.data_dir", "output"))
+        rows = _rows_to_send(cfg, conn, run_id, fetched_at)
+        for name in channels:
+            try:
+                _send_channel(conn, cfg, fetcher, name, rows, labels, fetched_at)
+            except Exception:
+                log.exception("channel %s failed; the page and the other "
+                              "channels are unaffected", name)
+    except Exception:
+        log.exception("notification failed, the page is unaffected")
     finally:
         if conn is not None:
             conn.close()
@@ -160,8 +254,9 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
 def crawl(cfg):
     """One pass: fetch, filter, rank, store, render, notify.
 
-    P1, P2 and P3 have landed: this fetches, selects, persists and publishes,
-    and returns the ranked shortlist. Only the senders are still ahead.
+    The whole pipeline, and it returns the ranked shortlist. Nothing after the
+    fetch can cost it: storage and rendering are guarded together, the senders
+    separately, and a channel separately again.
     """
     started = time.monotonic()
     fetched_at = dt.datetime.now(dt.timezone.utc)
@@ -210,9 +305,10 @@ def crawl(cfg):
              "across %d group(s)", len(matched), len(stories),
              sum(len(s) for s in ranked.values()), len(ranked))
     _report_groups(ranked)
-    _publish(cfg, ranked, groups, fetched_at, len(items), len(matched), errors)
-    log.warning("the senders are not implemented yet (P4) - nothing is "
-                "notified this cycle")
+    run_id = _publish(cfg, ranked, groups, fetched_at, len(items),
+                      len(matched), errors)
+    if run_id:
+        _notify(cfg, fetcher, run_id, [g.label for g in groups], fetched_at)
     return ranked
 
 

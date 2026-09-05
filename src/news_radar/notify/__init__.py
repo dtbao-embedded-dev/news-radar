@@ -13,9 +13,11 @@ per-host gap a GET does, and honouring a 429's `Retry-After` is a transport
 concern, not a per-channel one. Writing a second HTTP client here would be the
 alternative.
 
-Two things this file owns, because both channels need them and they differ only
-by a number:
+Three things this file owns, because both channels need them and they differ
+only by a number:
 
+- **`pick()`** - the group order and the seen-set diff, applied to the store's
+  rows before either channel sees them.
 - **`chunk()`** - the split. A group boundary is preferred, an item boundary is
   the fallback, and a story is never cut in half.
 - **`clip()`** - the cap that keeps one absurd headline from making a whole
@@ -30,7 +32,7 @@ import logging
 
 from dataclasses import dataclass, field
 
-__all__ = ["SendResult", "chunk", "clip", "TITLE_MAX"]
+__all__ = ["SendResult", "pick", "chunk", "clip", "TITLE_MAX"]
 
 log = logging.getLogger("news_radar.notify")
 
@@ -65,6 +67,33 @@ def clip(text, limit=TITLE_MAX):
     """`text` shortened to `limit` characters, with an ellipsis when it was."""
     text = text or ""
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+def pick(rows_by_label, labels, keys=None):
+    """`{label: [row]}` -> `[(label, [row])]` in the keyword file's own order.
+
+    Two jobs, both of which decide what a channel is even shown:
+
+    - **Order.** `labels` is the group order the keyword file fixes, the same
+      one the page renders in. A mapping's own order would shuffle the sections
+      between runs for no reason a reader could follow.
+    - **The diff.** `keys` is the seen-set answer - the stories this channel has
+      not been told about. `None` means send everything (`report.mode: current`);
+      an *empty* set means everything has already been sent, which is not the
+      same thing and must send nothing at all.
+
+    A group left empty by either job is dropped. The page prints the quiet
+    keyword because someone is looking for it; a phone should not buzz to say
+    nothing happened.
+    """
+    out = []
+    for label in labels:
+        rows = rows_by_label.get(label) or []
+        if keys is not None:
+            rows = [row for row in rows if row["dedup_key"] in keys]
+        if rows:
+            out.append((label, rows))
+    return out
 
 
 def chunk(blocks, limit):

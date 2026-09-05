@@ -1,8 +1,8 @@
 """Load and validate config.yaml, and check the secrets it implies.
 
 A leaf module: it imports nothing else from the package. The object it returns
-never holds a secret - `notify/*` reads those straight from the environment - so
-a Config is safe to log in full.
+never holds a secret - `__main__._notify()` reads those straight from the
+environment and hands them to the channel - so a Config is safe to log in full.
 
 Contract: docs/memory-ai/interface/config-and-env.md
 """

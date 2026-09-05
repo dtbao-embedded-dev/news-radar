@@ -59,8 +59,8 @@ one makes the file and the tags disagree.
 - **keywords**: the shipped `frequency_words.txt` now hunts AI. Two groups
   replace three: **AI** for the news and **AI Repos** for open-source projects,
   while `Embedded Linux`, `Rust on MCU` and `Security` are gone - six groups
-  instead of seven. Neither AI group could be written as plain terms, and that is worth knowing
-  before editing them: matching is **substring, not word-boundary**, so a term
+  instead of seven. Neither AI group could be written as plain terms, and
+  that is worth knowing before editing them: matching is **substring, not word-boundary**, so a term
   `AI` would match said, maintain, chain, fail, email, training and Ukraine.
   The boundary therefore lives in a `/regex/`, which is run against the
   original title where the capitals also help; the plain terms are all long

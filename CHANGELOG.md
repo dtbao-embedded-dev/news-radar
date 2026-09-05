@@ -16,6 +16,17 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Fixes
+
+- **crawl**: the end-of-cycle line that begins `the page shows ...` was counting
+  the store, not the page. The two agree until the keyword file is edited
+  mid-day: the store still holds the morning's rows for a group that no longer
+  exists, while `render.write()` walks the current label list, so the line
+  claimed 110 stories across 9 groups for a page showing 84 across 6. Counted
+  over the rendered labels now - a line that says "the page shows" has to mean
+  the page. The orphaned rows stay in the store until retention prunes them,
+  which is correct: they are history, they are simply not today's report
+
 ### Features
 
 - **keywords**: the shipped `frequency_words.txt` now hunts AI. Two groups

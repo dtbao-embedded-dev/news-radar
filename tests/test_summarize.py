@@ -16,6 +16,7 @@ Two rules this file exists to pin:
 
 from __future__ import annotations
 
+import datetime as dt
 import http.server
 import json
 import pathlib
@@ -180,6 +181,25 @@ eq("no url means no summary", summarize.summarize(
 eq("a day with no story means no summary", summarize.summarize(
     fetcher, url("/ok"), "k", "m", {"AI": []}, LABELS, 2), None)
 eq("...and none of the three sent a request", sum(HITS.values()), 0)
+
+
+# --- the key the once-a-day send is remembered by -------------------------
+
+# Not a timestamp and not a hash of the text: the summary is rewritten every
+# cycle, and a key that moved with it would send a new message every thirty
+# minutes. The local *date* is the whole identity - one summary per day, per
+# channel, and a container that restarted at noon still knows this morning's
+# went out.
+eq("the key is the local date", summarize.daily_key(dt.date(2026, 9, 5)),
+   "summary:2026-09-05")
+eq("two cycles in the same day share one key",
+   summarize.daily_key(dt.date(2026, 9, 5)),
+   summarize.daily_key(dt.date(2026, 9, 5)))
+check("tomorrow is a different key",
+      summarize.daily_key(dt.date(2026, 9, 5))
+      != summarize.daily_key(dt.date(2026, 9, 6)))
+check("the key cannot collide with a story's dedup key",
+      summarize.daily_key(dt.date(2026, 9, 5)).startswith("summary:"))
 
 
 server.shutdown()

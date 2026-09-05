@@ -18,6 +18,13 @@ one makes the file and the tags disagree.
 
 ### Fixes
 
+- **release**: `release.py` forces UTF-8 on stdout before it prints anything.
+  `--dry-run` shows the changelog section it is about to publish, and this
+  project's changelog is this project's own prose - a `Điện tử` in a P2 entry
+  was enough to end the run with `UnicodeEncodeError` on a cp1252 Windows
+  console, *after* the preflight had reported six green checks. The command
+  `release-flow.md` tells you to run first was the one that could not run, and
+  a release tool that cannot show the release is a release cut blind
 - **deploy**: the crawl service sets its own `dns:` (1.1.1.1, 8.8.8.8) instead
   of borrowing the host's resolver, which brings `r_embedded` back from the
   dead. It had been failing **every cycle** with `Name or service not known` -

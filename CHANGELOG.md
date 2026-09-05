@@ -18,6 +18,25 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **keywords**: the shipped `frequency_words.txt` now hunts AI. Two groups
+  replace three: **AI** for the news and **AI Repos** for open-source projects,
+  while `Embedded Linux`, `Rust on MCU` and `Security` are gone - six groups
+  instead of seven, so twelve search requests a cycle instead of fourteen.
+  Neither AI group could be written as plain terms, and that is worth knowing
+  before editing them: matching is **substring, not word-boundary**, so a term
+  `AI` would match said, maintain, chain, fail, email, training and Ukraine.
+  The boundary therefore lives in a `/regex/`, which is run against the
+  original title where the capitals also help; the plain terms are all long
+  phrases (`artificial intelligence`, `large language model`, `tri tue nhan
+  tao`) that are safe as substrings. The primary terms were picked from
+  measurement rather than taste: quoted as a phrase, `artificial intelligence`
+  returned 6 relevant hits of 6 on HN Algolia and `open source AI` returned 6
+  open-source AI projects of 6, where a bare `LLM` returned 3 of 6. A
+  side-effect worth recording: the eight fixed feeds had contributed **zero**
+  matches across the store's first twenty runs, because every group was an
+  English embedded term while more than half the fixed items are Vietnamese
+  consumer tech - the AI group is broad enough that `hn`, `lobsters` and
+  `hackaday` now land on the page for the first time
 - **ai**: the day's matches now get a summary, one line per keyword group - the
   group's name and at most two sentences about what actually stood out in it,
   in Vietnamese. It sits above the stories on the page and is rewritten every

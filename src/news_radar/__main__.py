@@ -504,11 +504,18 @@ def crawl(cfg):
     run_id, summary = _publish(cfg, ranked, groups, fetched_at, len(items),
                                len(matched), errors)
     if run_id:
-        _notify(cfg, fetcher, run_id, [g.label for g in groups], fetched_at)
-        # After the stories and outside the problem list on purpose: the
-        # summary is optional, so a failed one is a page without a paragraph
-        # and never a cycle that withholds its heartbeat ping.
+        # The summary goes first, and the order is the whole point: a cycle can
+        # push dozens of story messages, and a summary sent after them is a
+        # summary nobody scrolls back up to find. Observed on 2026-09-05, when
+        # a keyword change made 43 stories newly unsent and buried the day's
+        # summary under eighteen messages of links.
+        #
+        # Outside the problem list either way: the summary is optional, so a
+        # failed one is a page without a paragraph and never a cycle that
+        # withholds its heartbeat ping. Guarded separately too, so a refused
+        # summary cannot cost the stories their turn.
         _send_summary(cfg, summary, fetched_at)
+        _notify(cfg, fetcher, run_id, [g.label for g in groups], fetched_at)
     else:
         # `_publish` already logged the traceback. Without this line the cycle
         # would go on to ping the heartbeat and claim it succeeded, which is

@@ -2515,7 +2515,7 @@ a warning and a dead site is a problem.
 renders, so the paragraph at the top describes exactly what is under it.
 `_publish()` returns `(run_id, summary)`.
 
-`__main__._send_summary()` then pushes it, and holds back two ways:
+`__main__._send_summary()` then pushes it - **before `_notify()`, not after**. A cycle can push dozens of story messages, and a summary sent behind them is one nobody scrolls back up to find: observed on 2026-09-05, when a keyword change made 43 stories newly unsent and buried the day's summary under eighteen messages of links. It holds back two ways:
 
 - **Before `ai.notify_at_hour` local**, it logs `summary: holding until HH:00
   local` and sends nothing.

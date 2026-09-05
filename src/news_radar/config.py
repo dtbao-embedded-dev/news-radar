@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -37,6 +38,15 @@ DEFAULTS = {
         "freshness_half_life_hours": 12.0,
     },
     "storage": {"data_dir": "output", "retention_days": 0},
+    # Everything that keeps the radar alive without being watched. All four ship
+    # inert or safe: an absent `ops` section changes nothing about a run, which
+    # is what lets an existing deployment upgrade into this version untouched.
+    "ops": {
+        "heartbeat_url": "",
+        "site_url": "",
+        "backup_dir": "backups",
+        "backup_keep": 7,
+    },
     "notification": {
         "enabled": True,
         "channels": {
@@ -66,6 +76,12 @@ REPORT_MODES = ("incremental", "current", "daily")
 
 class ConfigError(Exception):
     """Refuse to start rather than run on a config that cannot do its job."""
+
+
+def _is_http_url(url):
+    """The same gate `Fetcher._request()` applies, checked where it is fixable."""
+    parts = urlsplit(url)
+    return parts.scheme in ("http", "https") and bool(parts.hostname)
 
 
 def _merge(base, override):
@@ -190,6 +206,22 @@ def validate(cfg, env=None):
             problems.append(
                 "search_templates[{}].url must contain {{kw}}: {!r}".format(
                     template.get("id", "?"), url))
+
+    keep = cfg.get("ops.backup_keep")
+    if not isinstance(keep, int) or isinstance(keep, bool) or keep < 0:
+        problems.append(
+            "ops.backup_keep must be an integer >= 0, got {!r}".format(keep))
+
+    # A mistyped heartbeat url is the exact failure this section exists to
+    # prevent: it would never reach the monitor, the monitor would never
+    # complain about a ping it was not expecting, and the silent failure P6-1
+    # is for would have grown a second hiding place.
+    for name in ("heartbeat_url", "site_url"):
+        url = cfg.get("ops." + name) or ""
+        if url and not _is_http_url(url):
+            problems.append(
+                "ops.{} must be an http(s) url or empty, got {!r}".format(
+                    name, url))
 
     # The one rule the whole project cares most about.
     for channel in cfg.enabled_channels():

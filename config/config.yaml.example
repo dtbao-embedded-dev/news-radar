@@ -97,7 +97,28 @@ rank:
 
 storage:
   data_dir: output
-  retention_days: 0      # 0 = keep everything
+  # 0 = keep everything. 90 is what ships: the store and output/days/ otherwise
+  # grow forever, and an unattended radar with no ceiling is a disk that fills
+  # on a weekend. A backup is written immediately before each prune.
+  retention_days: 90
+
+# Keeping it alive without babysitting.
+ops:
+  # Dead-man's switch. GET after every clean cycle - a healthchecks.io ping url
+  # or an Uptime Kuma push url. Empty means no ping at all, which is the right
+  # default for a clone that has no monitor of its own yet.
+  #   heartbeat_url: https://hc-ping.com/<uuid>
+  heartbeat_url: ""
+
+  # Checked immediately before the ping. A non-200 withholds the ping and counts
+  # as a failed cycle - this is what notices the tunnel connector going away
+  # while the crawl itself keeps running perfectly.
+  #   site_url: https://news.dtbao.org/
+  site_url: ""
+
+  # Never under data_dir: that directory is served to the public web.
+  backup_dir: backups
+  backup_keep: 7         # one file per day, newest N kept; 0 = no backup
 
 notification:
   enabled: true

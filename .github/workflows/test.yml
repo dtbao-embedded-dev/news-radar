@@ -1,0 +1,31 @@
+name: Test
+
+# Runs the checks on every push and pull request, so a broken script is caught
+# before a tag turns it into a published release.
+#
+# "on" is quoted for the same reason as release.yml: bare `on:` parses as the
+# boolean true.
+"on":
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # No install step: the checks are standard library only, same as the
+      # scripts they cover. The loop picks up new tests/test_*.py without this
+      # workflow having to be edited again.
+      - name: Run checks
+        run: |
+          for t in tests/test_*.py; do
+            echo "--- $t"
+            python "$t"
+          done

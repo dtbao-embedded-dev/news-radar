@@ -171,16 +171,35 @@ eq("a refused connection is a missing summary",
    summarize.summarize(fetcher, "http://127.0.0.1:1/v1", "k", "m", ROWS,
                        LABELS, 2), None)
 
-# The two short-circuits. Both must cost nothing at all - no request, and so no
-# bill for asking a question with no content in it.
+# --- no key is a supported deployment, not a failure ----------------------
+
+# An SGLang, vLLM or Ollama on the LAN authenticates nobody. Sending
+# `Authorization: Bearer ` to one is at best ignored and at worst a 401 from
+# whatever sits in front of it, so the header is simply not sent.
 HITS.clear()
-eq("no key means no summary", summarize.summarize(
-    fetcher, url("/ok"), "", "m", ROWS, LABELS, 2), None)
+eq("a keyless endpoint still returns a summary",
+   summarize.summarize(fetcher, url("/noauth"), "", "m", ROWS, LABELS, 2),
+   "AI — Có hai bài đáng đọc.\nRust — Bản 1.9 ra.")
+eq("...and it was actually asked", HITS.get("/noauth"), 1)
+check("...with no Authorization header at all",
+      "Authorization" not in SEEN_HEADERS["/noauth"],
+      SEEN_HEADERS["/noauth"])
+
+check("a key of whitespace is treated as no key",
+      summarize.summarize(fetcher, url("/blank-key"), "   ", "m", ROWS,
+                          LABELS, 2) is not None)
+check("...and sends no header either",
+      "Authorization" not in SEEN_HEADERS["/blank-key"],
+      SEEN_HEADERS["/blank-key"])
+
+# The two remaining short-circuits. Both must cost nothing at all - no request,
+# and so no bill for asking a question with no content in it.
+HITS.clear()
 eq("no url means no summary", summarize.summarize(
     fetcher, "", "k", "m", ROWS, LABELS, 2), None)
 eq("a day with no story means no summary", summarize.summarize(
     fetcher, url("/ok"), "k", "m", {"AI": []}, LABELS, 2), None)
-eq("...and none of the three sent a request", sum(HITS.values()), 0)
+eq("...and neither sent a request", sum(HITS.values()), 0)
 
 
 # --- the key the once-a-day send is remembered by -------------------------

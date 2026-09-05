@@ -171,10 +171,47 @@ def _send_discord(fetcher, groups, env):
     return discord.send(fetcher, groups, env.get("DISCORD_WEBHOOK_URL"))
 
 
+def _alert_telegram(fetcher, text, env):
+    return telegram.alert(fetcher, text, env.get("TELEGRAM_BOT_TOKEN"),
+                          env.get("TELEGRAM_CHAT_ID"))
+
+
+def _alert_discord(fetcher, text, env):
+    return discord.alert(fetcher, text, env.get("DISCORD_WEBHOOK_URL"))
+
+
 # Channel name (as `notification.channels` spells it) -> how to send on it. The
 # secrets are read here and handed down, so a channel module needs no
 # environment to be exercised.
 SENDERS = {telegram.NAME: _send_telegram, discord.NAME: _send_discord}
+
+# The same channels, carrying an operational message instead of a story. A
+# separate table rather than a flag on the one above: the two payloads share a
+# transport and nothing else, and an alert must go out on a channel whose
+# story-sending has already been refused this cycle.
+ALERTERS = {telegram.NAME: _alert_telegram, discord.NAME: _alert_discord}
+
+
+def _alert(cfg, text):
+    """Push one operational message to every enabled channel.
+
+    Guarded per channel like `_notify()` is, and for a harder reason: this runs
+    *because* something already went wrong, so it is the least surprising place
+    in the program for a second thing to go wrong. Nothing it does may end the
+    schedule loop.
+    """
+    channels = [c for c in cfg.enabled_channels() if c in ALERTERS]
+    if not channels:
+        log.warning("no channel is enabled, so nobody is being told: %s", text)
+        return
+
+    fetcher = _fetcher(cfg)
+    for name in channels:
+        try:
+            ALERTERS[name](fetcher, text, os.environ)
+        except Exception:
+            log.exception("could not alert on %s; the other channels and the "
+                          "loop are unaffected", name)
 
 
 def _rows_to_send(cfg, conn, run_id, fetched_at):
@@ -368,6 +405,10 @@ def run(cfg, once=False):
         if _stop.wait(interval_s):
             return 0
 
+    # One tracker for the life of the process: what makes an outage two
+    # messages instead of one every interval until somebody notices.
+    health = ops.Health()
+
     while not _stop.is_set():
         try:
             _, problems = crawl(cfg)
@@ -381,6 +422,10 @@ def run(cfg, once=False):
 
         for problem in problems:
             log.error("problem: %s", problem)
+
+        message = health.update(problems)
+        if message:
+            _alert(cfg, message)
 
         log.info("next crawl in %d minute(s)", interval_s // 60)
         if _stop.wait(interval_s):

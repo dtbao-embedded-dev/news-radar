@@ -99,6 +99,13 @@ li.story .meta {
 }
 li.story.hot .score { color: var(--hot); font-weight: 600; }
 p.empty { color: var(--dim); font-style: italic; margin: .4rem 0 .6rem; }
+section.summary {
+  background: var(--card); border: 1px solid var(--line);
+  border-left: 3px solid var(--dim);
+  border-radius: .6rem; margin: 1rem 0; padding: .75rem 1rem;
+}
+section.summary p { margin: .35rem 0; }
+section.summary strong { color: var(--hot); }
 footer { color: var(--dim); font-size: .8rem; padding: 1rem; text-align: center; }
 """
 
@@ -214,6 +221,39 @@ def _group(label, rows, threshold, tz):
             '{body}</section>').format(label=_e(label), n=len(rows), body=body)
 
 
+def _summary(text):
+    """The AI summary as one `<p>` per topic, or nothing at all.
+
+    The model was asked for `<topic> — <sentences>`, one line per topic, so the
+    split is on the first em dash and the topic half is bolded. A line that
+    carries no separator is rendered whole rather than dropped: a model that
+    ignored the format still wrote a sentence, and a sentence the reader cannot
+    see is worse than an unbolded one.
+
+    Everything here came off somebody else's endpoint, answering every thirty
+    minutes, so it goes through `_e` exactly like a feed title does. This is the
+    same trust boundary, reached from a new direction.
+    """
+    if not (text or "").strip():
+        return ""
+
+    paragraphs = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        topic, sep, rest = line.partition("—")
+        if sep and topic.strip() and rest.strip():
+            paragraphs.append("<p><strong>{}</strong> — {}</p>".format(
+                _e(topic.strip()), _e(rest.strip())))
+        else:
+            paragraphs.append("<p>{}</p>".format(_e(line)))
+
+    if not paragraphs:
+        return ""
+    return '<section class="summary">{}</section>'.format("".join(paragraphs))
+
+
 def _day_nav(data_dir, today):
     """Links to every snapshot on disk, newest first, today's included.
 
@@ -230,7 +270,7 @@ def _day_nav(data_dir, today):
         for stem in sorted(stems, reverse=True)))
 
 
-def _page(labels, day_rows, meta, tz, threshold, today, nav):
+def _page(labels, day_rows, meta, tz, threshold, today, nav, summary=None):
     generated = meta.get("generated_at")
     generated_local = generated.astimezone(tz).strftime("%H:%M %d/%m/%Y") \
         if generated else "-"
@@ -246,7 +286,7 @@ def _page(labels, day_rows, meta, tz, threshold, today, nav):
         '<input id="q" type="search" placeholder="Filter today\'s stories"'
         ' autocomplete="off" spellcheck="false">'
         '<button id="theme" type="button">Theme</button></div>\n'
-        "{nav}</header>\n<main>\n{groups}\n</main>\n"
+        "{nav}</header>\n<main>\n{summary}{groups}\n</main>\n"
         "<footer>{fetched} fetched &middot; {matched} matched &middot; "
         "{kept} kept today &middot; {sources} source(s), {errors} failed "
         "&middot; run {run} at {generated}</footer>\n"
@@ -254,6 +294,7 @@ def _page(labels, day_rows, meta, tz, threshold, today, nav):
             today=_e(today),
             style=STYLE,
             nav=nav,
+            summary=_summary(summary),
             groups="\n".join(
                 _group(label, day_rows.get(label) or [], threshold, tz)
                 for label in labels),
@@ -267,7 +308,7 @@ def _page(labels, day_rows, meta, tz, threshold, today, nav):
             script=SCRIPT)
 
 
-def write(data_dir, labels, day_rows, meta, tz, threshold=5):
+def write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None):
     """Write `index.html` and today's snapshot. Returns the paths written.
 
     `labels` fixes the group order and is what keeps an empty group on the page:
@@ -277,6 +318,10 @@ def write(data_dir, labels, day_rows, meta, tz, threshold=5):
     The snapshot is rewritten every run rather than once at midnight. A past day
     is still never touched, because the filename moves with the date - and there
     is no rollover branch to get wrong.
+
+    `summary` is the AI summary, one topic per line, or `None`. Absent is the
+    shipped case - `ai.enabled` defaults to false - and it renders nothing at
+    all rather than an empty card, so a clone's page is the page it always was.
     """
     data_dir = Path(data_dir)
     (data_dir / DAYS_DIR).mkdir(parents=True, exist_ok=True)
@@ -285,7 +330,7 @@ def write(data_dir, labels, day_rows, meta, tz, threshold=5):
     today = generated.astimezone(tz).date().isoformat()
 
     page = _page(labels, day_rows, meta, tz, threshold, today,
-                 _day_nav(data_dir, today))
+                 _day_nav(data_dir, today), summary)
 
     written = []
     for path in (data_dir / INDEX_NAME,

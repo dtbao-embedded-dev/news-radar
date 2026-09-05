@@ -221,6 +221,54 @@ check("the YAML message says YAML", "YAML" in msg, msg)
 
 
 # --------------------------------------------------------------------------
+# the ops section - P6
+# --------------------------------------------------------------------------
+
+check("the heartbeat ships off, so a fresh clone pings nobody",
+      cfg.get("ops.heartbeat_url") == "", repr(cfg.get("ops.heartbeat_url")))
+check("the site check ships off too", cfg.get("ops.site_url") == "",
+      repr(cfg.get("ops.site_url")))
+check("backups default to a directory outside the served output/",
+      cfg.get("ops.backup_dir") == "backups", repr(cfg.get("ops.backup_dir")))
+check("a week of backups is the default", cfg.get("ops.backup_keep") == 7,
+      repr(cfg.get("ops.backup_keep")))
+
+msg = check_raises("a negative backup_keep is refused", cfgmod.load,
+                   write(MINIMAL + "\nops:\n  backup_keep: -1\n"), env=SECRETS)
+check("the backup_keep message names the key", "backup_keep" in msg, msg)
+
+msg = check_raises("a bool is not a backup count", cfgmod.load,
+                   write(MINIMAL + "\nops:\n  backup_keep: true\n"), env=SECRETS)
+check("True does not sneak through as 1 here either",
+      "backup_keep" in msg, msg)
+
+# A typo'd heartbeat url is the failure this whole section exists to catch: it
+# would be silently unpingable, which is exactly the silent failure P6-1 is for.
+msg = check_raises("a non-http heartbeat url is refused", cfgmod.load,
+                   write(MINIMAL + "\nops:\n  heartbeat_url: ftp://hc.invalid/x\n"),
+                   env=SECRETS)
+check("the heartbeat message names the key", "heartbeat_url" in msg, msg)
+
+msg = check_raises("a site_url that is not a url is refused", cfgmod.load,
+                   write(MINIMAL + "\nops:\n  site_url: news.dtbao.org\n"),
+                   env=SECRETS)
+check("the site_url message names the key", "site_url" in msg, msg)
+
+ops_on = cfgmod.load(write(MINIMAL + """
+ops:
+  heartbeat_url: https://hc.invalid/ping/abc
+  site_url: https://news.invalid/
+  backup_keep: 0
+"""), env=SECRETS)
+check("a real https heartbeat url is accepted",
+      ops_on.get("ops.heartbeat_url") == "https://hc.invalid/ping/abc")
+check("backup_keep 0 is legal - it means back nothing up",
+      ops_on.get("ops.backup_keep") == 0)
+check("setting one ops key keeps the siblings",
+      ops_on.get("ops.backup_dir") == "backups")
+
+
+# --------------------------------------------------------------------------
 # the committed template must satisfy its own contract
 # --------------------------------------------------------------------------
 
@@ -232,6 +280,16 @@ if example.is_file():
           len(shipped.enabled_feeds()) > 0)
     check("no secret is present in the committed template",
           not any(k in str(shipped.as_dict()) for k in SECRETS))
+    # The default is 0 (an absent key keeps everything, so an upgrade never
+    # starts deleting on its own); the template ships the bounded window, which
+    # is the half of P6's "no disk growth" a config file can answer.
+    check("the shipped template bounds the archive at 90 days",
+          shipped.get("storage.retention_days") == 90,
+          repr(shipped.get("storage.retention_days")))
+    check("an absent retention_days still keeps everything",
+          cfg.get("storage.retention_days") == 0)
+    check("the template ships the heartbeat off, url to be filled in locally",
+          shipped.get("ops.heartbeat_url") == "")
 else:
     FAILURES.append("config/config.yaml.example is missing from the checkout")
 

@@ -16,6 +16,17 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Features
+
+- **docker**: `Dockerfile` for the crawl service, base image pinned by digest,
+  so `docker compose up -d` now builds and runs the whole stack
+- **crawl**: `python -m news_radar` - the entrypoint and schedule loop, with
+  `--once` for a single cycle. `SIGTERM` is honoured mid-interval and one
+  failed cycle does not end the service
+- **config**: load and validate `config.yaml` against every documented
+  default; an enabled notification channel with no secret refuses to start,
+  and a feed id that YAML turned into a boolean is rejected with the reason
+
 ### Fixes
 
 - **setup**: `--check` reports a blank notification secret and exits non-zero

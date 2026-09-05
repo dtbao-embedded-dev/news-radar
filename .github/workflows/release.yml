@@ -23,7 +23,7 @@ jobs:
       VERSION: ${{ github.ref_name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Reject a malformed tag before it becomes a published release that has
       # to be deleted by hand.

@@ -2,10 +2,10 @@
 title: News Sources and Search Paths
 category: data
 purpose: Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns.
-status: draft
-updated: 2026-09-04
-source: conversation
-confidence: inferred
+status: active
+updated: 2026-09-05
+source: config/config.yaml.example, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py
+confidence: confirmed
 keywords: sources, feeds, RSS, Atom, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent
 order: 1
 ---
@@ -28,7 +28,7 @@ one is a config edit, never a code edit.
 | `lobsters` | Lobsters | `https://lobste.rs/rss` | RSS 2.0 | en | Tags live in the title suffix, not a separate field |
 | `hackaday` | Hackaday | `https://hackaday.com/blog/feed/` | RSS 2.0 | en | WordPress feed; full body in `content:encoded` - ignore it, titles only |
 | `lwn` | LWN headlines | `https://lwn.net/headlines/rss` | RSS 2.0 | en | Subscriber-only items appear with a `[$]` title prefix |
-| `r_embedded` | r/embedded | `https://www.reddit.com/r/embedded/.rss` | Atom | en | **Requires a real User-Agent**; the default Python one gets HTTP 403 |
+| `r_embedded` | r/embedded | `https://www.reddit.com/r/embedded/.rss` | Atom | en | **Requires a real User-Agent**; the default Python one gets HTTP 403. **Needs its own resolver**: `www.reddit.com` failed to resolve on this homelab - host *and* container - so the crawl service sets `dns: [1.1.1.1, 8.8.8.8]` in `docker-compose.yml`. `reddit.com` resolves and then 301s to the name that will not; `old.reddit.com` resolves and then serves 350 kB of HTML rather than the feed. Neither is a workaround, the resolver is |
 | `vnexpress_sohoa` | VnExpress So hoa | `https://vnexpress.net/rss/so-hoa.rss` | RSS 2.0 | vi | Description carries an `<img>` tag - strip HTML before matching |
 | `genk` | GenK | `https://genk.vn/rss/home.rss` | RSS 2.0 | vi | Mixed tech and consumer news |
 | `tinhte` | Tinh te | `https://tinhte.vn/rss` | RSS 2.0 | vi | Forum-flavoured; heavier duplicate rate than the others |
@@ -45,9 +45,10 @@ group with three templates enabled produces three requests per run.
 
 | id | Template | Returns | Substitution |
 |----|----------|---------|--------------|
-| `google_news` | `https://news.google.com/rss/search?q={kw}&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase |
-| `hn_algolia` | `https://hn.algolia.com/api/v1/search?query={kw}` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID` |
-| `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement as the fixed Reddit feed |
+| `google_news` | `https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:7d` is not optional - without it the engine answers relevance-first and returns hits aged months |
+| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. Both are kept so Vietnamese AI coverage stays on the page |
+| `hn_algolia` | `https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story&typoTolerance=false` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID`. `search_by_date` orders chronologically, so the window needs no epoch computing; `tags=story` drops comment hits, whose title is not a headline. **`typoTolerance=false` is required, not cosmetic**: with it on, Algolia matches 41,612 stories for `RTOS` and `FreeToken` for `FreeRTOS`, and a date sort then returns the most recent of that noise - `RTOS` yielded 0 usable of 20. Off, it is strictly better on every shipped group: 97 usable a cycle instead of 77 |
+| `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement, and the same resolver requirement |
 
 `hl` / `gl` / `ceid` on the Google template pin the result locale to Vietnamese.
 Changing them to `hl=en&gl=US&ceid=US:en` gives the English-language cut of the

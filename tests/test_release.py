@@ -168,6 +168,26 @@ check("the heading itself is not part of the body",
 check("casing and trailing space on the heading still match",
       release.unreleased_body("## UNRELEASED  \n\n- x\n") == "- x")
 
+
+# --- the tool must be able to print the release it is about to cut ---------
+
+# `--dry-run` prints the changelog section, and this project's changelog is
+# this project's own prose. A `Điện tử` in a P2 entry ended the run with
+# UnicodeEncodeError on a cp1252 Windows console - after the preflight had
+# passed, and in the one command release-flow.md tells you to run first.
+release._utf8_stdout()
+encoding = (sys.stdout.encoding or "").lower().replace("-", "")
+check("stdout is reconfigured to UTF-8 before anything is printed",
+      encoding.startswith("utf"), repr(sys.stdout.encoding))
+
+body = release.unreleased_body(release.read_changelog())
+try:
+    body.encode(sys.stdout.encoding or "utf-8")
+    printable = True
+except (UnicodeEncodeError, LookupError):
+    printable = False
+check("the real Unreleased section survives the console encoding", printable)
+
 check_raises("promoting a missing section raises", ValueError,
              release.promote_unreleased, NO_SECTION, "v0.1.0", "2026-09-05")
 check_raises("promoting an empty section raises", ValueError,

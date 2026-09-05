@@ -5,9 +5,13 @@
 # Real config and secrets - templates are committed, these are not
 config/config.yaml
 docker/.env
+docker/tunnel-credentials.json
 
 # Derived data: crawl output, rendered pages, SQLite store
 output/
+
+# Dated copies of the store. Never under output/ - that directory is public.
+backups/
 
 # Python
 __pycache__/

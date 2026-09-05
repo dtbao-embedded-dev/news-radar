@@ -58,7 +58,7 @@ served on — default `http://localhost:8088`, overridable with
 | Flag | For |
 |---|---|
 | `--dry-run` | See every step, including the compose command. Writes nothing, starts nothing |
-| `--check` | Verify an existing checkout. Creates nothing, starts nothing |
+| `--check` | Verify an existing checkout, secrets included. Creates nothing, starts nothing, non-zero on a gap |
 | `--non-interactive` | Unattended: report a blank secret instead of prompting |
 | `--force` | Regenerate a config file from its template on purpose |
 

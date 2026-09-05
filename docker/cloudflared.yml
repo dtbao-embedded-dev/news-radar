@@ -1,0 +1,23 @@
+# Cloudflare Tunnel connector for news.dtbao.org.
+#
+# This is the `news` tunnel, created on the Cloudflare account that owns
+# dtbao.org. The tunnel id is not a secret - the credentials file beside it is,
+# which is why that one is gitignored and this one is committed.
+#
+# The connector runs as a container in this compose project, so it reaches the
+# web server by its service name over the docker network. The published host
+# port (NEWS_RADAR_HTTP_PORT, 8088) stays what it always was: local debugging.
+#
+# Running it here rather than adding a hostname to a host-level cloudflared
+# means the origin can be `caddy:8080` at all - a tunnel running on the host
+# cannot resolve a docker service name - and that restarting the news route
+# never touches whatever else the host tunnel is carrying.
+tunnel: 94fedb96-98c6-4683-8ae5-6addda3d9c9e
+credentials-file: /etc/cloudflared/creds.json
+
+ingress:
+  - hostname: news.dtbao.org
+    service: http://caddy:8080
+
+  # Anything else arriving on this tunnel is not ours to answer.
+  - service: http_status:404

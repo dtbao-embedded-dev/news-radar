@@ -14,15 +14,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      # No install step: the checks are standard library only, same as the
-      # scripts they cover. The loop picks up new tests/test_*.py without this
-      # workflow having to be edited again.
+      # The scripts under scripts/ are standard library only, but the package
+      # under src/ is not - test_config.py imports it, which imports PyYAML.
+      - name: Install runtime dependencies
+        run: pip install --disable-pip-version-check -r requirements.txt
+
+      # The loop picks up new tests/test_*.py without this workflow having to
+      # be edited again.
       - name: Run checks
         run: |
           for t in tests/test_*.py; do

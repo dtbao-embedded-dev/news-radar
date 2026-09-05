@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>embedded</title>
+  <link rel="self" href="https://www.reddit.com/r/embedded/.rss" type="application/atom+xml"/>
+  <updated>2026-09-04T12:00:00+00:00</updated>
+  <entry>
+    <id>t3_abc123</id>
+    <title>Best RTOS for a Cortex-M0+ in 2026?</title>
+    <link rel="alternate" href="https://www.reddit.com/r/embedded/comments/abc123/best_rtos/"/>
+    <updated>2026-09-04T10:05:00+00:00</updated>
+    <published>2026-09-04T10:00:00+00:00</published>
+  </entry>
+  <entry>
+    <id>t3_def456</id>
+    <title>Zephyr 4.0 device tree overlays</title>
+    <link rel="alternate" href="https://www.reddit.com/r/embedded/comments/def456/zephyr/"/>
+    <updated>2026-09-04T11:00:00+00:00</updated>
+  </entry>
+</feed>

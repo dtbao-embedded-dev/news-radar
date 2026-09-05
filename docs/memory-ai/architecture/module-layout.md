@@ -2,11 +2,11 @@
 title: Module Layout and Stack
 category: architecture
 purpose: The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take.
-status: draft
+status: active
 updated: 2026-09-05
-source: conversation
-confidence: inferred
-keywords: tree, layout, layering, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
+source: src/news_radar/, Dockerfile, requirements.txt
+confidence: confirmed
+keywords: tree, layout, layering, ops.py, summarize.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
 order: 2
 ---
 
@@ -32,23 +32,43 @@ news-radar/
 ├── scripts/
 │   ├── setup.py                # homelab bootstrap, stdlib only
 │   └── release.py              # release automation, stdlib only
-├── src/news_radar/             # P1..P4
-│   ├── __main__.py             # entrypoint: python -m news_radar
-│   ├── config.py               # load + validate config.yaml and env
-│   ├── keywords.py             # parse frequency_words.txt
-│   ├── fetch/
+├── Dockerfile                  # crawl service image, base pinned by digest
+├── requirements.txt            # the two runtime dependencies, pinned
+├── src/news_radar/
+│   ├── __init__.py             # DONE - __version__, read from VERSION
+│   ├── __main__.py             # DONE - entrypoint + schedule loop
+│   ├── config.py               # DONE - load + validate config.yaml and env
+│   ├── item.py                 # DONE - NewsItem, canonical url, dedup key, fold
+│   ├── keywords.py             # DONE - parse frequency_words.txt (landed in P1)
+│   ├── fetch/                  # DONE - P1
 │   │   ├── http.py             # UA, timeout, retry, per-host throttle
-│   │   ├── feeds.py            # fixed RSS/Atom sources
+│   │   ├── feeds.py            # rss/atom/json -> items, fixed feeds, isolation
 │   │   └── search.py           # keyword -> search URL -> items
-│   ├── filter.py               # match items against keyword groups
-│   ├── rank.py                 # dedup + weighted ranking
-│   ├── store.py                # SQLite persistence + seen-set
-│   ├── render.py               # output/index.html
-│   └── notify/
-│       ├── telegram.py
-│       └── discord.py
+│   ├── filter.py               # DONE - global filter + match against groups
+│   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
+│   ├── store.py                # DONE - SQLite persistence, seen-set, retention, backup
+│   ├── render.py               # DONE - output/index.html + days/<date>.html
+│   ├── ops.py                  # DONE - P6: heartbeat, Health, ALERT_AFTER
+│   ├── summarize.py            # DONE - P6-4: per-topic AI summary, OpenAI wire format
+│   └── notify/                 # DONE - P4
+│       ├── __init__.py         # SendResult, pick, chunk, clip
+│       ├── telegram.py         # bot API, HTML, 4000; alert() has no parse_mode
+│       └── discord.py          # webhook, Markdown, 2000; alert() is escaped
 ├── tests/
-│   └── test_release.py         # plain asserts, no framework
+│   ├── test_config.py          # plain asserts, needs PyYAML
+│   ├── test_item.py            # plain asserts, stdlib only
+│   ├── test_keywords.py        # plain asserts, stdlib only
+│   ├── test_http.py            # plain asserts, stdlib only, local http.server
+│   ├── test_feeds.py           # plain asserts, needs feedparser + PyYAML
+│   ├── test_search.py          # plain asserts, needs feedparser + PyYAML
+│   ├── test_filter.py          # plain asserts, stdlib only
+│   ├── test_rank.py            # plain asserts, stdlib only
+│   ├── test_store.py           # plain asserts, stdlib only (sqlite3)
+│   ├── test_render.py          # plain asserts, stdlib only
+│   ├── test_notify.py          # plain asserts, stdlib only, local http.server
+│   ├── test_summarize.py       # plain asserts, stdlib only, local http.server
+│   ├── test_release.py         # plain asserts, stdlib only
+│   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
 ├── docs/memory-ai/             # this bank
 ├── .github/workflows/
@@ -68,14 +88,43 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | Layer | Modules | May import |
 |-------|---------|-----------|
 | 1 — transport | `fetch/http.py` | stdlib only |
-| 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords` |
-| 3 — selection | `filter.py`, `rank.py` | `keywords`, plain data types |
-| 4 — persistence | `store.py` | layer 3 output types |
-| 5 — output | `render.py`, `notify/*` | layers 3 and 4 |
+| 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
+| 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
+| 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
+| 5 — output | `render.py`, `notify/*`, `ops.py`, `summarize.py` | layers 3 and 4; `notify/*`, `ops.py` and `summarize.py` also layer 1 |
+
+`ops.py` sits in layer 5 for the same reason `notify/*` does and imports layer 1
+for the same reason too - the heartbeat's site check and its ping are GETs, and
+they want the User-Agent, the timeout, the retry and the per-host gap the
+`Fetcher` already has. It imports no config and reads no clock: both urls and the
+verdict on the cycle arrive as arguments that `__main__.py` builds, which is why
+`tests/test_ops.py` runs against a local `http.server` with nothing installed.
+See [[config-and-env]] for the keys and [[delivery-phases]] for why the ping is
+withheld rather than sent on a bad cycle.
+
+`summarize.py` joins them on the same terms and for the same reason: a chat
+completion is a POST that wants the `Fetcher`'s User-Agent, retry and
+`Retry-After` handling as much as a webhook does. It reads no config and no
+clock either - the url, the key, the model and the rows all arrive as arguments,
+which is what lets `tests/test_summarize.py` exercise every failure path against
+a local `http.server`. The one thing it is given that `ops.py` is not is a
+longer timeout: `__main__._fetcher()` takes an override, because fifteen seconds
+is a feed's budget and not a completion's. See [[config-and-env]] for the keys.
+
+`notify/*` reaching back to layer 1 is the one deliberate widening: a POST needs
+the same User-Agent, timeout, retry and per-host gap a GET does, and honouring a
+429's `Retry-After` is a transport concern rather than a per-channel one. The
+alternative was a second HTTP client inside `notify/`. See [[notify-channels]].
 
 `__main__.py` is the only module that knows about all five; it wires them and owns
-the schedule loop. `config.py` and `keywords.py` are leaves — they import nothing
-from the package.
+the schedule loop. `config.py`, `item.py` and `keywords.py` are leaves — they
+import nothing from the package, which is why each has a test that needs neither
+PyYAML nor feedparser to run.
+
+Layer 3 taking no `config` import is not a style preference either: the weights
+and the `source_id -> rank_weight` map are plain dicts `__main__.py` builds and
+hands down, which is why `test_filter.py` and `test_rank.py` run on a bare
+Python with no dependency installed. See [[selection-layer]].
 
 `scripts/` is outside the package entirely and imports nothing from it: both
 scripts must run on a machine where the package's dependencies are not installed
@@ -90,12 +139,17 @@ yet. That is the whole point of `setup.py`.
 | Feed parsing | **feedparser** | Twenty years of malformed RSS/Atom in the wild. Hand-rolling `xml.etree` here is the classic mistake |
 | HTTP | stdlib `urllib.request` | One GET with a User-Agent and a timeout. `requests` earns nothing here |
 | Storage | stdlib `sqlite3` | Single writer, single file, no server to run |
-| Templating | stdlib `string.Template` / f-strings | One page. A template engine is a dependency for nothing |
+| Templating | stdlib f-strings | One page. A template engine is a dependency for nothing |
 | Web server | Caddy (container) | Static files plus automatic HTTPS if ever served directly |
 | Scheduling | in-process loop in the crawl container | Compose has no cron; a host cron differs between Windows and Linux |
 
 **Runtime dependencies: `pyyaml`, `feedparser`. That is the entire list.** Adding
 a third needs a line in the changelog saying what it replaced.
+
+**P6-4 is what that rule looks like when it bites and holds.** The AI summary was
+dropped once partly for needing an `openai` package; it shipped instead as one
+`Fetcher.post_json()` against an OpenAI-compatible `/v1/chat/completions`, which
+is a POST with a bearer header and no new import. See [[delivery-phases]].
 
 `scripts/setup.py` and `scripts/release.py` use **stdlib only** — no PyYAML, no
 feedparser — so they work on a bare Python install.

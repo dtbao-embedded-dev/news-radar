@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>LWN.net</title>
+    <link>https://lwn.net</link>
+    <description>LWN.net headlines</description>
+    <item>
+      <title>[$] A subscriber-only look at the scheduler</title>
+      <link>https://lwn.net/Articles/1000001/</link>
+      <guid isPermaLink="false">https://lwn.net/Articles/1000001/</guid>
+      <pubDate>Fri, 04 Sep 2026 09:30:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Kernel 7.1 released &amp;mdash; what changed</title>
+      <link>https://lwn.net/Articles/1000002/?utm_source=rss&amp;utm_medium=feed</link>
+      <guid isPermaLink="false">lwn-1000002</guid>
+      <pubDate>Fri, 04 Sep 2026 11:00:00 +0700</pubDate>
+    </item>
+    <item>
+      <title>An item with no pubDate at all</title>
+      <link>https://lwn.net/Articles/1000003/</link>
+    </item>
+    <item>
+      <title></title>
+      <link>https://lwn.net/Articles/1000004/</link>
+    </item>
+  </channel>
+</rss>

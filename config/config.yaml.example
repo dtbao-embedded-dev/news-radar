@@ -32,6 +32,11 @@ feeds:
     url: https://lwn.net/headlines/rss
     enabled: true
     rank_weight: 0.9
+  # If this one answers "Name or service not known", the resolver is the
+  # problem and not Reddit: `www.reddit.com` failed to resolve on this homelab's
+  # host *and* in the container until the crawl service was given its own
+  # nameservers in docker-compose.yml. `old.reddit.com` is not the workaround it
+  # looks like - it resolves and then serves 350 kB of HTML instead of the feed.
   - id: r_embedded
     name: r/embedded
     url: https://www.reddit.com/r/embedded/.rss
@@ -54,18 +59,40 @@ feeds:
     rank_weight: 0.6
 
 # Search feeds: {kw} is replaced by each keyword group's primary term.
-# Cost per run is len(groups) x len(enabled templates) - keep that in mind
-# before enabling all three.
+# Cost per run is len(groups) x len(enabled templates) - six groups and the
+# three enabled below is 18 requests, on top of the eight fixed feeds. Keep
+# that in mind before enabling the fourth.
 search_templates:
+  # `when:7d` is the whole reason this template earns its slot. Google News
+  # answers relevance-first: without a window it returns hits aged months,
+  # which score 0 for freshness and leave the group ordered by source weight
+  # alone. Widen it and the page goes stale, not fuller.
   - id: google_news
     name: Google News (vi)
-    url: "https://news.google.com/rss/search?q={kw}&hl=vi&gl=VN&ceid=VN:vi"
+    url: "https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi"
     format: rss
     enabled: true
     rank_weight: 0.8
+  # The same engine in English, and it is not a duplicate: the locale decides
+  # which press is searched at all. Measured on 2026-09-05 over the six shipped
+  # groups, `hl=vi` returned 48 usable stories and every one of them was in the
+  # AI group - the Vietnamese press does not write about ESP32, RTOS or RISC-V.
+  # `hl=en` returned 218 across all six. Keeping both costs one request per
+  # group per cycle and is what keeps Vietnamese AI coverage on the page.
+  - id: google_news_en
+    name: Google News (en)
+    url: "https://news.google.com/rss/search?q={kw}+when:7d&hl=en&gl=US&ceid=US:en"
+    format: rss
+    enabled: true
+    rank_weight: 0.8
+  # `typoTolerance=false` is not a nicety. Algolia's default typo tolerance
+  # matches 41,612 stories for `RTOS` and `FreeToken` for `FreeRTOS`, and
+  # search_by_date then returns the most recent of that noise - RTOS came back
+  # 0 usable of 20. Turning it off is strictly better on every shipped group:
+  # 97 usable stories a cycle instead of 77, measured 2026-09-05.
   - id: hn_algolia
     name: Hacker News search
-    url: "https://hn.algolia.com/api/v1/search?query={kw}"
+    url: "https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story&typoTolerance=false"
     format: hn_algolia_json
     enabled: true
     rank_weight: 0.8
@@ -93,7 +120,57 @@ rank:
 
 storage:
   data_dir: output
-  retention_days: 0      # 0 = keep everything
+  # 0 = keep everything. 90 is what ships: the store and output/days/ otherwise
+  # grow forever, and an unattended radar with no ceiling is a disk that fills
+  # on a weekend. A backup is written immediately before each prune.
+  retention_days: 90
+
+# Keeping it alive without babysitting.
+ops:
+  # Dead-man's switch. GET after every clean cycle - a healthchecks.io ping url
+  # or an Uptime Kuma push url. Empty means no ping at all, which is the right
+  # default for a clone that has no monitor of its own yet.
+  #   heartbeat_url: https://hc-ping.com/<uuid>
+  heartbeat_url: ""
+
+  # Checked immediately before the ping. A non-200 withholds the ping and counts
+  # as a failed cycle - this is what notices the tunnel connector going away
+  # while the crawl itself keeps running perfectly.
+  #   site_url: https://news.dtbao.org/
+  site_url: ""
+
+  # Never under data_dir: that directory is served to the public web.
+  backup_dir: backups
+  backup_keep: 7         # one file per day, newest N kept; 0 = no backup
+
+ai:
+  # The one thing in this file that costs money, so it ships off. On, it writes
+  # one line per keyword group - the group's name and at most two sentences
+  # about what actually stood out in it - at the top of the page every cycle,
+  # and sends that same line-per-topic summary to the notification channels
+  # once a local day. A group with nothing notable is left out entirely rather
+  # than given a sentence saying so.
+  enabled: false
+
+  # The OpenAI *wire format*, not the vendor. Anything that answers
+  # /v1/chat/completions works, and one of them has no bill:
+  #   api_url: https://openrouter.ai/api/v1/chat/completions
+  #   api_url: https://api.deepseek.com/v1/chat/completions
+  #   api_url: http://ollama:11434/v1/chat/completions   # local, no key needed
+  api_url: https://api.openai.com/v1/chat/completions
+  model: gpt-4o-mini
+
+  # OPENAI_API_KEY in docker/.env, and only if the endpoint wants one. A
+  # server on your own LAN authenticates nobody, so leave the key unset and no
+  # Authorization header is sent at all. A hosted endpoint with no key set
+  # answers 401, which is logged every cycle rather than failing startup.
+
+  max_per_topic: 5       # top-scored stories per group that reach the prompt
+  # A completion is slower than a feed; 15s is not enough. 60 suits a hosted
+  # small model - a self-hosted 27B on one box measured ~95s, so raise this
+  # rather than wonder why every summary "times out".
+  timeout_s: 60
+  notify_at_hour: 8      # local hour the once-a-day message goes out (0-23)
 
 notification:
   enabled: true

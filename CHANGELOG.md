@@ -31,7 +31,15 @@ one makes the file and the tags disagree.
   once, none of which used to be more than a line in a log nobody reads. The
   reverse is deliberate too: a monitor that refuses the ping is a warning and
   never an alert, because the radar is fine and the thing that would have told
-  you so is the thing that broke
+  you so is the thing that broke. Those same reasons now arrive on Telegram and
+  Discord: **two** failed cycles in a row send one message naming them, and the
+  first clean cycle after sends one saying it recovered - two messages for an
+  outage of any length, because a broken thing repeats every thirty minutes and
+  an alert that repeats with it is one you learn to swipe away, taking the next
+  real one with it. The alert takes a different escaping rule than a story does
+  on each channel: Telegram gets no `parse_mode` at all, so a stray `<` in an
+  exception message cannot cost the one message you must not lose, while Discord
+  is escaped because it renders Markdown in plain content whether asked to or not
 - **ops**: the archive has a ceiling - the shipped `config.yaml` now sets
   `storage.retention_days: 90` instead of `0`, so `news.db` and `output/days/`
   stop growing without bound. The *default* for an absent key stays `0`: an

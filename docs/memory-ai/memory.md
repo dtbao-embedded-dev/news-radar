@@ -19,11 +19,19 @@ _Generated 2026-09-05 - 14 durable doc(s)._
 
 ## What works
 
-**P0 Foundation is complete.** See `architecture/delivery-phases.md` for the
-phase map and the finished-product definition all of it serves.
+**P0 Foundation is complete and released as v0.1.0** (2026-09-05). See
+`architecture/delivery-phases.md` for the phase map and the finished-product
+definition all of it serves.
 
-- **The design bank is complete enough to build from.** Twelve durable docs plus
-  one ADR cover the target architecture, the sources and their exact URLs, the
+- **v0.1.0 is published.** `python scripts/release.py 0.1.0` ran the whole chain
+  without stopping: promoted the changelog, wrote `VERSION`, committed on
+  `release/v0.1`, merged into `developing` then `main`, tagged, returned, pushed
+  all three branches and the tag. CI published the GitHub Release from the tag,
+  with the `## v0.1.0` changelog section as its notes. Five workflow runs, all
+  green. `main` carries real content for the first time.
+
+- **The design bank is complete enough to build from.** Thirteen durable docs
+  plus one ADR cover the target architecture, the sources and their exact URLs, the
   item shape and dedup rule, every config key, the keyword-file syntax, the
   notification contracts, the crawl algorithm with its known edge cases, and the
   release and setup procedures.
@@ -35,19 +43,26 @@ phase map and the finished-product definition all of it serves.
   `.env` comments, and exits non-zero while a required secret is blank.
   `--dry-run`, `--check`, `--force` and `--non-interactive` all behave as
   documented.
-- **`python scripts/release.py <version>` works.** `--dry-run 0.1.0` prints the
-  changelog it would write, built from the real commit history, and the exact git
-  chain: commit on `release/*`, merge into `developing`, merge into `main`, tag,
-  return, push. `python tests/test_release.py` passes with plain asserts and no
-  test framework.
+- **`python scripts/release.py <version>` works, end to end.** It no longer
+  reads the commit log: the changelog is hand-written into `## Unreleased` and
+  the script promotes that section to the version, opening a fresh empty one.
+  A missing or empty section fails the preflight - proven by emptying the section
+  and watching a real run refuse with exit 1, nothing changed. `--dry-run` prints
+  the body it would promote and the exact git chain. `python tests/test_release.py`
+  passes with plain asserts and no test framework.
 - **CI publishes a release from a tag.** `.github/workflows/release.yml` triggers
   on `v*`, cuts the version's section out of `CHANGELOG.md` using `release.py`'s
   own extractor, and falls back to GitHub-generated notes when there is no
   section. Both paths were exercised locally against the real workflow code.
 - **CI runs the checks on every push and pull request.**
   `.github/workflows/test.yml` runs every `tests/test_*.py` on Python 3.12 with
-  no install step. Verified locally by running the same loop, and by proving a
-  failing check aborts it instead of passing silently.
+  no install step. Verified locally by running the same loop, by proving a
+  failing check aborts it instead of passing silently, and by every green run
+  since.
+- **`setup.py` starts the stack itself.** A successful run ends with
+  `docker compose up -d`, not a command printed for the operator to copy. Install
+  is two steps, not three. The success path has not been exercised on a machine
+  with the Docker daemon running; the failure path was, and reports non-zero.
 - **The docker stack is defined and Caddy actually runs.** Verified by starting
   it: Caddy serves `output/` with the `Cache-Control` headers from our Caddyfile.
 - **The repository has a license.** Apache-2.0, in `LICENSE`, chosen because
@@ -73,8 +88,13 @@ not written** - `src/news_radar/` does not exist yet.
 ## Known issues
 
 - **The `news-radar` compose service cannot start.** It builds from a `Dockerfile`
-  that lands in P5. Until then only `docker compose ... up -d caddy` works, and
-  the compose file says so.
+  that lands in P5. Until then only `caddy` can start; the compose file says so
+  and `setup.py` narrows itself to `caddy` on its own while the file is absent.
+- **The pre-rewrite root commit is still reachable on GitHub.** History was
+  rewritten on 2026-09-05 to drop a `Co-Authored-By` trailer, but a force push
+  does not delete the old objects: `91ea2d9` still answers over the API with the
+  trailer in it, and the repository is public. It clears when GitHub garbage
+  collects, which cannot be triggered from here.
 - **Host port 8080 is taken by ntfy on this homelab.** Caddy is published on
   `NEWS_RADAR_HTTP_PORT`, default `8088`. A probe of `localhost:8080` answers
   from ntfy, which looks like success and is not.
@@ -92,9 +112,10 @@ not written** - `src/news_radar/` does not exist yet.
 
 ## Current focus
 
-P0 Foundation shipped on `release/v0.1`. The next piece of work is **P1 Fetch**:
-getting real items out of the eight fixed feeds and the keyword-built search
-feeds, which is the first phase that produces something a human can look at.
+**v0.1.0 is released** (2026-09-05) - P0 Foundation is closed and published.
+The next piece of work is **P1 Fetch**: getting real items out of the eight fixed
+feeds and the keyword-built search feeds, which is the first phase that produces
+something a human can look at.
 
 ## Recent changes
 
@@ -113,12 +134,24 @@ feeds, which is the first phase that produces something a human can look at.
   request; `release.py --dry-run 0.1.0` was exercised against the real history.
 - Caddy's published host port moved to `NEWS_RADAR_HTTP_PORT` (default `8088`)
   after 8080 turned out to be taken by ntfy on the homelab.
+- `LICENSE` added: Apache-2.0, closing the decision `adr-0001` had left open.
+- README restructured: badges, standard section order, no hardcoded deployment
+  host, and no pointers into `docs/memory-ai` - the bank is working state for an
+  assistant, not documentation to send a user of the project to read.
+- `setup.py` now brings the stack up itself; `rule/changelog.md` added and
+  `release.py` rewritten to promote a hand-written `Unreleased` section instead
+  of generating one from commit subjects.
+- **History was rewritten once** to strip a `Co-Authored-By` trailer from the
+  root commit, which changed every hash and force-pushed all three branches. Any
+  clone made before 2026-09-05 is on orphaned history and needs
+  `git fetch && git reset --hard origin/<branch>`, not `git pull`.
 
 ## Next steps
 
 1. **Add the `Dockerfile` and the `src/news_radar/` package skeleton** - the
    compose stack cannot start its crawl service until this exists, so it blocks
-   every later verification.
+   every later verification. `setup.py` already narrows itself to `caddy` while
+   the file is absent and widens on its own once it exists.
 2. **P1-1 HTTP client** - User-Agent from config, timeout, retry with backoff,
    per-hostname minimum interval. Reddit's 403 on an anonymous UA is the first
    thing to prove fixed.
@@ -134,6 +167,9 @@ feeds, which is the first phase that produces something a human can look at.
 - **Two runtime dependencies, total**: `pyyaml` and `feedparser`. HTTP, storage
   and templating come from the standard library. A third needs justifying in the
   changelog.
+- **The changelog records technical changes only**, written by hand into
+  `## Unreleased` in the same commit as the change. `release.py` reads no commit
+  subjects. The rule is `rule/changelog.md`.
 - **Both scripts stay stdlib-only** so they run on a bare checkout, before
   anything is installed.
 - **Self-hosted, not GitHub Pages.** The crawl and the site both run on the

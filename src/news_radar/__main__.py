@@ -211,12 +211,23 @@ def _alert(cfg, text):
         return
 
     fetcher = _fetcher(cfg)
+    taken = []
     for name in channels:
         try:
-            ALERTERS[name](fetcher, text, os.environ)
+            if ALERTERS[name](fetcher, text, os.environ):
+                taken.append(name)
         except Exception:
             log.exception("could not alert on %s; the other channels and the "
                           "loop are unaffected", name)
+
+    # Logged at WARNING, and logged even when every channel took it. Found by
+    # the P6 live run: an alert that succeeded left no line at all, so the only
+    # trace of one in `docker logs` was an unexplained two-second gap. A feature
+    # whose whole purpose is visibility may not be the quietest thing in the
+    # file.
+    log.warning("alerted %d of %d channel(s) [%s]: %s",
+                len(taken), len(channels), ", ".join(taken) or "none",
+                text.replace("\n", " | "))
 
 
 def _rows_to_send(cfg, conn, run_id, fetched_at):

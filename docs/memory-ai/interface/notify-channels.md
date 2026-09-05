@@ -4,9 +4,9 @@ category: interface
 purpose: Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send.
 status: active
 updated: 2026-09-05
-source: src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py
+source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py
 confidence: confirmed
-keywords: telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set
+keywords: alert, Health, ALERT_AFTER, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set
 order: 3
 ---
 
@@ -80,6 +80,7 @@ The same row `store.day_matches()` and `store.run_matches()` return - see
 |-----------|---------|
 | `build(groups, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
 | `send(fetcher, groups, token, chat_id)` | `SendResult` |
+| `alert(fetcher, text, token, chat_id)` | `bool` - one operational message, **no `parse_mode`** |
 
 Formatting: `<b>label</b>` per group, then
 `• <a href="url">title</a> <i>sources</i>` per story.
@@ -113,6 +114,7 @@ Formatting: `<b>label</b>` per group, then
 |-----------|---------|
 | `build(groups, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
 | `send(fetcher, groups, webhook_url)` | `SendResult` |
+| `alert(fetcher, text, webhook_url)` | `bool` - one operational message, Markdown-escaped |
 
 Formatting: `**label**` per group, then ``• [title](url) `sources` `` per story.
 
@@ -193,3 +195,29 @@ Recorded rather than quietly dropped:
 - **The secrets are read in `__main__`, not in `notify/`.** The draft had each
   channel read its own environment. Passing them in is what lets both channels be
   exercised with no environment at all.
+
+## `alert()` - the operational message, and why it is not a `send()`
+
+P6-2 pushes *failures* down the same two channels the stories use, and the
+payload has nothing in common with a story but the transport. `alert()` takes one
+string, posts it once, and answers `True`/`False` rather than a `SendResult`:
+there is no seen-set to diff, no group order to preserve, nothing to chunk (an
+alert that overran a channel limit would be a bug in `ops.Health`, not a case to
+split), and nothing to mark as reported.
+
+**The two channels escape it differently, and neither reuses its own `send()`
+rule.** Telegram is posted with **no `parse_mode` at all** - `send()` needs HTML
+because a story is a link, but an alert is a sentence, and HTML mode's only
+contribution here would be a way for a stray `<` in an exception message to cost
+the whole message. The one message you must not lose is the one saying something
+is broken. Discord *is* escaped, because it renders Markdown in plain `content`
+whether asked to or not, and an exception carrying `*` or `_` would arrive
+reformatted or half-eaten.
+
+**When it fires** is decided entirely by `ops.Health` and never here:
+`ALERT_AFTER = 2` consecutive failed cycles send one message naming the reasons,
+and the first clean cycle after sends one saying it recovered. Two messages for
+an outage of any length. `__main__._alert()` guards each channel separately, for
+a harder reason than `_notify()` has: it runs *because* something already went
+wrong, which makes it the least surprising place in the program for a second
+thing to go wrong, and nothing it does may end the schedule loop.

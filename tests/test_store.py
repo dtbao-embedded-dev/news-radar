@@ -270,6 +270,57 @@ eq("the story inside the window survives",
 conn.close()
 
 
+# -- backup: a copy of the store, outside the served directory --------------
+
+root = data_dir()
+conn = mod.open_db(root)
+backups = root.parent / "backups{}".format(COUNTER[0])
+kept = item("Backed up", "https://example.com/b", "hn")
+run = mod.start_run(conn, NOW)
+mod.save(conn, run, {"ESP32": [story(kept, ["ESP32"])]}, NOW)
+
+path, removed = mod.backup(conn, backups, NOW, 7)
+check("backup writes a file", path is not None and path.is_file(), repr(path))
+eq("named for the day it covers, so the name is the rotation key",
+   path.name, "news-2026-09-05.db")
+eq("nothing to rotate away on the first day", removed, 0)
+
+# The point of a backup is being openable when the original is not, so this
+# reads it as a store rather than comparing bytes.
+copy = sqlite3.connect(str(path))
+copy.row_factory = sqlite3.Row
+eq("the copy is a real store at the same schema version",
+   copy.execute("PRAGMA user_version").fetchone()[0], mod.SCHEMA_VERSION)
+eq("...carrying the row that was in the original",
+   copy.execute("SELECT title FROM items").fetchone()["title"], "Backed up")
+copy.close()
+
+# A cycle every thirty minutes must not mean 48 copies of the same day.
+before = sorted(p.name for p in backups.glob("*.db"))
+path2, removed2 = mod.backup(conn, backups, NOW + HOUR, 7)
+eq("a second cycle the same day writes no second file", path2, None)
+eq("...and rotates nothing", removed2, 0)
+eq("...leaving the directory as it was",
+   sorted(p.name for p in backups.glob("*.db")), before)
+
+# Rotation: three days, keep two.
+mod.backup(conn, backups, NOW + DAY, 2)
+_, removed3 = mod.backup(conn, backups, NOW + 2 * DAY, 2)
+eq("keeping 2 over 3 days drops exactly one", removed3, 1)
+eq("...and the two newest are what is left",
+   sorted(p.name for p in backups.glob("*.db")),
+   ["news-2026-09-06.db", "news-2026-09-07.db"])
+
+# `keep: 0` is the off switch, and it must not delete what is already there.
+off = root.parent / "backups-off{}".format(COUNTER[0])
+eq("keep 0 backs nothing up", mod.backup(conn, off, NOW, 0), (None, 0))
+check("...and creates no directory to do it", not off.exists())
+eq("keep 0 against an existing directory still writes nothing",
+   mod.backup(conn, backups, NOW + 3 * DAY, 0), (None, 0))
+eq("...and deletes nothing either", len(list(backups.glob("*.db"))), 2)
+conn.close()
+
+
 # -- a store written by a newer version is refused, never downgraded --------
 
 root = data_dir()

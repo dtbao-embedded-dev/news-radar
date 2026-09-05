@@ -192,9 +192,17 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
                          items_fetched=fetched, items_matched=matched,
                          errors=errors)
 
+        # Counted over the *rendered* labels, not over `day`. The two are the
+        # same until someone edits the keyword file mid-day: the store still
+        # holds this morning's rows for a group that no longer exists, and
+        # `render.write()` walks `labels` rather than the mapping, so those rows
+        # are on disk and not on the page. A line beginning "the page shows"
+        # has to mean the page.
+        labels = [g.label for g in groups]
         log.info("stored %d match row(s) as run %s; the page shows %d "
                  "story(ies) across %d group(s) today", rows, run_id,
-                 sum(len(v) for v in day.values()), len(day))
+                 sum(len(day.get(label) or []) for label in labels),
+                 len(labels))
         return run_id, summary
     except Exception:
         log.exception("storing or rendering failed, the fetched items are kept")

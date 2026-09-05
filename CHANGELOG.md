@@ -18,6 +18,20 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **ops**: a run that fails silently is now visible. A radar cannot report its
+  own death - a killed container, a host that lost power and a daemon that never
+  came back all look identical from inside: silence. So each clean cycle GETs a
+  dead-man's switch (`ops.heartbeat_url`), and the alarm is the ping that stops
+  arriving. Immediately before it, the crawl fetches its own published page
+  (`ops.site_url`): a non-200 withholds the ping and counts the cycle as failed,
+  which is what finally notices the tunnel connector going away while every
+  other log line still says success. A ping is a claim that the cycle worked, so
+  `crawl()` now returns the reasons it should not be called one - a storage or
+  render failure, an unusable keyword file, or every enabled source failing at
+  once, none of which used to be more than a line in a log nobody reads. The
+  reverse is deliberate too: a monitor that refuses the ping is a warning and
+  never an alert, because the radar is fine and the thing that would have told
+  you so is the thing that broke
 - **ops**: the archive has a ceiling - the shipped `config.yaml` now sets
   `storage.retention_days: 90` instead of `0`, so `news.db` and `output/days/`
   stop growing without bound. The *default* for an absent key stays `0`: an

@@ -32,7 +32,11 @@ COPY src/ ./src/
 # on the host - which differs between this Windows homelab and a Linux one.
 # Switch to a fixed uid once output/ is a named volume rather than a bind mount.
 
-# No HEALTHCHECK: a crawl loop that sleeps 30 minutes has no cheap liveness
-# signal yet. P6-1 adds a heartbeat, and the healthcheck belongs with it.
+# Still no HEALTHCHECK, and now deliberately so. P6-1 gave the loop a liveness
+# signal, but it points *outward*: each clean cycle pings a dead-man's switch
+# (`ops.heartbeat_url`), and the alarm is the ping that stops arriving. A
+# HEALTHCHECK would only colour a column in `docker ps` - nothing restarts an
+# unhealthy container without an autoheal sidecar, which is a new moving part
+# for a failure this stack has not had. Add one if that changes.
 
 ENTRYPOINT ["python", "-m", "news_radar"]

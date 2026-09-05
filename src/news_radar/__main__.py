@@ -11,13 +11,20 @@ all of them.
 from __future__ import annotations
 
 import argparse
+import collections
+import datetime as dt
 import logging
 import signal
 import sys
 import threading
+import time
 
 from . import __version__
 from .config import ConfigError, load
+from .fetch.feeds import read_fixed_feeds
+from .fetch.http import Fetcher
+from .fetch.search import read_search_feeds
+from .keywords import KeywordError, parse as parse_keywords
 
 log = logging.getLogger("news_radar")
 
@@ -38,25 +45,76 @@ def _install_signal_handlers():
             signal.signal(sig, handler)
 
 
+def _fetcher(cfg):
+    """One Fetcher per cycle: the per-host throttle state lives on it."""
+    return Fetcher(
+        user_agent=cfg.user_agent(),
+        timeout_s=cfg.get("advanced.request_timeout_s", 15),
+        max_retries=cfg.get("advanced.max_retries", 2),
+        interval_ms=cfg.get("advanced.request_interval_ms", 2000),
+    )
+
+
+def _report_counts(items, sources, errors):
+    """One line per configured source, including the ones that brought nothing.
+
+    A source that quietly stops returning items looks exactly like a quiet week
+    in a total. Naming every source, zeros included, is what makes the
+    difference visible without reading the whole debug log.
+    """
+    counted = collections.Counter(i.source_id for i in items)
+    failed = {source_id for source_id, _ in errors}
+    for source_id in sources:
+        log.info("  %-18s %4d item(s)%s", source_id, counted.get(source_id, 0),
+                 "  [failed]" if source_id in failed else "")
+
+
 def crawl(cfg):
     """One pass: fetch, filter, rank, store, render, notify.
 
-    Not implemented. P1 lands the fetch layer here, P2 the selection, P3 the
-    store and the page, P4 the senders. It logs what it *would* do and returns
-    0 items rather than pretending: a loop that reports success while doing
-    nothing is worse than one that says it is empty.
+    P1 has landed the fetch half. Filtering, ranking, storage, the page and the
+    senders are still ahead, so the cycle ends by saying what it has rather
+    than claiming a report it did not produce.
     """
-    feeds = cfg.enabled_feeds()
-    searches = cfg.enabled_search_templates()
-    channels = cfg.enabled_channels()
+    started = time.monotonic()
+    fetched_at = dt.datetime.now(dt.timezone.utc)
+    fetcher = _fetcher(cfg)
 
-    log.info(
-        "would fetch %d fixed feed(s) and %d search template(s), "
-        "reporting to %s",
-        len(feeds), len(searches), ", ".join(channels) or "no channel",
-    )
-    log.warning("fetch is not implemented yet (P1) - 0 items this cycle")
-    return 0
+    try:
+        groups, _global_filter = parse_keywords(cfg.get("keywords.file"))
+    except KeywordError as exc:
+        # The fixed feeds do not need the keyword file; only the search feeds
+        # do. Losing half the run is better than losing all of it, and the
+        # reason is on one line rather than in a traceback.
+        log.error("keyword file unusable, search feeds skipped this cycle: %s", exc)
+        groups = []
+
+    feed_items, feed_errors = read_fixed_feeds(fetcher, cfg, fetched_at=fetched_at)
+    search_items, search_errors = read_search_feeds(
+        fetcher, cfg, groups, fetched_at=fetched_at)
+
+    items = feed_items + search_items
+    errors = feed_errors + search_errors
+
+    log.info("fixed feeds: %d item(s) from %d source(s)",
+             len(feed_items), len(cfg.enabled_feeds()))
+    _report_counts(feed_items, [f.get("id") for f in cfg.enabled_feeds()],
+                   feed_errors)
+    log.info("search feeds: %d item(s) from %d group(s) x %d template(s)",
+             len(search_items), len(groups),
+             len(cfg.enabled_search_templates()))
+    _report_counts(search_items,
+                   [t.get("id") for t in cfg.enabled_search_templates()],
+                   search_errors)
+
+    for source_id, reason in errors:
+        log.warning("source failed: %s - %s", source_id, reason)
+
+    log.info("fetched %d raw item(s) in %.1fs, %d source(s) failed",
+             len(items), time.monotonic() - started, len(errors))
+    log.warning("filtering and ranking are not implemented yet (P2) - "
+                "nothing is stored, published or notified this cycle")
+    return items
 
 
 def run(cfg, once=False):

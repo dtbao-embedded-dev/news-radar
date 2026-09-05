@@ -18,6 +18,15 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **crawl**: the fetch layer - `python -m news_radar --once` now pulls real
+  items from the eight fixed feeds and from a search built out of every
+  keyword group in `frequency_words.txt`, and prints a count per source.
+  Adding a keyword group adds a hunting path with no code change. RSS, Atom
+  and the HN Algolia JSON API are all read; a source that times out, is
+  blocked or answers with something that is not a feed costs one warning line
+  and never the run. Requests carry an identifying User-Agent and are spaced
+  per hostname, so Reddit does not answer 403 and Google News does not
+  throttle. Nothing is filtered, stored or notified yet
 - **docker**: `Dockerfile` for the crawl service, base image pinned by digest,
   so `docker compose up -d` now builds and runs the whole stack
 - **crawl**: `python -m news_radar` - the entrypoint and schedule loop, with

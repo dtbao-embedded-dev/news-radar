@@ -54,8 +54,9 @@ feeds:
     rank_weight: 0.6
 
 # Search feeds: {kw} is replaced by each keyword group's primary term.
-# Cost per run is len(groups) x len(enabled templates) - keep that in mind
-# before enabling all three.
+# Cost per run is len(groups) x len(enabled templates) - six groups and the
+# three enabled below is 18 requests, on top of the eight fixed feeds. Keep
+# that in mind before enabling the fourth.
 search_templates:
   # `when:7d` is the whole reason this template earns its slot. Google News
   # answers relevance-first: without a window it returns hits aged months,
@@ -67,9 +68,26 @@ search_templates:
     format: rss
     enabled: true
     rank_weight: 0.8
+  # The same engine in English, and it is not a duplicate: the locale decides
+  # which press is searched at all. Measured on 2026-09-05 over the six shipped
+  # groups, `hl=vi` returned 48 usable stories and every one of them was in the
+  # AI group - the Vietnamese press does not write about ESP32, RTOS or RISC-V.
+  # `hl=en` returned 218 across all six. Keeping both costs one request per
+  # group per cycle and is what keeps Vietnamese AI coverage on the page.
+  - id: google_news_en
+    name: Google News (en)
+    url: "https://news.google.com/rss/search?q={kw}+when:7d&hl=en&gl=US&ceid=US:en"
+    format: rss
+    enabled: true
+    rank_weight: 0.8
+  # `typoTolerance=false` is not a nicety. Algolia's default typo tolerance
+  # matches 41,612 stories for `RTOS` and `FreeToken` for `FreeRTOS`, and
+  # search_by_date then returns the most recent of that noise - RTOS came back
+  # 0 usable of 20. Turning it off is strictly better on every shipped group:
+  # 97 usable stories a cycle instead of 77, measured 2026-09-05.
   - id: hn_algolia
     name: Hacker News search
-    url: "https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story"
+    url: "https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story&typoTolerance=false"
     format: hn_algolia_json
     enabled: true
     rank_weight: 0.8

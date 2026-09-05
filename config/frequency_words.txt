@@ -33,6 +33,12 @@ OTA update
 @10
 => Firmware
 
+# `RTOS` is four characters and used to return nothing at all: HN Algolia's
+# typo tolerance matched 41,612 stories for it (ESP32 matches 1,308) and
+# search_by_date handed back the most recent of that noise. The fix is
+# `typoTolerance=false` on the template in config.yaml, not a longer term here -
+# with it, `RTOS` returns 18 of 20 where `FreeRTOS` returns 14, and Google News
+# prefers the short form too.
 RTOS
 FreeRTOS
 Zephyr

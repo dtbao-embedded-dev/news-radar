@@ -6,8 +6,8 @@ group's primary term travels into the URL and the search engine does the first
 cut.
 
 Cost is `len(groups) x len(enabled templates)` requests per run - eight feeds,
-six groups and two templates is 20 requests, not eight. Worth knowing before
-enabling a third template.
+six groups and three templates is 26 requests, not eight. Worth knowing before
+enabling a fourth.
 
 Contract: docs/memory-ai/data/news-sources.md (search feeds),
 docs/memory-ai/behavior/news-search.md (stage 1)

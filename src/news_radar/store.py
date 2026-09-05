@@ -28,7 +28,7 @@ from .item import dedup_key
 __all__ = [
     "StoreError", "SCHEMA_VERSION", "DB_NAME", "open_db", "to_db", "from_db",
     "start_run", "finish_run", "save", "day_matches", "run_matches",
-    "unreported", "mark_reported", "prune",
+    "unreported", "mark_reported", "backup", "prune",
 ]
 
 log = logging.getLogger("news_radar.store")
@@ -306,12 +306,80 @@ def mark_reported(conn, dedup_keys, channel, when):
     conn.commit()
 
 
+def backup(conn, backup_dir, now, keep):
+    """One dated copy of the store per day. Returns `(path | None, removed)`.
+
+    Taken with SQLite's own online-backup API rather than by copying the file:
+    the crawl service holds this connection open and a `-wal` may be mid-flush,
+    so a filesystem copy can produce a database that opens and is missing the
+    last write. `conn.backup()` is the supported way to snapshot a live one.
+
+    Three decisions worth stating:
+
+    - **The filename is the rotation key.** `news-<UTC date>.db` sorts as the
+      date does, so keeping the newest N is a slice and nothing has to parse a
+      name back into a time. A second cycle the same day is a no-op - at the
+      default interval there are 48 of them, and 48 identical copies is not an
+      archive.
+    - **UTC, like every other timestamp in this file.** Local time is a
+      render-time concern and does not reach layer 4. A backup taken at 06:00
+      Ho Chi Minh sits under the previous UTC date, which is correct and
+      uninteresting: what matters is that the ordering is total.
+    - **`backup_dir` is a caller's argument and must never be under
+      `data_dir`.** That directory is served to the public web by Caddy, and a
+      backup there is one Caddyfile line away from handing a stranger the whole
+      archive in one request. `config.yaml` documents it; this file cannot
+      check it, because it does not know what is being served.
+
+    `keep <= 0` is the off switch: nothing is written, nothing is deleted, and
+    no directory is created.
+    """
+    if not keep or keep <= 0:
+        return (None, 0)
+
+    backup_dir = Path(backup_dir)
+    stamp = now.astimezone(dt.timezone.utc).date().isoformat()
+    path = backup_dir / "news-{}.db".format(stamp)
+    if path.exists():
+        return (None, 0)
+
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    # Written under a temporary name and renamed into place: a backup that was
+    # interrupted half-way must not be left looking like a good one, which is
+    # the failure you would only discover on the day you needed it.
+    partial = path.with_name(path.name + ".part")
+    try:
+        dest = sqlite3.connect(str(partial))
+        try:
+            conn.backup(dest)
+        finally:
+            dest.close()
+        partial.replace(path)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+
+    existing = sorted(backup_dir.glob("news-*.db"))
+    removed = 0
+    for old in existing[:-keep]:
+        old.unlink()
+        removed += 1
+
+    log.info("backup: wrote %s, %d older copy(ies) dropped, %d kept",
+             path, removed, min(len(existing), keep))
+    return (path, removed)
+
+
 def prune(conn, data_dir, retention_days, now):
     """Drop rows and `days/` files older than the window. Returns (rows, files).
 
-    `retention_days = 0` means keep everything and is the shipped default - the
-    store is small and an operator who wants the archive should not have to
-    notice a setting to keep it.
+    `retention_days = 0` means keep everything, and remains the fallback for an
+    **absent** key so that upgrading a deployment never starts deleting rows
+    nobody chose to lose. The shipped `config.yaml` sets `90`: an unattended
+    radar with no ceiling is a disk that fills on a weekend, and P6's definition
+    of done says "no disk growth". `backup()` runs immediately before this, so
+    the first prune always has a copy standing in front of it.
     """
     if not retention_days or retention_days <= 0:
         return (0, 0)

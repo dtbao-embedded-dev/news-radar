@@ -144,6 +144,11 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
             log.warning("no keyword group this cycle, the page is left as it "
                         "was rather than rewritten empty")
 
+        # Before the prune, and inside the same guard, on purpose: if the copy
+        # cannot be written the deletion below never runs either. No backup, no
+        # deletion is the one ordering worth being strict about.
+        store.backup(conn, cfg.get("ops.backup_dir", "backups"), fetched_at,
+                     cfg.get("ops.backup_keep", 7))
         store.prune(conn, data_dir, cfg.get("storage.retention_days", 0),
                     fetched_at)
         store.finish_run(conn, run_id, dt.datetime.now(dt.timezone.utc),

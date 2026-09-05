@@ -254,16 +254,15 @@ def validate(cfg, env=None):
         problems.append(
             "ai.api_url must be an http(s) url, got {!r}".format(api_url))
 
-    # Enabled with no key is the notification rule applied to a third thing: a
-    # stack that starts and silently never summarises is the same failure as
-    # one that starts and silently never notifies.
-    if cfg.get("ai.enabled"):
-        if not api_url:
-            problems.append("ai.enabled is true but ai.api_url is empty")
-        if not (env.get("OPENAI_API_KEY") or "").strip():
-            problems.append(
-                "ai.enabled is true but OPENAI_API_KEY is not set - set it in "
-                "docker/.env or turn the summary off")
+    # The url is required when the summary is on; the *key* deliberately is not.
+    # That is where this section parts company with the notification rule below:
+    # a channel genuinely cannot work without its secret, while an SGLang, vLLM
+    # or Ollama on the LAN authenticates nobody. Refusing to start would be this
+    # file telling the operator their own server does not exist. A remote
+    # endpoint with no key answers 401, and `summarize()` logs that every cycle -
+    # visible, which is the property the fatal check was really protecting.
+    if cfg.get("ai.enabled") and not api_url:
+        problems.append("ai.enabled is true but ai.api_url is empty")
 
     # The one rule the whole project cares most about.
     for channel in cfg.enabled_channels():

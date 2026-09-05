@@ -137,11 +137,16 @@ ai:
   api_url: https://api.openai.com/v1/chat/completions
   model: gpt-4o-mini
 
-  # Needs OPENAI_API_KEY in docker/.env whenever enabled is true - including
-  # for a local Ollama, which ignores the value but is still asked for one.
+  # OPENAI_API_KEY in docker/.env, and only if the endpoint wants one. A
+  # server on your own LAN authenticates nobody, so leave the key unset and no
+  # Authorization header is sent at all. A hosted endpoint with no key set
+  # answers 401, which is logged every cycle rather than failing startup.
 
   max_per_topic: 5       # top-scored stories per group that reach the prompt
-  timeout_s: 60          # a completion is slower than a feed; 15s is not enough
+  # A completion is slower than a feed; 15s is not enough. 60 suits a hosted
+  # small model - a self-hosted 27B on one box measured ~95s, so raise this
+  # rather than wonder why every summary "times out".
+  timeout_s: 60
   notify_at_hour: 8      # local hour the once-a-day message goes out (0-23)
 
 notification:

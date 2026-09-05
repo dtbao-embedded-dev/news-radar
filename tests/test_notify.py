@@ -21,7 +21,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from news_radar import notify  # noqa: E402
 from news_radar.fetch.http import Fetcher  # noqa: E402
-from news_radar.notify import telegram  # noqa: E402
+from news_radar.notify import discord, telegram  # noqa: E402
 
 FAILURES = []
 HITS = {}
@@ -55,10 +55,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             int(self.headers.get("Content-Length") or 0))))
 
         if "bad" in path:
-            self._reply(400, b'{"ok":false,"description":"chat not found"}')
+            self._reply(400, b'{"message":"Invalid Webhook Token","code":50027}')
             return
         if "flaky" in path and HITS[path] > 1:
             self._reply(400, b'{"ok":false,"description":"too many entities"}')
+            return
+        if path.startswith("/webhook"):
+            # Discord answers a webhook with 204 and no body at all - not the
+            # 200 + JSON the bot API sends.
+            self.send_response(204)
+            self.end_headers()
             return
         self._reply(200, b'{"ok":true}')
 
@@ -180,6 +186,65 @@ eq("the accepted chunk still counts", partial.sent, 1)
 eq("the refused one is counted too", partial.failed, 1)
 check("only the accepted stories come back for marking",
       0 < len(partial.keys) < 40, str(len(partial.keys)))
+
+
+# --- discord: markdown is a second escaping problem, not the same one -----
+
+WEBHOOK = "http://127.0.0.1:{}/webhook".format(PORT)
+
+hostile_md = discord.build([("ESP32", [
+    row("*bold* _under_ [link] `code` ~strike~ |spoil|", "k1")])])
+md = hostile_md[0][0]
+check("the group label is bold markdown", md.startswith("**ESP32**"), md)
+check("a bracket in a title cannot break the link syntax",
+      "\\[link\\]" in md, md)
+check("an asterisk in a title is escaped", "\\*bold\\*" in md, md)
+check("an underscore in a title is escaped", "\\_under\\_" in md, md)
+check("a backtick in a title is escaped", "\\`code\\`" in md, md)
+check("a tilde in a title is escaped", "\\~strike\\~" in md, md)
+check("a pipe in a title is escaped", "\\|spoil\\|" in md, md)
+check("the story is a masked link, so the raw url never widens the line",
+      "](https://example.com/a)" in md, md)
+
+paren = discord.build([("G", [row("t", "k", url="https://x/a(b)c")])])[0][0]
+check("a closing paren in a url is encoded, not left to end the link early",
+      "%29" in paren and "(b)" not in paren, paren)
+
+# 2000 is a quarter of Telegram's budget: the same run makes more Discord
+# messages than Telegram messages, which is expected rather than a bug.
+same = [("G{}".format(i), [row("x" * 200, "k{}-{}".format(i, j))
+                           for j in range(4)]) for i in range(6)]
+check("a quarter of the budget makes more messages, not truncated ones",
+      len(discord.build(same)) > len(telegram.build(same)),
+      "{} vs {}".format(len(discord.build(same)), len(telegram.build(same))))
+check("every discord chunk is under the webhook limit",
+      all(len(text) <= discord.LIMIT for text, _ in discord.build(same)))
+
+dgroups = [("ESP32", [row("First", "k1"), row("Second", "k2")]),
+           ("Rust", [row("Third", "k3")])]
+
+dres = discord.send(fetcher, dgroups, WEBHOOK)
+eq("one webhook post went out", dres.sent, 1)
+eq("nothing failed", dres.failed, 0)
+eq("the accepted keys come back for mark_reported", set(dres.keys),
+   {"k1", "k2", "k3"})
+
+dbody = BODIES["/webhook"][0]
+check("the payload is a plain content body", "content" in dbody, str(dbody))
+check("no embeds - the 6000-character total is easier to overrun than the "
+      "per-embed limit", "embeds" not in dbody, str(dbody))
+check("the message carries both groups",
+      "ESP32" in dbody["content"] and "Rust" in dbody["content"])
+
+eq("nothing to send posts nothing at all",
+   discord.send(fetcher, [], WEBHOOK).sent, 0)
+eq("...and asks the webhook nothing", HITS.get("/webhook"), 1)
+
+dbad = discord.send(fetcher, dgroups, WEBHOOK + "-bad")
+eq("a revoked webhook sends nothing", dbad.sent, 0)
+eq("a revoked webhook is recorded as failed", dbad.failed, 1)
+eq("a revoked webhook marks no story as reported", dbad.keys, ())
+eq("a 400 is not retried", HITS.get("/webhook-bad"), 1)
 
 
 server.shutdown()

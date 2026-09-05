@@ -269,6 +269,67 @@ check("setting one ops key keeps the siblings",
 
 
 # --------------------------------------------------------------------------
+# the ai section - P6-4
+# --------------------------------------------------------------------------
+
+# The whole section ships inert. P6-4 was dropped once for costing an API key
+# and a bill, and the answer to that is not "it is cheap" - it is that an
+# existing config.yaml that says nothing about `ai` must upgrade into this
+# version and behave exactly as it did before.
+check("the summary ships off", cfg.get("ai.enabled") is False,
+      repr(cfg.get("ai.enabled")))
+check("the default endpoint is OpenAI's own",
+      cfg.get("ai.api_url") == "https://api.openai.com/v1/chat/completions",
+      repr(cfg.get("ai.api_url")))
+check("the default model is the cheap one",
+      cfg.get("ai.model") == "gpt-4o-mini", repr(cfg.get("ai.model")))
+check("five stories a topic is the default",
+      cfg.get("ai.max_per_topic") == 5, repr(cfg.get("ai.max_per_topic")))
+check("a completion gets longer than a feed does",
+      cfg.get("ai.timeout_s") == 60, repr(cfg.get("ai.timeout_s")))
+check("the daily message defaults to the morning",
+      cfg.get("ai.notify_at_hour") == 8, repr(cfg.get("ai.notify_at_hour")))
+check("an absent ai section costs an existing config nothing",
+      cfgmod.load(write(MINIMAL), env=SECRETS).get("ai.enabled") is False)
+
+# Enabled with no key is the notification rule applied to a third thing: a
+# stack that starts and silently never summarises is the same failure as one
+# that starts and silently never notifies.
+msg = check_raises("enabling the summary with no key is refused", cfgmod.load,
+                   write(MINIMAL + "\nai:\n  enabled: true\n"), env=SECRETS)
+check("the missing-key message names the variable", "OPENAI_API_KEY" in msg, msg)
+
+msg = check_raises("a non-http api_url is refused", cfgmod.load,
+                   write(MINIMAL + "\nai:\n  api_url: localhost:11434/v1\n"),
+                   env=SECRETS)
+check("the api_url message names the key", "api_url" in msg, msg)
+
+msg = check_raises("an api_url blanked while enabled is refused", cfgmod.load,
+                   write(MINIMAL + '\nai:\n  enabled: true\n  api_url: ""\n'),
+                   env=dict(SECRETS, OPENAI_API_KEY="k"))
+check("the blank api_url message names the key", "api_url" in msg, msg)
+
+msg = check_raises("hour 24 does not exist", cfgmod.load,
+                   write(MINIMAL + "\nai:\n  notify_at_hour: 24\n"), env=SECRETS)
+check("the hour message names the key", "notify_at_hour" in msg, msg)
+
+msg = check_raises("a topic cap of zero would send an empty prompt", cfgmod.load,
+                   write(MINIMAL + "\nai:\n  max_per_topic: 0\n"), env=SECRETS)
+check("the topic-cap message names the key", "max_per_topic" in msg, msg)
+
+ai_on = cfgmod.load(write(MINIMAL + """
+ai:
+  enabled: true
+  api_url: http://ollama.invalid:11434/v1/chat/completions
+  model: qwen2.5
+"""), env=dict(SECRETS, OPENAI_API_KEY="k"))
+check("an OpenAI-compatible endpoint that is not OpenAI is accepted",
+      ai_on.get("ai.api_url") == "http://ollama.invalid:11434/v1/chat/completions")
+check("setting one ai key keeps the siblings",
+      ai_on.get("ai.max_per_topic") == 5)
+
+
+# --------------------------------------------------------------------------
 # the committed template must satisfy its own contract
 # --------------------------------------------------------------------------
 
@@ -290,6 +351,10 @@ if example.is_file():
           cfg.get("storage.retention_days") == 0)
     check("the template ships the heartbeat off, url to be filled in locally",
           shipped.get("ops.heartbeat_url") == "")
+    # The template loads with no OPENAI_API_KEY in `SECRETS`, which only holds
+    # because it ships the summary off. That is the check, not the value.
+    check("the template ships the summary off, so it needs no API key",
+          shipped.get("ai.enabled") is False, repr(shipped.get("ai.enabled")))
 else:
     FAILURES.append("config/config.yaml.example is missing from the checkout")
 

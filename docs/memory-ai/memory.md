@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-05 - 18 durable doc(s)._
+_Generated 2026-09-05 - 19 durable doc(s)._
 
 ## State (transient)
 
@@ -26,6 +26,18 @@ finished-product definition all of it serves.
 
 ### P6 - Ops
 
+- **The day now arrives as a paragraph, not only as a list.** P6-4 shipped:
+  `summarize.py` writes one line per keyword group - the group's name and at
+  most two sentences about what stood out - above the stories on the page, and
+  sends that same text to Telegram and Discord once a local day. Measured on
+  2026-09-05 against a local stub endpoint driving a real `--once` cycle: with
+  `ai.enabled: false` no request left the process and the page carried no
+  summary block; enabled, the page carried it and the log said
+  `summary: sent to 2 of 2 channel(s) [telegram, discord]`; a second cycle in
+  the same local day logged `summary: already sent today` and sent nothing; and
+  with the endpoint pointed at a refused port the cycle exited `0` with one
+  WARNING and **no** entry in its problem list - an endpoint having a bad
+  afternoon is not a news-radar outage. Contract in [[ai-summary]].
 - **A failing cycle now reaches the phone, and it says so exactly twice.**
   Measured in the container on 2026-09-05 against a deliberately 404-ing
   `site_url`, three cycles one minute apart, one process throughout:
@@ -311,8 +323,9 @@ finished-product definition all of it serves.
 
 **Time, not code.** Every module the design bank specifies is now written: the
 entrypoint, the config loader, the item shape, the keyword parser, the whole
-fetch layer, the whole selection layer, the store, the renderer, both senders and
-the ops layer - and the whole thing is reachable at `https://news.dtbao.org`.
+fetch layer, the whole selection layer, the store, the renderer, both senders,
+the ops layer and the summary - and the whole thing is reachable at
+`https://news.dtbao.org`.
 
 - **Seven days unattended is the one thing still open.** It is P6's definition of
   done, and the clock starts when this branch merges: nothing has yet run
@@ -324,9 +337,12 @@ the ops layer - and the whole thing is reachable at `https://news.dtbao.org`.
   expecting a ping yet. Until a healthchecks.io or Uptime Kuma url goes into
   `config/config.yaml`, the half of P6-1 that survives the container being killed
   is built but not armed. The site check and the alerting work without it.
-- **P6-4, the AI summary, was deliberately not built** - see
-  [[delivery-phases]] for why. It is the only planned task that serves none of
-  the six finished-product statements.
+- **P6-4, the AI summary, is built after all** - see [[ai-summary]] for the
+  contract and [[delivery-phases]] for why the decision to drop it was
+  reversed. It ships `ai.enabled: false` and has never run against a real
+  endpoint: everything below was measured against a local stub, so the open
+  question is what a real model writes when handed a real day's headlines, and
+  whether two sentences a topic reads as a summary or as a horoscope.
 - **Nobody has yet watched a real outage they did not cause.** Every alert so far
   came from a `site_url` pointed at a 404 on purpose. Whether `ALERT_AFTER = 2` is
   the right chattiness against real feed flakiness is a question only the seven
@@ -411,10 +427,12 @@ the ops layer - and the whole thing is reachable at `https://news.dtbao.org`.
 
 ## Current focus
 
-**P6 Ops is built** (2026-09-05). A cycle that fails now says so - twice per
-outage, on Telegram and Discord - and a cycle that stops happening at all trips a
-dead-man's switch that lives outside this stack. The store gets a dated backup
-before anything is pruned, and the archive has a 90-day ceiling.
+**P6 Ops is built, P6-4 included** (2026-09-05). A cycle that fails now says
+so - twice per outage, on Telegram and Discord - and a cycle that stops
+happening at all trips a dead-man's switch that lives outside this stack. The
+store gets a dated backup before anything is pruned, and the archive has a
+90-day ceiling. The day's matches also arrive as a paragraph now: one line per
+keyword group, on the page every cycle and on the phone once a local day.
 
 **What is left of P6 is time, not code.** Seven days unattended with no manual
 intervention and no disk growth is the phase's definition of done, and the clock
@@ -451,9 +469,32 @@ starts when this branch merges.
 - **The retention default and the retention template deliberately disagree.**
   `config.py` keeps `0` so an upgrade never starts deleting rows nobody chose to
   lose; the shipped template says `90` because someone chose it.
-- **P6-4 (AI summary) was dropped on its own terms** - the only planned task that
-  serves none of the six finished-product statements, against an API key and a
-  third runtime dependency. Recorded in [[delivery-phases]] rather than deleted.
+- **P6-4 landed on `release/v0.1` after being dropped** (2026-09-05):
+  `src/news_radar/summarize.py` (new - `summarize()`, `build_prompt()`,
+  `daily_key()`, `SENTENCES_MAX`), `fetch/http.py` (`post_json()` takes
+  `headers`), `config.py` (the `ai` section), `render.py` (`_summary()`, the
+  `summary=` argument), `__main__.py` (`_summarize()`, `_send_summary()`,
+  `_publish()` returning `(run_id, summary)`, `_fetcher()`'s timeout override),
+  `config/config.yaml.example`, `docker/.env.example`,
+  `docker/docker-compose.yml`, and `tests/test_summarize.py` (new).
+- **One third of the reason to drop P6-4 had quietly expired.** The recorded
+  objection was an API key, a bill and a third runtime dependency - but P4 had
+  already added `Fetcher.post_json()`, so an OpenAI-compatible
+  `/v1/chat/completions` is a POST with a bearer header and no new import. The
+  other two are opt-in. Worth remembering as a shape: a decision written down
+  with its reasons can be re-checked against the reasons, which is the whole
+  argument for writing them down.
+- **Per topic, not one blob - and the phone gets it once a day.** A group with
+  nothing notable is left out of the prompt entirely rather than told to say
+  "nothing today", and two sentences a topic is a hard bound in the prompt. The
+  page is rewritten every cycle; the message goes at `ai.notify_at_hour`, kept
+  to once by `summary:<local date>` in the existing `reported` table, so a
+  restart does not re-send it.
+- **The summary may never speak for the cycle.** `summarize()` has one failure
+  mode, `None`, and the caller adds nothing to `problems` - a dead endpoint
+  cannot withhold the heartbeat ping or trip an ops alert. Same asymmetry as
+  P6-1's refused ping: the optional thing does not get to report on the thing
+  that is not.
 - **P5 landed in four commits on `release/v0.1`** (2026-09-05):
   `docker/cloudflared.yml` (new, the ingress), `docker/docker-compose.yml` (the
   `cloudflared` service behind `profiles: ["tunnel"]`), `.gitignore`,
@@ -603,7 +644,7 @@ loader and the design bank - see `progress.md`.
 ## Memory
 
 ### [architecture] Delivery Phases
-*`architecture/delivery-phases.md` - The finished product news-radar aims at, and the phase-by-phase task breakdown that gets there. - status: active - source: conversation, CHANGELOG.md - keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, scope, milestones, definition of done*
+*`architecture/delivery-phases.md` - The finished product news-radar aims at, and the phase-by-phase task breakdown that gets there. - status: active - source: conversation, CHANGELOG.md - keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, P6-4, ai summary, scope, milestones, definition of done*
 
 # Delivery Phases
 
@@ -743,14 +784,14 @@ restart with whatever else a host connector is carrying. The tunnel id lives in
 a committed `docker/cloudflared.yml`; only the credentials file is a secret.
 Details in [[deployment-homelab]], the procedure in [[setup-homelab]].
 
-### P6 — Ops *(built; the seven unattended days are still running)*
+### P6 — Ops *(built, P6-4 included; the seven unattended days are still running)*
 
 | # | Task |
 |---|------|
 | P6-1 | ~~Heartbeat: a run that fails silently must be visible~~ - `ops.heartbeat()`, a site check then a dead-man's-switch ping |
 | P6-2 | ~~Failure alerting into the same Telegram/Discord channels~~ - `ops.Health` + `alert()` on both channels |
 | P6-3 | ~~Backup and restore of the SQLite store~~ - `store.backup()`, restore documented in [[storage-layer]] |
-| P6-4 | Optional AI summary of the day's matches - **deliberately not built** |
+| P6-4 | ~~Optional AI summary of the day's matches~~ - `summarize.py`, off by default; **dropped once, then built when a third of the reason expired** |
 
 **A ping is a claim that the cycle worked**, and everything in P6-1 exists to
 keep that claim from being made falsely: the published page is fetched *before*
@@ -766,11 +807,38 @@ sends one saying it recovered. A broken thing repeats every thirty minutes, and
 an alert that repeats with it is one you learn to swipe away - taking the next
 real one with it.
 
-**P6-4 was dropped on its own terms.** It is the only task in the whole plan that
-serves none of the six finished-product statements, and it would cost an API key,
-a third runtime dependency and a per-run bill against a two-dependency rule the
-project has held since P0. It stays listed rather than deleted: the reason to
-skip it is worth more than the task was.
+**P6-4 was dropped on its own terms, and then built when one of those terms
+expired.** The drop rested on three costs: an API key, a per-run bill, and a
+third runtime dependency against a two-dependency rule the project has held
+since P0. P4 retired the third without anyone noticing at the time -
+`Fetcher.post_json()` exists, so an OpenAI-compatible `/v1/chat/completions` is
+a POST with a bearer header and no new import. What remained was a key and a
+bill, and both are opt-in: `ai.enabled` ships `false`, so a config that says
+nothing about `ai` never reaches the network. Naming the *wire format* rather
+than a vendor is what makes the bill optional too - OpenRouter, DeepSeek, Groq
+and a local Ollama all answer the same endpoint, and the last costs nothing.
+
+**The summary is per topic, and a quiet topic is not in it.** One line per
+keyword group - the group's name, then at most `SENTENCES_MAX` sentences about
+what actually stood out. A group whose day held nothing notable is left out of
+the prompt entirely rather than given a sentence saying so, which is what keeps
+the message a glance. The rows arrive already `score DESC` from
+`store._matches()`, so "the notable ones" is a slice and not a second ranking
+pass.
+
+**The page gets it every cycle; a phone gets it once a local day.** The page is
+somewhere you go and a message is something that interrupts you, and
+forty-eight interruptions a day saying roughly the same thing is how a channel
+gets muted - taking the outage alerts of P6-2 with it. "Once" survives a restart
+because it is not remembered in memory: the summary rides in the existing
+`reported` table under `summarize.daily_key()`, per channel and idempotent, the
+same mechanism that keeps a story from being sent twice.
+
+**And it may never cost a cycle.** `summarize()` has exactly one failure mode,
+`None`, and the caller adds nothing to `problems`. An endpoint having a bad
+afternoon is a page without a paragraph - never a withheld heartbeat ping, and
+never an ops alert. That asymmetry is deliberate in the same way P6-1's is: the
+thing that is optional must not be able to speak for the thing that is not.
 
 **What is left is time, not code.** Seven days unattended with no manual
 intervention and no disk growth is P6's definition of done, and nothing has yet
@@ -783,7 +851,7 @@ run unattended for longer than a cycle. `progress.md` carries the clock.
 - No mobile app; the page is responsive and that is the whole client story.
 
 ### [architecture] Module Layout and Stack
-*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: active - source: src/news_radar/, Dockerfile, requirements.txt - keywords: tree, layout, layering, ops.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
+*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: active - source: src/news_radar/, Dockerfile, requirements.txt - keywords: tree, layout, layering, ops.py, summarize.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
 
 # Module Layout and Stack
 
@@ -824,6 +892,7 @@ news-radar/
 │   ├── store.py                # DONE - SQLite persistence, seen-set, retention, backup
 │   ├── render.py               # DONE - output/index.html + days/<date>.html
 │   ├── ops.py                  # DONE - P6: heartbeat, Health, ALERT_AFTER
+│   ├── summarize.py            # DONE - P6-4: per-topic AI summary, OpenAI wire format
 │   └── notify/                 # DONE - P4
 │       ├── __init__.py         # SendResult, pick, chunk, clip
 │       ├── telegram.py         # bot API, HTML, 4000; alert() has no parse_mode
@@ -840,6 +909,7 @@ news-radar/
 │   ├── test_store.py           # plain asserts, stdlib only (sqlite3)
 │   ├── test_render.py          # plain asserts, stdlib only
 │   ├── test_notify.py          # plain asserts, stdlib only, local http.server
+│   ├── test_summarize.py       # plain asserts, stdlib only, local http.server
 │   ├── test_release.py         # plain asserts, stdlib only
 │   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
@@ -864,7 +934,7 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
 | 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
 | 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
-| 5 — output | `render.py`, `notify/*`, `ops.py` | layers 3 and 4; `notify/*` and `ops.py` also layer 1 |
+| 5 — output | `render.py`, `notify/*`, `ops.py`, `summarize.py` | layers 3 and 4; `notify/*`, `ops.py` and `summarize.py` also layer 1 |
 
 `ops.py` sits in layer 5 for the same reason `notify/*` does and imports layer 1
 for the same reason too - the heartbeat's site check and its ping are GETs, and
@@ -874,6 +944,15 @@ verdict on the cycle arrive as arguments that `__main__.py` builds, which is why
 `tests/test_ops.py` runs against a local `http.server` with nothing installed.
 See [[config-and-env]] for the keys and [[delivery-phases]] for why the ping is
 withheld rather than sent on a bad cycle.
+
+`summarize.py` joins them on the same terms and for the same reason: a chat
+completion is a POST that wants the `Fetcher`'s User-Agent, retry and
+`Retry-After` handling as much as a webhook does. It reads no config and no
+clock either - the url, the key, the model and the rows all arrive as arguments,
+which is what lets `tests/test_summarize.py` exercise every failure path against
+a local `http.server`. The one thing it is given that `ops.py` is not is a
+longer timeout: `__main__._fetcher()` takes an override, because fifteen seconds
+is a feed's budget and not a completion's. See [[config-and-env]] for the keys.
 
 `notify/*` reaching back to layer 1 is the one deliberate widening: a POST needs
 the same User-Agent, timeout, retry and per-host gap a GET does, and honouring a
@@ -909,6 +988,11 @@ yet. That is the whole point of `setup.py`.
 
 **Runtime dependencies: `pyyaml`, `feedparser`. That is the entire list.** Adding
 a third needs a line in the changelog saying what it replaced.
+
+**P6-4 is what that rule looks like when it bites and holds.** The AI summary was
+dropped once partly for needing an `openai` package; it shipped instead as one
+`Fetcher.post_json()` against an OpenAI-compatible `/v1/chat/completions`, which
+is a POST with a bearer header and no new import. See [[delivery-phases]].
 
 `scripts/setup.py` and `scripts/release.py` use **stdlib only** — no PyYAML, no
 feedparser — so they work on a bare Python install.
@@ -1289,7 +1373,7 @@ Everything under `output/` is gitignored. It is derived data: deleting the whole
 directory costs the archive, not the configuration.
 
 ### [interface] Config Keys, Keyword File and Environment
-*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt - keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
 
 # Config Keys, Keyword File and Environment
 
@@ -1341,6 +1425,12 @@ someone chose it.
 | `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. This is what notices the tunnel connector going away. `""` = no check |
 | `ops.backup_dir` | str | `backups` | Where the daily store backup is written. **Never under `storage.data_dir`** - that directory is served to the public web |
 | `ops.backup_keep` | int | `7` | Newest N backups kept; `0` = back nothing up |
+| `ai.enabled` | bool | `false` | The AI summary. Off is the shipped case: a config that says nothing about `ai` never reaches the network and never sees a bill |
+| `ai.api_url` | str | `https://api.openai.com/v1/chat/completions` | Any endpoint speaking the OpenAI chat-completions wire format - OpenRouter, DeepSeek, Groq, a local Ollama. Must be an http(s) url, and non-empty when `ai.enabled` |
+| `ai.model` | str | `gpt-4o-mini` | Model id, passed through verbatim |
+| `ai.max_per_topic` | int | `5` | Top-scored stories per keyword group that reach the prompt. Must be >= 1: zero is a prompt with nothing in it and a bill for asking |
+| `ai.timeout_s` | int | `60` | Per-request timeout for the completion only. `advanced.request_timeout_s` stays the feeds' budget; fifteen seconds would time out every summary while looking like an outage |
+| `ai.notify_at_hour` | int | `8` | Local hour (0-23) at or after which the once-a-day summary message goes out. The page is rewritten every cycle regardless |
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |
@@ -1403,11 +1493,13 @@ outside it, from the real environment.
 | `TELEGRAM_BOT_TOKEN` | when Telegram is enabled | - | `notify/telegram.py` |
 | `TELEGRAM_CHAT_ID` | when Telegram is enabled | - | `notify/telegram.py` |
 | `DISCORD_WEBHOOK_URL` | when Discord is enabled | - | `notify/discord.py` |
+| `OPENAI_API_KEY` | when `ai.enabled` is true | - | `__main__.py`, handed to `summarize.summarize()`. Asked for even by a local Ollama, which ignores the value |
 | `NEWS_RADAR_CONFIG` | no | `config/config.yaml` | `config.py` |
 | `TZ` | no | `Asia/Ho_Chi_Minh` | container clock; `app.timezone` still wins for rendering |
 
 Startup validation: a channel that is `enabled: true` with its variable missing is
-a **fatal config error**, not a warning. Silently not sending is the failure mode
+a **fatal config error**, not a warning - and `ai.enabled: true` with no
+`OPENAI_API_KEY` is the same rule applied to a third thing. Silently not sending is the failure mode
 this project most wants to avoid. `scripts/setup.py` checks the same rule before
 the container is ever started - see [[cli-scripts]].
 
@@ -1956,18 +2048,26 @@ at all. A `#` starts a comment only at the start of a line, so the term
 ```
 Fetcher(user_agent, timeout_s=15, max_retries=2, interval_ms=2000, backoff_s=1.0)
     .get(url)               -> bytes    raises HttpError
-    .post_json(url, payload) -> bytes   raises HttpError
+    .post_json(url, payload, headers=None) -> bytes   raises HttpError
 HttpError(message, status=None, url=None, body=b"", retry_after=None)
 RETRY_AFTER_MAX = 60.0
 ```
 
 **Both verbs, one code path.** `get()` reads a feed and `post_json()` talks to a
-notification channel; both go through a private `_request()`, so the
-User-Agent, the timeout, the retry policy and the per-host gap are decided once.
+notification channel or an AI endpoint; both go through a private `_request()`,
+so the User-Agent, the timeout, the retry policy and the per-host gap are
+decided once.
 A POST is retried on the same statuses a GET is, which means a 5xx can deliver
 the same message twice - the trade [[notify-channels]] already takes, where a
 duplicate is the acceptable failure and a dropped story is not.
 
+- **`headers` is merged *underneath* the transport's own, never over them.** It
+  exists for one caller - `summarize.py` needs `Authorization: Bearer <key>` for
+  an OpenAI-compatible endpoint, and neither channel webhook needs a header at
+  all. The three the class sets for itself (User-Agent, Accept, Accept-Encoding)
+  and the Content-Type overwrite whatever the caller passed, so a caller can add
+  a header and can never take one away: losing the User-Agent to a typo is the
+  403 on both Reddit sources, arriving from a different direction.
 - **One instance per cycle.** The `{hostname: last_request}` throttle state
   lives on it, so every source in the run shares one idea of how recently a
   host was asked. Keyed by **hostname**: `hn` and `hn_algolia` are different
@@ -2203,7 +2303,7 @@ page does not earn a dependency.
 |-----------|---------|-------|
 | `local_tz(name)` | `tzinfo` | Never raises - see the fallback below |
 | `day_bounds(now, tz)` | `(start_utc, end_utc)` | The local day containing `now`, half-open, expressed in UTC |
-| `write(data_dir, labels, day_rows, meta, tz, threshold=5)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html` with identical bodies |
+| `write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html` with identical bodies. `summary` is the AI summary, one topic per line; falsy renders no block at all, which is the shipped case |
 
 `labels` fixes the group order **and** is what keeps an empty group on the page:
 a keyword that has gone quiet looks identical to a keyword nobody wrote about,
@@ -2292,6 +2392,144 @@ docker compose -f docker/docker-compose.yml start news-radar
 The next cycle rewrites `index.html` from the restored store. Day snapshots under
 `output/days/` are **not** in the backup: they are rendered output, and every one
 of them is reproducible from the rows that are.
+
+### [interface] The AI Summary - summarize.py
+*`interface/ai-summary.md` - Every public signature of the AI summary layer, the OpenAI-compatible contract it speaks, and the rules that keep an optional feature from ever costing a cycle. - status: active - source: src/news_radar/summarize.py, src/news_radar/__main__.py, src/news_radar/render.py, src/news_radar/fetch/http.py - keywords: summarize, build_prompt, daily_key, SENTENCES_MAX, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, chat completions, OpenAI-compatible, Ollama, per-topic summary, P6-4*
+
+# The AI Summary - `summarize.py`
+
+> One line per keyword group, in Vietnamese, from any endpoint speaking the
+> OpenAI chat-completions wire format. Off by default, and constitutionally
+> unable to fail a cycle.
+
+## Signatures
+
+```
+SENTENCES_MAX = 2
+
+daily_key(local_date)                                  -> str
+build_prompt(rows_by_label, labels, max_per_topic)     -> str
+summarize(fetcher, api_url, api_key, model,
+          rows_by_label, labels, max_per_topic)        -> str | None
+```
+
+`rows_by_label` is the shape `store.day_matches()` returns; `labels` is the
+keyword file's group order, the same list the page renders in.
+
+Layer 5, importing **layer 1** only - the same widening `notify/*` and `ops.py`
+already take. No config, no clock, no store: everything arrives as an argument,
+which is why `tests/test_summarize.py` exercises every path against a local
+`http.server` with nothing installed. See [[module-layout]].
+
+## No third dependency
+
+P6-4 was dropped once partly for needing an `openai` package against the
+two-dependency rule. It ships instead as one `Fetcher.post_json()` with an
+`Authorization: Bearer` header - see [[fetch-layer]] for why that header is
+merged *underneath* the transport's own. The **wire format** is what is named,
+not the vendor: OpenRouter, DeepSeek, Groq and a local Ollama all answer
+`/v1/chat/completions`, and the last has no bill. Full reasoning in
+[[delivery-phases]].
+
+## The request
+
+| Field | Value |
+|-------|-------|
+| Method | `POST` to `ai.api_url` |
+| Header | `Authorization: Bearer $OPENAI_API_KEY` |
+| Body | `{"model": ai.model, "messages": [{"role": "user", "content": <prompt>}], "temperature": 0.3}` |
+| Read back | `choices[0].message.content`, stripped |
+| Timeout | `ai.timeout_s` (default 60) - a dedicated `Fetcher`, because `advanced.request_timeout_s` is the feeds' 15 s |
+
+`temperature` is low but not zero: a summary read every day should not be the
+same four sentences with the nouns swapped, and nothing here needs
+reproducibility.
+
+## The prompt is per topic, and a quiet topic is not in it
+
+`build_prompt()` walks `labels` in order, takes the first `max_per_topic` rows
+of each group - already `score DESC` from `store._matches()`, so "the notable
+ones" is a slice and not a second ranking pass - and emits one block per topic.
+**A group with no rows contributes no block**, so the model is never handed a
+topic it would have to fill with "nothing today".
+
+The instruction is written in English (everything in this repository is) and
+asks for a Vietnamese answer in one shape:
+
+```
+<topic name> — <at most SENTENCES_MAX sentences>
+```
+
+No links, no numbering, no heading, no preamble, and a topic whose stories are
+unremarkable omitted entirely. That bound is the whole reason the daily message
+stays a glance rather than a wall of text.
+
+`build_prompt()` is pure - no clock, no network, no config - and returns `""`
+when nothing is notable, which short-circuits `summarize()` before any request.
+
+## One failure mode: `None`
+
+`summarize()` never raises. Each of these is a page without a paragraph and a
+message that does not go out:
+
+| Cause | Handling |
+|-------|----------|
+| Empty `api_key` or empty `api_url` | Returns before any request |
+| No story in any group | Returns before any request; logs at INFO |
+| `HttpError` - refused, timed out, 4xx, 5xx | WARNING, `None` |
+| A 200 that is not JSON (a proxy's HTML error page) | WARNING, `None` |
+| A body missing `choices` / `message` / `content` | WARNING, `None` - every provider claims this shape and one will be wrong |
+| An empty summary | WARNING, `None` |
+
+**And the caller adds nothing to `problems`.** An endpoint having a bad
+afternoon is not a news-radar outage: it must never withhold the heartbeat ping
+or trip an ops alert. The optional thing may not speak for the thing that is
+not - the mirror of the asymmetry in [[delivery-phases]] where a refused ping is
+a warning and a dead site is a problem.
+
+## Page every cycle, phone once a local day
+
+`__main__._summarize()` runs inside `_publish()`, on the same `day` rows the page
+renders, so the paragraph at the top describes exactly what is under it.
+`_publish()` returns `(run_id, summary)`.
+
+`__main__._send_summary()` then pushes it, and holds back two ways:
+
+- **Before `ai.notify_at_hour` local**, it logs `summary: holding until HH:00
+  local` and sends nothing.
+- **Once a day, per channel.** `daily_key(local_date)` -> `"summary:<ISO date>"`
+  rides in the existing `reported` table via `store.unreported()` /
+  `store.mark_reported()`, so "already sent today" survives a container restart
+  - the same mechanism that keeps a story from being sent twice. The `summary:`
+  prefix is what keeps it from colliding with a dedup key, and `store.prune()`
+  deletes keys by joining against `items`, so these rows are never pruned: one
+  per day per channel, ~730 a year, cheaper than a second mechanism.
+
+Sent through each channel's `alert()` rather than `send()` - a summary is
+sentences, not a list of links, which is the payload `alert()` was shaped for.
+On Telegram that means no `parse_mode`, so an em dash or a stray `<` from a
+model cannot cost the message. See [[notify-channels]].
+
+The page is rewritten with a fresh summary every cycle regardless. That
+asymmetry is the design: a page is somewhere you go, a message is something that
+interrupts you, and forty-eight interruptions a day saying roughly the same
+thing is how a channel gets muted - taking P6-2's outage alerts with it.
+
+## On the page
+
+`render.write(..., summary=None)` renders `<section class="summary">` above the
+groups: one `<p>` per non-empty line, the half before the first em dash in
+`<strong>`. A line carrying no separator is rendered whole rather than dropped -
+a model that ignored the format still wrote a sentence. Everything goes through
+`html.escape`: this text came off somebody else's endpoint, answering every
+thirty minutes, and it is the same trust boundary a feed title crosses. A falsy
+summary renders nothing at all, which is the shipped case.
+
+## Config
+
+`ai.*` and `OPENAI_API_KEY` are specified in [[config-and-env]]. The section
+ships inert: `ai.enabled` is `false`, so a config that says nothing about `ai`
+upgrades into this version and behaves exactly as it did before.
 
 ### [behavior] How News Is Searched, Matched and Ranked
 *`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*

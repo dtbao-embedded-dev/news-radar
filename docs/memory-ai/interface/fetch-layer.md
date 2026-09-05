@@ -55,18 +55,26 @@ at all. A `#` starts a comment only at the start of a line, so the term
 ```
 Fetcher(user_agent, timeout_s=15, max_retries=2, interval_ms=2000, backoff_s=1.0)
     .get(url)               -> bytes    raises HttpError
-    .post_json(url, payload) -> bytes   raises HttpError
+    .post_json(url, payload, headers=None) -> bytes   raises HttpError
 HttpError(message, status=None, url=None, body=b"", retry_after=None)
 RETRY_AFTER_MAX = 60.0
 ```
 
 **Both verbs, one code path.** `get()` reads a feed and `post_json()` talks to a
-notification channel; both go through a private `_request()`, so the
-User-Agent, the timeout, the retry policy and the per-host gap are decided once.
+notification channel or an AI endpoint; both go through a private `_request()`,
+so the User-Agent, the timeout, the retry policy and the per-host gap are
+decided once.
 A POST is retried on the same statuses a GET is, which means a 5xx can deliver
 the same message twice - the trade [[notify-channels]] already takes, where a
 duplicate is the acceptable failure and a dropped story is not.
 
+- **`headers` is merged *underneath* the transport's own, never over them.** It
+  exists for one caller - `summarize.py` needs `Authorization: Bearer <key>` for
+  an OpenAI-compatible endpoint, and neither channel webhook needs a header at
+  all. The three the class sets for itself (User-Agent, Accept, Accept-Encoding)
+  and the Content-Type overwrite whatever the caller passed, so a caller can add
+  a header and can never take one away: losing the User-Agent to a typo is the
+  403 on both Reddit sources, arriving from a different direction.
 - **One instance per cycle.** The `{hostname: last_request}` throttle state
   lives on it, so every source in the run shares one idea of how recently a
   host was asked. Keyed by **hostname**: `hn` and `hn_algolia` are different

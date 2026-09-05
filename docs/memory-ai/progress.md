@@ -16,6 +16,18 @@ finished-product definition all of it serves.
 
 ### P6 - Ops
 
+- **The day now arrives as a paragraph, not only as a list.** P6-4 shipped:
+  `summarize.py` writes one line per keyword group - the group's name and at
+  most two sentences about what stood out - above the stories on the page, and
+  sends that same text to Telegram and Discord once a local day. Measured on
+  2026-09-05 against a local stub endpoint driving a real `--once` cycle: with
+  `ai.enabled: false` no request left the process and the page carried no
+  summary block; enabled, the page carried it and the log said
+  `summary: sent to 2 of 2 channel(s) [telegram, discord]`; a second cycle in
+  the same local day logged `summary: already sent today` and sent nothing; and
+  with the endpoint pointed at a refused port the cycle exited `0` with one
+  WARNING and **no** entry in its problem list - an endpoint having a bad
+  afternoon is not a news-radar outage. Contract in [[ai-summary]].
 - **A failing cycle now reaches the phone, and it says so exactly twice.**
   Measured in the container on 2026-09-05 against a deliberately 404-ing
   `site_url`, three cycles one minute apart, one process throughout:
@@ -301,8 +313,9 @@ finished-product definition all of it serves.
 
 **Time, not code.** Every module the design bank specifies is now written: the
 entrypoint, the config loader, the item shape, the keyword parser, the whole
-fetch layer, the whole selection layer, the store, the renderer, both senders and
-the ops layer - and the whole thing is reachable at `https://news.dtbao.org`.
+fetch layer, the whole selection layer, the store, the renderer, both senders,
+the ops layer and the summary - and the whole thing is reachable at
+`https://news.dtbao.org`.
 
 - **Seven days unattended is the one thing still open.** It is P6's definition of
   done, and the clock starts when this branch merges: nothing has yet run
@@ -314,9 +327,12 @@ the ops layer - and the whole thing is reachable at `https://news.dtbao.org`.
   expecting a ping yet. Until a healthchecks.io or Uptime Kuma url goes into
   `config/config.yaml`, the half of P6-1 that survives the container being killed
   is built but not armed. The site check and the alerting work without it.
-- **P6-4, the AI summary, was deliberately not built** - see
-  [[delivery-phases]] for why. It is the only planned task that serves none of
-  the six finished-product statements.
+- **P6-4, the AI summary, is built after all** - see [[ai-summary]] for the
+  contract and [[delivery-phases]] for why the decision to drop it was
+  reversed. It ships `ai.enabled: false` and has never run against a real
+  endpoint: everything below was measured against a local stub, so the open
+  question is what a real model writes when handed a real day's headlines, and
+  whether two sentences a topic reads as a summary or as a horoscope.
 - **Nobody has yet watched a real outage they did not cause.** Every alert so far
   came from a `site_url` pointed at a 404 on purpose. Whether `ALERT_AFTER = 2` is
   the right chattiness against real feed flakiness is a question only the seven

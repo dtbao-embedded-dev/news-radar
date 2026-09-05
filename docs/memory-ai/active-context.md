@@ -9,10 +9,12 @@ updated: 2026-09-05
 
 ## Current focus
 
-**P6 Ops is built** (2026-09-05). A cycle that fails now says so - twice per
-outage, on Telegram and Discord - and a cycle that stops happening at all trips a
-dead-man's switch that lives outside this stack. The store gets a dated backup
-before anything is pruned, and the archive has a 90-day ceiling.
+**P6 Ops is built, P6-4 included** (2026-09-05). A cycle that fails now says
+so - twice per outage, on Telegram and Discord - and a cycle that stops
+happening at all trips a dead-man's switch that lives outside this stack. The
+store gets a dated backup before anything is pruned, and the archive has a
+90-day ceiling. The day's matches also arrive as a paragraph now: one line per
+keyword group, on the page every cycle and on the phone once a local day.
 
 **What is left of P6 is time, not code.** Seven days unattended with no manual
 intervention and no disk growth is the phase's definition of done, and the clock
@@ -49,9 +51,32 @@ starts when this branch merges.
 - **The retention default and the retention template deliberately disagree.**
   `config.py` keeps `0` so an upgrade never starts deleting rows nobody chose to
   lose; the shipped template says `90` because someone chose it.
-- **P6-4 (AI summary) was dropped on its own terms** - the only planned task that
-  serves none of the six finished-product statements, against an API key and a
-  third runtime dependency. Recorded in [[delivery-phases]] rather than deleted.
+- **P6-4 landed on `release/v0.1` after being dropped** (2026-09-05):
+  `src/news_radar/summarize.py` (new - `summarize()`, `build_prompt()`,
+  `daily_key()`, `SENTENCES_MAX`), `fetch/http.py` (`post_json()` takes
+  `headers`), `config.py` (the `ai` section), `render.py` (`_summary()`, the
+  `summary=` argument), `__main__.py` (`_summarize()`, `_send_summary()`,
+  `_publish()` returning `(run_id, summary)`, `_fetcher()`'s timeout override),
+  `config/config.yaml.example`, `docker/.env.example`,
+  `docker/docker-compose.yml`, and `tests/test_summarize.py` (new).
+- **One third of the reason to drop P6-4 had quietly expired.** The recorded
+  objection was an API key, a bill and a third runtime dependency - but P4 had
+  already added `Fetcher.post_json()`, so an OpenAI-compatible
+  `/v1/chat/completions` is a POST with a bearer header and no new import. The
+  other two are opt-in. Worth remembering as a shape: a decision written down
+  with its reasons can be re-checked against the reasons, which is the whole
+  argument for writing them down.
+- **Per topic, not one blob - and the phone gets it once a day.** A group with
+  nothing notable is left out of the prompt entirely rather than told to say
+  "nothing today", and two sentences a topic is a hard bound in the prompt. The
+  page is rewritten every cycle; the message goes at `ai.notify_at_hour`, kept
+  to once by `summary:<local date>` in the existing `reported` table, so a
+  restart does not re-send it.
+- **The summary may never speak for the cycle.** `summarize()` has one failure
+  mode, `None`, and the caller adds nothing to `problems` - a dead endpoint
+  cannot withhold the heartbeat ping or trip an ops alert. Same asymmetry as
+  P6-1's refused ping: the optional thing does not get to report on the thing
+  that is not.
 - **P5 landed in four commits on `release/v0.1`** (2026-09-05):
   `docker/cloudflared.yml` (new, the ingress), `docker/docker-compose.yml` (the
   `cloudflared` service behind `profiles: ["tunnel"]`), `.gitignore`,

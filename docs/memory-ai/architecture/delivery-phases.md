@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-05
 source: conversation, CHANGELOG.md
 confidence: confirmed
-keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, scope, milestones, definition of done
+keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, P6-4, ai summary, scope, milestones, definition of done
 order: 1
 ---
 
@@ -148,14 +148,14 @@ restart with whatever else a host connector is carrying. The tunnel id lives in
 a committed `docker/cloudflared.yml`; only the credentials file is a secret.
 Details in [[deployment-homelab]], the procedure in [[setup-homelab]].
 
-### P6 — Ops *(built; the seven unattended days are still running)*
+### P6 — Ops *(built, P6-4 included; the seven unattended days are still running)*
 
 | # | Task |
 |---|------|
 | P6-1 | ~~Heartbeat: a run that fails silently must be visible~~ - `ops.heartbeat()`, a site check then a dead-man's-switch ping |
 | P6-2 | ~~Failure alerting into the same Telegram/Discord channels~~ - `ops.Health` + `alert()` on both channels |
 | P6-3 | ~~Backup and restore of the SQLite store~~ - `store.backup()`, restore documented in [[storage-layer]] |
-| P6-4 | Optional AI summary of the day's matches - **deliberately not built** |
+| P6-4 | ~~Optional AI summary of the day's matches~~ - `summarize.py`, off by default; **dropped once, then built when a third of the reason expired** |
 
 **A ping is a claim that the cycle worked**, and everything in P6-1 exists to
 keep that claim from being made falsely: the published page is fetched *before*
@@ -171,11 +171,38 @@ sends one saying it recovered. A broken thing repeats every thirty minutes, and
 an alert that repeats with it is one you learn to swipe away - taking the next
 real one with it.
 
-**P6-4 was dropped on its own terms.** It is the only task in the whole plan that
-serves none of the six finished-product statements, and it would cost an API key,
-a third runtime dependency and a per-run bill against a two-dependency rule the
-project has held since P0. It stays listed rather than deleted: the reason to
-skip it is worth more than the task was.
+**P6-4 was dropped on its own terms, and then built when one of those terms
+expired.** The drop rested on three costs: an API key, a per-run bill, and a
+third runtime dependency against a two-dependency rule the project has held
+since P0. P4 retired the third without anyone noticing at the time -
+`Fetcher.post_json()` exists, so an OpenAI-compatible `/v1/chat/completions` is
+a POST with a bearer header and no new import. What remained was a key and a
+bill, and both are opt-in: `ai.enabled` ships `false`, so a config that says
+nothing about `ai` never reaches the network. Naming the *wire format* rather
+than a vendor is what makes the bill optional too - OpenRouter, DeepSeek, Groq
+and a local Ollama all answer the same endpoint, and the last costs nothing.
+
+**The summary is per topic, and a quiet topic is not in it.** One line per
+keyword group - the group's name, then at most `SENTENCES_MAX` sentences about
+what actually stood out. A group whose day held nothing notable is left out of
+the prompt entirely rather than given a sentence saying so, which is what keeps
+the message a glance. The rows arrive already `score DESC` from
+`store._matches()`, so "the notable ones" is a slice and not a second ranking
+pass.
+
+**The page gets it every cycle; a phone gets it once a local day.** The page is
+somewhere you go and a message is something that interrupts you, and
+forty-eight interruptions a day saying roughly the same thing is how a channel
+gets muted - taking the outage alerts of P6-2 with it. "Once" survives a restart
+because it is not remembered in memory: the summary rides in the existing
+`reported` table under `summarize.daily_key()`, per channel and idempotent, the
+same mechanism that keeps a story from being sent twice.
+
+**And it may never cost a cycle.** `summarize()` has exactly one failure mode,
+`None`, and the caller adds nothing to `problems`. An endpoint having a bad
+afternoon is a page without a paragraph - never a withheld heartbeat ping, and
+never an ops alert. That asymmetry is deliberate in the same way P6-1's is: the
+thing that is optional must not be able to speak for the thing that is not.
 
 **What is left is time, not code.** Seven days unattended with no manual
 intervention and no disk growth is P6's definition of done, and nothing has yet

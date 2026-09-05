@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-05
 source: src/news_radar/, Dockerfile, requirements.txt
 confidence: confirmed
-keywords: tree, layout, layering, ops.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
+keywords: tree, layout, layering, ops.py, summarize.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
 order: 2
 ---
 
@@ -49,6 +49,7 @@ news-radar/
 │   ├── store.py                # DONE - SQLite persistence, seen-set, retention, backup
 │   ├── render.py               # DONE - output/index.html + days/<date>.html
 │   ├── ops.py                  # DONE - P6: heartbeat, Health, ALERT_AFTER
+│   ├── summarize.py            # DONE - P6-4: per-topic AI summary, OpenAI wire format
 │   └── notify/                 # DONE - P4
 │       ├── __init__.py         # SendResult, pick, chunk, clip
 │       ├── telegram.py         # bot API, HTML, 4000; alert() has no parse_mode
@@ -65,6 +66,7 @@ news-radar/
 │   ├── test_store.py           # plain asserts, stdlib only (sqlite3)
 │   ├── test_render.py          # plain asserts, stdlib only
 │   ├── test_notify.py          # plain asserts, stdlib only, local http.server
+│   ├── test_summarize.py       # plain asserts, stdlib only, local http.server
 │   ├── test_release.py         # plain asserts, stdlib only
 │   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
@@ -89,7 +91,7 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
 | 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
 | 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
-| 5 — output | `render.py`, `notify/*`, `ops.py` | layers 3 and 4; `notify/*` and `ops.py` also layer 1 |
+| 5 — output | `render.py`, `notify/*`, `ops.py`, `summarize.py` | layers 3 and 4; `notify/*`, `ops.py` and `summarize.py` also layer 1 |
 
 `ops.py` sits in layer 5 for the same reason `notify/*` does and imports layer 1
 for the same reason too - the heartbeat's site check and its ping are GETs, and
@@ -99,6 +101,15 @@ verdict on the cycle arrive as arguments that `__main__.py` builds, which is why
 `tests/test_ops.py` runs against a local `http.server` with nothing installed.
 See [[config-and-env]] for the keys and [[delivery-phases]] for why the ping is
 withheld rather than sent on a bad cycle.
+
+`summarize.py` joins them on the same terms and for the same reason: a chat
+completion is a POST that wants the `Fetcher`'s User-Agent, retry and
+`Retry-After` handling as much as a webhook does. It reads no config and no
+clock either - the url, the key, the model and the rows all arrive as arguments,
+which is what lets `tests/test_summarize.py` exercise every failure path against
+a local `http.server`. The one thing it is given that `ops.py` is not is a
+longer timeout: `__main__._fetcher()` takes an override, because fifteen seconds
+is a feed's budget and not a completion's. See [[config-and-env]] for the keys.
 
 `notify/*` reaching back to layer 1 is the one deliberate widening: a POST needs
 the same User-Agent, timeout, retry and per-host gap a GET does, and honouring a
@@ -134,6 +145,11 @@ yet. That is the whole point of `setup.py`.
 
 **Runtime dependencies: `pyyaml`, `feedparser`. That is the entire list.** Adding
 a third needs a line in the changelog saying what it replaced.
+
+**P6-4 is what that rule looks like when it bites and holds.** The AI summary was
+dropped once partly for needing an `openai` package; it shipped instead as one
+`Fetcher.post_json()` against an OpenAI-compatible `/v1/chat/completions`, which
+is a POST with a bearer header and no new import. See [[delivery-phases]].
 
 `scripts/setup.py` and `scripts/release.py` use **stdlib only** — no PyYAML, no
 feedparser — so they work on a bare Python install.

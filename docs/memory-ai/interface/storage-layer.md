@@ -95,7 +95,7 @@ page does not earn a dependency.
 |-----------|---------|-------|
 | `local_tz(name)` | `tzinfo` | Never raises - see the fallback below |
 | `day_bounds(now, tz)` | `(start_utc, end_utc)` | The local day containing `now`, half-open, expressed in UTC |
-| `write(data_dir, labels, day_rows, meta, tz, threshold=5)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html` with identical bodies |
+| `write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html` with identical bodies. `summary` is the AI summary, one topic per line; falsy renders no block at all, which is the shipped case |
 
 `labels` fixes the group order **and** is what keeps an empty group on the page:
 a keyword that has gone quiet looks identical to a keyword nobody wrote about,

@@ -4,9 +4,9 @@ category: interface
 purpose: Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads.
 status: active
 updated: 2026-09-05
-source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt
+source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py
 confidence: confirmed
-keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
+keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
 order: 1
 ---
 
@@ -60,6 +60,12 @@ someone chose it.
 | `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. This is what notices the tunnel connector going away. `""` = no check |
 | `ops.backup_dir` | str | `backups` | Where the daily store backup is written. **Never under `storage.data_dir`** - that directory is served to the public web |
 | `ops.backup_keep` | int | `7` | Newest N backups kept; `0` = back nothing up |
+| `ai.enabled` | bool | `false` | The AI summary. Off is the shipped case: a config that says nothing about `ai` never reaches the network and never sees a bill |
+| `ai.api_url` | str | `https://api.openai.com/v1/chat/completions` | Any endpoint speaking the OpenAI chat-completions wire format - OpenRouter, DeepSeek, Groq, a local Ollama. Must be an http(s) url, and non-empty when `ai.enabled` |
+| `ai.model` | str | `gpt-4o-mini` | Model id, passed through verbatim |
+| `ai.max_per_topic` | int | `5` | Top-scored stories per keyword group that reach the prompt. Must be >= 1: zero is a prompt with nothing in it and a bill for asking |
+| `ai.timeout_s` | int | `60` | Per-request timeout for the completion only. `advanced.request_timeout_s` stays the feeds' budget; fifteen seconds would time out every summary while looking like an outage |
+| `ai.notify_at_hour` | int | `8` | Local hour (0-23) at or after which the once-a-day summary message goes out. The page is rewritten every cycle regardless |
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |
@@ -122,10 +128,12 @@ outside it, from the real environment.
 | `TELEGRAM_BOT_TOKEN` | when Telegram is enabled | - | `notify/telegram.py` |
 | `TELEGRAM_CHAT_ID` | when Telegram is enabled | - | `notify/telegram.py` |
 | `DISCORD_WEBHOOK_URL` | when Discord is enabled | - | `notify/discord.py` |
+| `OPENAI_API_KEY` | when `ai.enabled` is true | - | `__main__.py`, handed to `summarize.summarize()`. Asked for even by a local Ollama, which ignores the value |
 | `NEWS_RADAR_CONFIG` | no | `config/config.yaml` | `config.py` |
 | `TZ` | no | `Asia/Ho_Chi_Minh` | container clock; `app.timezone` still wins for rendering |
 
 Startup validation: a channel that is `enabled: true` with its variable missing is
-a **fatal config error**, not a warning. Silently not sending is the failure mode
+a **fatal config error**, not a warning - and `ai.enabled: true` with no
+`OPENAI_API_KEY` is the same rule applied to a third thing. Silently not sending is the failure mode
 this project most wants to avoid. `scripts/setup.py` checks the same rule before
 the container is ever started - see [[cli-scripts]].

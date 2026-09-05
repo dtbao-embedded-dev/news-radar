@@ -38,7 +38,13 @@ one makes the file and the tags disagree.
   `false`, so a config that says nothing about `ai` upgrades untouched and
   never reaches the network. Naming the wire format rather than a vendor is
   what makes the bill optional too: OpenRouter, DeepSeek, Groq and a local
-  Ollama all answer the same endpoint. And it may never cost a cycle -
+  Ollama all answer the same endpoint - and none of those needs a key, so an
+  unset `OPENAI_API_KEY` sends no `Authorization` header at all rather than an
+  empty bearer token, and `ai.enabled: true` without one starts fine. That is
+  where this section parts company with the notification channels, which are
+  fatal without their secrets: a channel cannot work without one, while
+  refusing to start here would be the config telling you your own LAN server
+  does not exist. And it may never cost a cycle -
   `summarize()` has exactly one failure mode, no summary, and a refused
   endpoint adds nothing to the run's problem list, so it can neither withhold
   the heartbeat ping nor trip an ops alert

@@ -44,7 +44,8 @@ services:
       - caddy_data:/data
     # Host port is for local debugging only - the Cloudflare Tunnel reaches
     # caddy:8080 over the docker network and does not need a published port.
-    # 8080 is already taken on this homelab (ntfy), hence the override.
+    # 8088 rather than 8080 by choice: a port of our own does not have to be
+    # renegotiated the next time something else on the host wants 8080.
     ports:
       - "${NEWS_RADAR_HTTP_PORT:-8088}:8080"
 

@@ -218,11 +218,12 @@ def branch_exists(name):
     return git("rev-parse", "--verify", "--quiet", "refs/heads/" + name, check=False).returncode == 0
 
 
-def tag_exists(name):
+def tag_exists(name, remote):
+    """True when the tag exists locally or on the remote the release will push to."""
     if git("rev-parse", "--verify", "--quiet", "refs/tags/" + name, check=False).returncode == 0:
         return True
-    remote = git("ls-remote", "--tags", "origin", name, check=False)
-    return bool(remote.stdout.strip())
+    proc = git("ls-remote", "--tags", remote, name, check=False)
+    return bool(proc.stdout.strip())
 
 
 def previous_tag():
@@ -238,7 +239,7 @@ def commit_subjects_since(tag):
     return [line for line in proc.stdout.splitlines() if line.strip()]
 
 
-def preflight(version, strict):
+def preflight(version, strict, remote):
     """Report every check. Returns True when the release may proceed."""
     ok = True
 
@@ -263,7 +264,7 @@ def preflight(version, strict):
             say("warn" if not strict else "fail", "branch {} does not exist".format(name))
             ok = False
 
-    if tag_exists(version):
+    if tag_exists(version, remote):
         say("warn" if not strict else "fail", "tag {} already exists".format(version))
         ok = False
     else:
@@ -300,7 +301,7 @@ def main(argv=None):
 
     # Preflight is advisory under --dry-run: the point of a dry run is to see
     # the plan, including from a branch that could not release yet.
-    passed = preflight(version, strict=not args.dry_run)
+    passed = preflight(version, strict=not args.dry_run, remote=args.remote)
 
     prev = previous_tag()
     commits = parse_subjects(commit_subjects_since(prev))

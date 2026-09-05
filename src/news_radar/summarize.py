@@ -117,11 +117,16 @@ def summarize(fetcher, api_url, api_key, model, rows_by_label, labels,
     API documents - each is a page without a summary block and a message that
     does not go out, never a cycle that stops.
 
-    The three short-circuits above the request are not politeness: an empty key,
-    an empty url or a day with no story would each be a bill for asking a
-    question with nothing in it.
+    **An empty `api_key` is a supported deployment, not a failure.** An SGLang,
+    vLLM or Ollama on the LAN authenticates nobody; sending it
+    `Authorization: Bearer ` is at best ignored and at worst a 401 from whatever
+    sits in front of it, so with no key the header is simply not sent.
+
+    The two short-circuits above the request are not politeness: an empty url or
+    a day with no story would each be a bill for asking a question with nothing
+    in it.
     """
-    if not api_url or not (api_key or "").strip():
+    if not api_url:
         return None
 
     prompt = build_prompt(rows_by_label, labels, max_per_topic)
@@ -129,6 +134,7 @@ def summarize(fetcher, api_url, api_key, model, rows_by_label, labels,
         log.info("summary: nothing notable today, so nothing was asked")
         return None
 
+    key = (api_key or "").strip()
     try:
         body = fetcher.post_json(
             api_url,
@@ -140,7 +146,7 @@ def summarize(fetcher, api_url, api_key, model, rows_by_label, labels,
                 # needs reproducibility.
                 "temperature": 0.3,
             },
-            headers={"Authorization": "Bearer {}".format(api_key)},
+            headers={"Authorization": "Bearer {}".format(key)} if key else None,
         )
     except HttpError as exc:
         log.warning("summary: the endpoint refused (%s) - the page and the "

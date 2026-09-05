@@ -18,6 +18,24 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **crawl**: the store and the page - `python -m news_radar --once` now writes
+  what it found instead of only printing it. Every shortlisted story lands in
+  `output/news.db`, keyed by the same dedup key the ranking uses: the row keeps
+  the date it was first seen, the earliest timestamp any source reported for it,
+  and the accumulated set of sources that carried it, so a story re-found
+  tomorrow is the same row rather than a second one. The page is then rendered
+  from the **store**, not from the run in memory - it shows the whole local day,
+  which is what makes a restart at noon still publish what the morning found.
+  `output/index.html` and an immutable `output/days/<date>.html` are written each
+  cycle: one section per keyword group in the keyword file's own order, empty
+  groups included, the first `report.rank_threshold` of each highlighted, and
+  every title, link and source escaped on the way in. The page carries a dark
+  mode that remembers the choice, a search box that folds diacritics the way the
+  matcher does, and links to every past day - with no external stylesheet,
+  script or image, so it still reads when the network it reports on is down.
+  `storage.retention_days` prunes rows and day files past the window in the same
+  pass, `0` keeping everything. A locked database or a full disk costs the page,
+  never the fetch. Nothing is notified yet
 - **crawl**: the selection layer - `python -m news_radar --once` now prints a
   grouped, deduped, ranked shortlist instead of a raw item count. Every item is
   checked against the `[GLOBAL_FILTER]` exclusions first and dropped outright if

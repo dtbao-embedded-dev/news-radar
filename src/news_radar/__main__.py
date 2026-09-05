@@ -27,6 +27,7 @@ from .fetch.search import read_search_feeds
 from .filter import select
 from .keywords import KeywordError, parse as parse_keywords
 from .rank import collapse, rank_groups
+from . import render, store
 
 log = logging.getLogger("news_radar")
 
@@ -101,12 +102,66 @@ def _report_groups(ranked):
                      ", ".join(story.source_ids))
 
 
+def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
+    """Persist the run and rewrite the page. Returns True when both happened.
+
+    Guarded as a whole, for the same reason the keyword file is: a full disk, a
+    locked database or a read-only volume must not throw away the 597 items that
+    took forty seconds to collect. The cycle logs it and still returns the
+    shortlist.
+    """
+    data_dir = cfg.get("storage.data_dir", "output")
+    conn = None
+    try:
+        conn = store.open_db(data_dir)
+        run_id = store.start_run(conn, fetched_at)
+        rows = store.save(conn, run_id, ranked, fetched_at)
+
+        tz = render.local_tz(cfg.get("app.timezone") or "UTC")
+        start, end = render.day_bounds(fetched_at, tz)
+        # Read back from the store rather than rendering `ranked` directly: the
+        # page shows the whole local day, so a restart at noon still publishes
+        # what the morning found.
+        day = store.day_matches(conn, start, end)
+
+        if groups:
+            render.write(
+                data_dir, [g.label for g in groups], day,
+                {"run_id": run_id, "fetched": fetched, "matched": matched,
+                 "sources": len(cfg.enabled_feeds())
+                            + len(cfg.enabled_search_templates()),
+                 "errors": len(errors), "generated_at": fetched_at},
+                tz, threshold=cfg.get("report.rank_threshold", 5))
+        else:
+            # No keyword file means no group order to render in, and a page with
+            # no sections at all is worse than yesterday's page: it reads as "no
+            # news" rather than "the radar is broken".
+            log.warning("no keyword group this cycle, the page is left as it "
+                        "was rather than rewritten empty")
+
+        store.prune(conn, data_dir, cfg.get("storage.retention_days", 0),
+                    fetched_at)
+        store.finish_run(conn, run_id, dt.datetime.now(dt.timezone.utc),
+                         items_fetched=fetched, items_matched=matched,
+                         errors=errors)
+
+        log.info("stored %d match row(s) as run %s; the page shows %d "
+                 "story(ies) across %d group(s) today", rows, run_id,
+                 sum(len(v) for v in day.values()), len(day))
+        return True
+    except Exception:
+        log.exception("storing or rendering failed, the fetched items are kept")
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def crawl(cfg):
     """One pass: fetch, filter, rank, store, render, notify.
 
-    P1 and P2 have landed: this returns the ranked shortlist, grouped by
-    keyword group. Storage, the page and the senders are still ahead, so the
-    cycle ends by printing the shortlist rather than claiming it published one.
+    P1, P2 and P3 have landed: this fetches, selects, persists and publishes,
+    and returns the ranked shortlist. Only the senders are still ahead.
     """
     started = time.monotonic()
     fetched_at = dt.datetime.now(dt.timezone.utc)
@@ -155,8 +210,9 @@ def crawl(cfg):
              "across %d group(s)", len(matched), len(stories),
              sum(len(s) for s in ranked.values()), len(ranked))
     _report_groups(ranked)
-    log.warning("storage, the page and the senders are not implemented yet "
-                "(P3, P4) - nothing is published or notified this cycle")
+    _publish(cfg, ranked, groups, fetched_at, len(items), len(matched), errors)
+    log.warning("the senders are not implemented yet (P4) - nothing is "
+                "notified this cycle")
     return ranked
 
 

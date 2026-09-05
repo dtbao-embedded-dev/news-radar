@@ -69,6 +69,16 @@ one makes the file and the tags disagree.
 
 ### Fixes
 
+- **config**: both shipped search templates now ask for recent stories rather
+  than relevant ones, so the freshness half of the ranking finally does
+  something. Google News takes a `when:7d` window and Hacker News is queried
+  through `search_by_date` with `tags=story`; before this every search hit
+  scored exactly the source term and the order inside a group was arbitrary.
+  Measured against the shipped keyword file: ten stories now clear that floor
+  where none did. It costs volume on Google News - the Vietnamese index holds
+  almost no recent embedded coverage, so seven queries return sixteen items
+  instead of two hundred and fifty three - but the items that were dropped were
+  three to eight months old and were filling whole groups
 - **setup**: `--check` reports a blank notification secret and exits non-zero
   instead of calling the checkout ready when it cannot start
 - **setup**: flush stdout before handing over to docker, so its output lands

@@ -62,7 +62,7 @@ never claims a stack it could not start.
 | Flag | Use it when |
 |------|-------------|
 | `--dry-run` | You want to see what it would do. Writes nothing, asks nothing |
-| `--check` | Verifying an existing install - same checks, creates nothing |
+| `--check` | Verifying an existing install - same checks plus the secrets, creates nothing, non-zero on a gap |
 | `--force` | Regenerating a config from the template on purpose |
 | `--non-interactive` | Unattended provisioning; a blank secret is reported, not prompted for |
 

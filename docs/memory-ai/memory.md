@@ -835,7 +835,7 @@ operator to type afterwards.
 | `--dry-run` | **Writes nothing, prompts for nothing, starts nothing.** Prints the checks, the files it would create and the compose command it would run, then exits |
 | `--force` | Overwrite files that already exist. Without it, an existing file is reported and left alone |
 | `--non-interactive` | Never prompt; leave a missing secret blank and report it. For unattended provisioning |
-| `--check` | Verify only: toolchain present, required files exist. Creates nothing and starts nothing |
+| `--check` | Verify only: toolchain present, required files exist, **required secrets non-empty**. Creates nothing, starts nothing, exits non-zero on a gap |
 
 Steps, in order:
 
@@ -853,6 +853,11 @@ Steps, in order:
    `docker/.env` and falling back to `8088`.
 
 Steps 6 and 7 are skipped by `--dry-run` and by `--check`.
+
+`--dry-run` and `--check` differ at step 5. A dry run describes a checkout that
+does not exist yet, so it only lists the secrets it would ask for. `--check`
+inspects one that does, so a blank secret is a finding and exits `1` - otherwise
+it would call an install ready that cannot start.
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -1268,7 +1273,7 @@ never claims a stack it could not start.
 | Flag | Use it when |
 |------|-------------|
 | `--dry-run` | You want to see what it would do. Writes nothing, asks nothing |
-| `--check` | Verifying an existing install - same checks, creates nothing |
+| `--check` | Verifying an existing install - same checks plus the secrets, creates nothing, non-zero on a gap |
 | `--force` | Regenerating a config from the template on purpose |
 | `--non-interactive` | Unattended provisioning; a blank secret is reported, not prompted for |
 

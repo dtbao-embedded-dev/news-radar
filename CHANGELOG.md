@@ -18,6 +18,23 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **crawl**: the senders - a cycle that finds something new now pushes it to
+  Telegram and Discord instead of only writing the page. Only what is **new**
+  goes out: the run is read back out of the store, diffed against the per-channel
+  seen-set, and a story is recorded as sent only after the message carrying it
+  was accepted - so a crash between the two re-sends rather than losing it, and
+  enabling Discord later does not replay everything Telegram already had. A
+  cycle with nothing new sends nothing at all rather than an empty message.
+  `report.mode` finally does something: `incremental` pushes this run's new
+  matches, `current` pushes the whole shortlist every cycle, `daily` pushes
+  everything today that has not gone out yet. Messages are split at a group
+  boundary first and an item boundary second, never through the middle of a
+  story, and every title is escaped for the channel it is going to - Telegram's
+  HTML and Discord's Markdown break on different characters, and an unescaped
+  one costs the whole message rather than one headline. A throttled channel is
+  slept for exactly as long as it asked (`Retry-After`, capped at a minute)
+  instead of a guess, and a refused channel costs neither the page nor the
+  other channel
 - **crawl**: the store and the page - `python -m news_radar --once` now writes
   what it found instead of only printing it. Every shortlisted story lands in
   `output/news.db`, keyed by the same dedup key the ranking uses: the row keeps

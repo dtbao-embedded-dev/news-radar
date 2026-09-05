@@ -3,10 +3,10 @@ title: "ADR-0001: Clean-room reimplementation, TrendRadar as reference only"
 category: architecture
 purpose: Why news-radar is written from scratch instead of forking TrendRadar, and what that forbids.
 status: active
-updated: 2026-09-04
+updated: 2026-09-05
 source: conversation, https://github.com/sansan0/TrendRadar
 confidence: confirmed
-keywords: ADR-0001, clean-room, TrendRadar, GPL-3.0, license, fork, copyleft, reference
+keywords: ADR-0001, clean-room, TrendRadar, GPL-3.0, Apache-2.0, LICENSE, license, fork, copyleft, reference
 order: 1
 ---
 
@@ -53,9 +53,10 @@ key-for-key.
 
 ## Consequences
 
-- news-radar stays free to pick its own license. **No `LICENSE` file exists yet**
-  — that decision is still open and must be made before the repository is made
-  public.
+- news-radar stays free to pick its own license, and has: **Apache-2.0**, in
+  `LICENSE` at the repository root. Permissive rather than copyleft, which only
+  a clean-room implementation could choose — deriving from GPL-3.0 TrendRadar
+  would have forced GPL-3.0 here.
 - No upstream merges. Every fix TrendRadar makes has to be re-derived here if it
   applies. That cost is accepted and is why the reference rule exists at all.
 - Problems already solved upstream get solved again. The mitigation is

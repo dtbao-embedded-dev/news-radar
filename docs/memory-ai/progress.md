@@ -40,6 +40,9 @@ phase map and the finished-product definition all of it serves.
   failing check aborts it instead of passing silently.
 - **The docker stack is defined and Caddy actually runs.** Verified by starting
   it: Caddy serves `output/` with the `Cache-Control` headers from our Caddyfile.
+- **The repository has a license.** Apache-2.0, in `LICENSE`, chosen because
+  the clean-room decision left it free (`adr-0001`). The README states it and
+  carries a badge.
 
 ## What's left
 
@@ -59,9 +62,6 @@ not written** - `src/news_radar/` does not exist yet.
 
 ## Known issues
 
-- **No `LICENSE` file.** news-radar is a clean-room reimplementation precisely so
-  it is free to pick one (`adr-0001`), but nobody has picked it yet. Decide before
-  the repository is made public.
 - **The `news-radar` compose service cannot start.** It builds from a `Dockerfile`
   that lands in P5. Until then only `docker compose ... up -d caddy` works, and
   the compose file says so.

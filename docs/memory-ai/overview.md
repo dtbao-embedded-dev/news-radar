@@ -37,7 +37,7 @@ needs a human before you rely on it).
 | rule | [rule/release-flow.md](rule/release-flow.md) | How a version is cut - the branch model, running release.py, what CI does with the tag, and what to do when it fails midway. | active | release, release.py, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release |
 | rule | [rule/setup-homelab.md](rule/setup-homelab.md) | The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux. | active | setup, setup.py, docker compose, homelab, cloudflare tunnel, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088 |
 | rule | [rule/reference-trendradar.md](rule/reference-trendradar.md) | When and how to consult TrendRadar for a problem news-radar hits, and exactly what may not be carried back. | active | TrendRadar, reference, stuck, GPL-3.0, clean-room, copyleft, prior art, how to consult |
-| adr | [adr/adr-0001-clean-room-from-trendradar.md](adr/adr-0001-clean-room-from-trendradar.md) | Why news-radar is written from scratch instead of forking TrendRadar, and what that forbids. | active | ADR-0001, clean-room, TrendRadar, GPL-3.0, license, fork, copyleft, reference |
+| adr | [adr/adr-0001-clean-room-from-trendradar.md](adr/adr-0001-clean-room-from-trendradar.md) | Why news-radar is written from scratch instead of forking TrendRadar, and what that forbids. | active | ADR-0001, clean-room, TrendRadar, GPL-3.0, Apache-2.0, LICENSE, license, fork, copyleft, reference |
 <!-- END:MAP -->
 
 ## Conventions

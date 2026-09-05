@@ -54,6 +54,7 @@ news-radar/
 ├── .github/workflows/
 │   ├── test.yml                # runs tests/test_*.py on push and PR
 │   └── release.yml             # tag -> GitHub Release
+├── LICENSE                     # Apache-2.0
 ├── CHANGELOG.md
 ├── VERSION
 └── README.md

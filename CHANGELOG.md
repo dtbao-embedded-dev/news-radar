@@ -39,7 +39,12 @@ one makes the file and the tags disagree.
   real one with it. The alert takes a different escaping rule than a story does
   on each channel: Telegram gets no `parse_mode` at all, so a stray `<` in an
   exception message cannot cost the one message you must not lose, while Discord
-  is escaped because it renders Markdown in plain content whether asked to or not
+  is escaped because it renders Markdown in plain content whether asked to or not.
+  Sending an alert logs one `alerted N of M channel(s)` line at `WARNING`,
+  including when every channel took it - found by the live run, where a
+  successful alert left no trace in `docker logs` but an unexplained two-second
+  gap, and the quietest thing in the file should not be the feature whose whole
+  purpose is visibility
 - **ops**: the store has a backup - one dated copy per day under `backups/`,
   taken with SQLite's own online-backup API rather than by copying the file,
   because the crawl holds the connection open and a `-wal` mid-flush can produce

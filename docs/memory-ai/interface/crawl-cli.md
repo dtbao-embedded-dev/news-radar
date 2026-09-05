@@ -84,17 +84,17 @@ written:
 INFO  fixed feeds: 208 item(s) from 8 source(s)
 INFO    hn                   20 item(s)
 INFO    r_embedded            0 item(s)  [failed]
-INFO  search feeds: 156 item(s) from 7 group(s) x 2 template(s)
+INFO  search feeds: 200 item(s) from 6 group(s) x 2 template(s)
 INFO    google_news          16 item(s)
 WARN  source failed: r_embedded - URLError: ...
 INFO  fetched 364 raw item(s) in 49.9s, 1 source(s) failed
-INFO  matched 68 item(s) -> 61 story(ies) after dedup -> 43 kept across 7 group(s)
+INFO  matched 169 item(s) -> 160 story(ies) after dedup -> 45 kept across 6 group(s)
 INFO    ESP32 - 10 item(s)
 INFO      0.42  I Connected My Withings Body+ to Home Assistant with an ESP32  [hn_algolia]
-INFO    Security - 0 item(s)
-INFO  rendered output/index.html (7 group(s), 90 story(ies))
+INFO    AI Repos - 8 item(s)
+INFO  rendered output/index.html (6 group(s), 90 story(ies))
 INFO  stored 43 match row(s) as run 20260905T081328Z; the page shows 90
-      story(ies) across 7 group(s) today
+      story(ies) across 6 group(s) today
 INFO  notifying 2 channel(s) in incremental mode
 INFO    telegram 2 message(s), 43 story(ies)
 INFO    discord  5 message(s), 43 story(ies)

@@ -238,8 +238,9 @@ finished-product definition all of it serves.
 - **`keywords.py` landed early.** It is P2-1, written in P1 because the search
   generator needs each group's primary term and finding that correctly already
   means skipping every other prefix. It parses the shipped
-  `config/frequency_words.txt` into its 7 groups with the right caps, labels,
-  required terms and regex.
+  `config/frequency_words.txt` into its 6 groups with the right caps, labels,
+  required terms and regexes - including the two AI groups, whose word
+  boundaries live in a regex because plain-term matching is substring.
 
 ### P0 - Foundation
 

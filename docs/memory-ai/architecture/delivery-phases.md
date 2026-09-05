@@ -33,9 +33,9 @@ Six statements define "done". Every phase below exists to make one of them true.
    keyword group, has a dark mode, a search box, and per-day history.
 4. **New stories come to you.** Each crawl pushes only the **new** matches to
    Telegram and Discord. Nothing is re-sent.
-5. **Installing on a new machine is three steps.** `git clone` →
-   `python scripts/setup.py` (fill in tokens) → `docker compose up -d`.
-   Identical on Windows and Linux.
+5. **Installing on a new machine is two steps.** `git clone` →
+   `python scripts/setup.py` (fill in tokens); the script brings the stack up
+   itself. Identical on Windows and Linux.
 6. **Releasing is one command.** `python scripts/release.py 0.2.0` writes the
    changelog, commits `chore(release): v0.2.0` on `release/*`, merges into
    `developing` then `main`, tags, returns to `release/*` and pushes. CI turns

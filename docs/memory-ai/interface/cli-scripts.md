@@ -22,16 +22,18 @@ order: 2
 python scripts/setup.py [--dry-run] [--force] [--non-interactive] [--check]
 ```
 
-Bootstraps a homelab checkout: verifies the toolchain, creates the real config
-and env files from their templates, and validates the notification secrets.
+Bootstraps a homelab checkout and starts it: verifies the toolchain, creates the
+real config and env files from their templates, validates the notification
+secrets, then brings the stack up. A successful run leaves nothing for the
+operator to type afterwards.
 
 | Flag | Guarantee |
 |------|-----------|
 | *(none)* | Interactive. Creates missing files, prompts for missing secrets, never overwrites an existing file |
-| `--dry-run` | **Writes nothing and prompts for nothing.** Prints the checks and the files it would create, then exits |
+| `--dry-run` | **Writes nothing, prompts for nothing, starts nothing.** Prints the checks, the files it would create and the compose command it would run, then exits |
 | `--force` | Overwrite files that already exist. Without it, an existing file is reported and left alone |
 | `--non-interactive` | Never prompt; leave a missing secret blank and report it. For unattended provisioning |
-| `--check` | Verify only: toolchain present, required files exist, required secrets non-empty. Creates nothing |
+| `--check` | Verify only: toolchain present, required files exist. Creates nothing and starts nothing |
 
 Steps, in order:
 
@@ -41,12 +43,19 @@ Steps, in order:
 4. Create `docker/.env` from `docker/.env.example` if absent.
 5. For each notification channel enabled in the config, ensure its variables are
    present and non-empty in `docker/.env`; prompt unless `--non-interactive`.
-6. Print the next command to run.
+6. `docker compose -f docker/docker-compose.yml up -d`, with docker's own output
+   inherited rather than captured. While no `Dockerfile` is present in the
+   checkout the crawl service cannot build, so only `caddy` is named; the
+   narrowing lifts by itself once the file exists.
+7. Print the URL the page is served on, taking `NEWS_RADAR_HTTP_PORT` from
+   `docker/.env` and falling back to `8088`.
+
+Steps 6 and 7 are skipped by `--dry-run` and by `--check`.
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Everything needed is in place (or, under `--dry-run`, would be) |
-| `1` | A prerequisite is missing, or a required secret is still empty |
+| `1` | A prerequisite is missing, a required secret is still empty, or `docker compose up` failed |
 | `2` | Bad usage - unknown flag, or a template file is missing from the checkout |
 
 ## scripts/release.py

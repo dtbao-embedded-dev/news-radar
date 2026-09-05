@@ -12,9 +12,9 @@ order: 2
 
 # Setting Up on the Homelab
 
-> Three steps: clone, `python scripts/setup.py`, `docker compose up -d`. The
-> same three on Windows and on Linux - that is why setup is a Python script and
-> not a pair of shell scripts.
+> Two steps: clone, then `python scripts/setup.py` - the script starts the stack
+> itself. The same two on Windows and on Linux; that is why setup is a Python
+> script and not a pair of shell scripts.
 
 ## Prerequisites
 
@@ -33,14 +33,7 @@ notification secret.
 git clone git@github.com:dtbao-embedded-dev/news-radar.git
 cd news-radar
 python scripts/setup.py
-docker compose -f docker/docker-compose.yml up -d
 ```
-
-**Until P5 lands, start `caddy` alone:** `docker compose -f
-docker/docker-compose.yml up -d caddy`. The crawl service builds from a
-`Dockerfile` that does not exist yet, so the full `up -d` dies on the build.
-`setup.py` prints whichever of the two commands actually applies, deciding on
-whether the `Dockerfile` is present.
 
 **Step 2 in detail.** `setup.py` checks Python and Docker, then creates the two
 files that are deliberately not in git:
@@ -57,6 +50,14 @@ failure this project most wants to avoid.
 
 An existing file is never overwritten: it is reported as `[skip]`. Use `--force`
 to replace one deliberately.
+
+**Step 3 happens inside step 2.** Once the checks pass and the secrets are
+filled, `setup.py` runs `docker compose -f docker/docker-compose.yml up -d`
+itself and prints the URL the page is served on. There is no separate command to
+type. While the checkout has no `Dockerfile` the crawl service cannot build, so
+the script names `caddy` alone and says so; that narrowing disappears when P5
+adds the file. A compose failure is reported and exits non-zero - the script
+never claims a stack it could not start.
 
 | Flag | Use it when |
 |------|-------------|

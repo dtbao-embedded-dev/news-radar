@@ -170,9 +170,9 @@ Six statements define "done". Every phase below exists to make one of them true.
    keyword group, has a dark mode, a search box, and per-day history.
 4. **New stories come to you.** Each crawl pushes only the **new** matches to
    Telegram and Discord. Nothing is re-sent.
-5. **Installing on a new machine is three steps.** `git clone` →
-   `python scripts/setup.py` (fill in tokens) → `docker compose up -d`.
-   Identical on Windows and Linux.
+5. **Installing on a new machine is two steps.** `git clone` →
+   `python scripts/setup.py` (fill in tokens); the script brings the stack up
+   itself. Identical on Windows and Linux.
 6. **Releasing is one command.** `python scripts/release.py 0.2.0` writes the
    changelog, commits `chore(release): v0.2.0` on `release/*`, merges into
    `developing` then `main`, tags, returns to `release/*` and pushes. CI turns
@@ -788,16 +788,18 @@ the container is ever started - see [[cli-scripts]].
 python scripts/setup.py [--dry-run] [--force] [--non-interactive] [--check]
 ```
 
-Bootstraps a homelab checkout: verifies the toolchain, creates the real config
-and env files from their templates, and validates the notification secrets.
+Bootstraps a homelab checkout and starts it: verifies the toolchain, creates the
+real config and env files from their templates, validates the notification
+secrets, then brings the stack up. A successful run leaves nothing for the
+operator to type afterwards.
 
 | Flag | Guarantee |
 |------|-----------|
 | *(none)* | Interactive. Creates missing files, prompts for missing secrets, never overwrites an existing file |
-| `--dry-run` | **Writes nothing and prompts for nothing.** Prints the checks and the files it would create, then exits |
+| `--dry-run` | **Writes nothing, prompts for nothing, starts nothing.** Prints the checks, the files it would create and the compose command it would run, then exits |
 | `--force` | Overwrite files that already exist. Without it, an existing file is reported and left alone |
 | `--non-interactive` | Never prompt; leave a missing secret blank and report it. For unattended provisioning |
-| `--check` | Verify only: toolchain present, required files exist, required secrets non-empty. Creates nothing |
+| `--check` | Verify only: toolchain present, required files exist. Creates nothing and starts nothing |
 
 Steps, in order:
 
@@ -807,12 +809,19 @@ Steps, in order:
 4. Create `docker/.env` from `docker/.env.example` if absent.
 5. For each notification channel enabled in the config, ensure its variables are
    present and non-empty in `docker/.env`; prompt unless `--non-interactive`.
-6. Print the next command to run.
+6. `docker compose -f docker/docker-compose.yml up -d`, with docker's own output
+   inherited rather than captured. While no `Dockerfile` is present in the
+   checkout the crawl service cannot build, so only `caddy` is named; the
+   narrowing lifts by itself once the file exists.
+7. Print the URL the page is served on, taking `NEWS_RADAR_HTTP_PORT` from
+   `docker/.env` and falling back to `8088`.
+
+Steps 6 and 7 are skipped by `--dry-run` and by `--check`.
 
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Everything needed is in place (or, under `--dry-run`, would be) |
-| `1` | A prerequisite is missing, or a required secret is still empty |
+| `1` | A prerequisite is missing, a required secret is still empty, or `docker compose up` failed |
 | `2` | Bad usage - unknown flag, or a template file is missing from the checkout |
 
 ## scripts/release.py
@@ -1165,9 +1174,9 @@ Recovery is ordinary git. Find out which step failed from the output, then:
 
 # Setting Up on the Homelab
 
-> Three steps: clone, `python scripts/setup.py`, `docker compose up -d`. The
-> same three on Windows and on Linux - that is why setup is a Python script and
-> not a pair of shell scripts.
+> Two steps: clone, then `python scripts/setup.py` - the script starts the stack
+> itself. The same two on Windows and on Linux; that is why setup is a Python
+> script and not a pair of shell scripts.
 
 ## Prerequisites
 
@@ -1186,14 +1195,7 @@ notification secret.
 git clone git@github.com:dtbao-embedded-dev/news-radar.git
 cd news-radar
 python scripts/setup.py
-docker compose -f docker/docker-compose.yml up -d
 ```
-
-**Until P5 lands, start `caddy` alone:** `docker compose -f
-docker/docker-compose.yml up -d caddy`. The crawl service builds from a
-`Dockerfile` that does not exist yet, so the full `up -d` dies on the build.
-`setup.py` prints whichever of the two commands actually applies, deciding on
-whether the `Dockerfile` is present.
 
 **Step 2 in detail.** `setup.py` checks Python and Docker, then creates the two
 files that are deliberately not in git:
@@ -1210,6 +1212,14 @@ failure this project most wants to avoid.
 
 An existing file is never overwritten: it is reported as `[skip]`. Use `--force`
 to replace one deliberately.
+
+**Step 3 happens inside step 2.** Once the checks pass and the secrets are
+filled, `setup.py` runs `docker compose -f docker/docker-compose.yml up -d`
+itself and prints the URL the page is served on. There is no separate command to
+type. While the checkout has no `Dockerfile` the crawl service cannot build, so
+the script names `caddy` alone and says so; that narrowing disappears when P5
+adds the file. A compose failure is reported and exits non-zero - the script
+never claims a stack it could not start.
 
 | Flag | Use it when |
 |------|-------------|

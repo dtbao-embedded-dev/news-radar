@@ -2,8 +2,9 @@
 """Bootstrap a news-radar checkout on a homelab machine.
 
 One script, identical behaviour on Windows and Linux: check the toolchain,
-create the real config and env files from their committed templates, and make
-sure every notification secret the stack needs is actually filled in.
+create the real config and env files from their committed templates, make sure
+every notification secret the stack needs is actually filled in, and bring the
+stack up. Nothing is left for the reader to run afterwards.
 
 Standard library only, on purpose - this runs before anything is installed.
 Nothing here imports src/news_radar, and nothing here parses YAML: the config
@@ -11,7 +12,8 @@ template is copied verbatim.
 
     python scripts/setup.py [--dry-run] [--force] [--non-interactive] [--check]
 
-Exit codes: 0 all good, 1 prerequisite or secret missing, 2 bad usage.
+Exit codes: 0 all good, 1 prerequisite/secret missing or the stack failed to
+start, 2 bad usage.
 See docs/memory-ai/interface/cli-scripts.md for the full contract.
 """
 
@@ -34,6 +36,10 @@ TEMPLATES = [
 ]
 
 ENV_FILE = Path("docker/.env")
+COMPOSE_FILE = Path("docker/docker-compose.yml")
+
+# Mirrors the fallback in docker-compose.yml; 8080 is commonly taken already.
+DEFAULT_HTTP_PORT = "8088"
 
 # Channel -> the variables it cannot work without. Kept as a constant rather
 # than read from config.yaml: parsing YAML would mean a dependency, and this
@@ -199,6 +205,52 @@ def ensure_secrets(dry_run, interactive):
 
 
 # --------------------------------------------------------------------------
+# stack
+# --------------------------------------------------------------------------
+
+
+def compose_argv():
+    """The `up -d` argv for whatever can actually start in this checkout.
+
+    The crawl service builds from a Dockerfile that lands in P5. While that
+    file is absent a full `up -d` dies on the build, so bring up the web half
+    alone; the narrowing disappears by itself once the Dockerfile exists.
+    """
+    # as_posix(): the same printed command works when pasted into any shell,
+    # including a Windows one, instead of growing backslashes there.
+    argv = ["docker", "compose", "-f", COMPOSE_FILE.as_posix(), "up", "-d"]
+    if not (ROOT / "Dockerfile").is_file():
+        argv.append("caddy")
+    return argv
+
+
+def start_stack():
+    """Bring the stack up. Docker's own output is inherited, not captured."""
+    argv = compose_argv()
+    exe = shutil.which(argv[0])
+    if exe is None:
+        say("fail", "docker is no longer on PATH")
+        return False
+
+    if argv[-1] == "caddy":
+        say("warn", "no Dockerfile in the checkout - starting caddy only")
+    say("run", " ".join(argv))
+
+    try:
+        proc = subprocess.run([exe] + argv[1:], cwd=str(ROOT), check=False)
+    except OSError as exc:
+        say("fail", "could not run docker compose: {}".format(exc))
+        return False
+    if proc.returncode != 0:
+        say("fail", "docker compose exited {}".format(proc.returncode))
+        return False
+
+    port = read_env(ROOT / ENV_FILE).get("NEWS_RADAR_HTTP_PORT") or DEFAULT_HTTP_PORT
+    say("ok", "stack is up - http://localhost:{}".format(port))
+    return True
+
+
+# --------------------------------------------------------------------------
 
 
 def main(argv=None):
@@ -237,6 +289,7 @@ def main(argv=None):
     if args.dry_run:
         # A dry run reports what would happen; it never fails on state it was
         # explicitly told not to change.
+        say("dry", "would run: {}".format(" ".join(compose_argv())))
         say("dry", "nothing was written")
         return 0 if ok else 1
 
@@ -247,16 +300,11 @@ def main(argv=None):
         say("fail", "fill the empty values in {}, then re-run".format(ENV_FILE))
         return 1
 
-    say("ok", "ready")
-    # The crawl service builds from a Dockerfile that lands in P5. Until that
-    # file exists a full `up -d` dies on the build, so point at what can
-    # actually start; the check disappears on its own once P5 adds the file.
-    if (ROOT / "Dockerfile").is_file():
-        print("next:  docker compose -f docker/docker-compose.yml up -d")
-    else:
-        print("next:  docker compose -f docker/docker-compose.yml up -d caddy")
-        print("       (no Dockerfile yet - the crawl service cannot build)")
-    return 0
+    if args.check:
+        say("ok", "checkout is ready - re-run without --check to start the stack")
+        return 0
+
+    return 0 if start_stack() else 1
 
 
 if __name__ == "__main__":

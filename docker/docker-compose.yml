@@ -34,6 +34,11 @@ services:
     volumes:
       - ../config:/app/config:ro
       - ../output:/app/output
+      # Store backups, and deliberately NOT under output/. Caddy serves that
+      # directory to the public web; a dated copy of the whole archive sitting
+      # in it would be one Caddyfile line away from being downloadable. This
+      # mount is on the crawl service only - caddy never sees the path at all.
+      - ../backups:/app/backups
 
   # Serves ../output as static files. Reached from outside through the
   # existing homelab Cloudflare Tunnel, routed to http://caddy:8080.

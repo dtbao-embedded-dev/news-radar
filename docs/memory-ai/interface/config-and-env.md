@@ -3,10 +3,10 @@ title: Config Keys, Keyword File and Environment
 category: interface
 purpose: Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads.
 status: draft
-updated: 2026-09-04
+updated: 2026-09-05
 source: config/config.yaml.example, config/frequency_words.txt
 confidence: inferred
-keywords: config.yaml, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
+keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
 order: 1
 ---
 
@@ -47,7 +47,11 @@ falls back to the default below.
 | `rank.weight_freshness` | float | `0.2` | Weight of the freshness term |
 | `rank.freshness_half_life_hours` | float | `12` | Age at which the freshness term halves |
 | `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
-| `storage.retention_days` | int | `0` | `0` = keep everything; otherwise prune rows and day files past the window |
+| `storage.retention_days` | int | `0` **(template ships `90`)** | `0` = keep everything; otherwise prune rows and day files past the window. The default and the template disagree on purpose - an absent key must never make an upgrade start deleting, while a fresh install should have a ceiling |
+| `ops.heartbeat_url` | str | `""` | Dead-man's switch pinged after every clean cycle (healthchecks.io / Uptime Kuma push). `""` = no ping |
+| `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. This is what notices the tunnel connector going away. `""` = no check |
+| `ops.backup_dir` | str | `backups` | Where the daily store backup is written. **Never under `storage.data_dir`** - that directory is served to the public web |
+| `ops.backup_keep` | int | `7` | Newest N backups kept; `0` = back nothing up |
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |

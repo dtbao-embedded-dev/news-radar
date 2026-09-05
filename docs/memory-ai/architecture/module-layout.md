@@ -48,9 +48,10 @@ news-radar/
 │   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
 │   ├── store.py                # DONE - SQLite persistence, seen-set, retention
 │   ├── render.py               # DONE - output/index.html + days/<date>.html
-│   └── notify/                 # P4
-│       ├── telegram.py
-│       └── discord.py
+│   └── notify/                 # DONE - P4
+│       ├── __init__.py         # SendResult, pick, chunk, clip
+│       ├── telegram.py         # bot API, HTML, 4000
+│       └── discord.py          # webhook, Markdown, 2000
 ├── tests/
 │   ├── test_config.py          # plain asserts, needs PyYAML
 │   ├── test_item.py            # plain asserts, stdlib only
@@ -62,6 +63,7 @@ news-radar/
 │   ├── test_rank.py            # plain asserts, stdlib only
 │   ├── test_store.py           # plain asserts, stdlib only (sqlite3)
 │   ├── test_render.py          # plain asserts, stdlib only
+│   ├── test_notify.py          # plain asserts, stdlib only, local http.server
 │   ├── test_release.py         # plain asserts, stdlib only
 │   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
@@ -86,7 +88,12 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
 | 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
 | 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
-| 5 — output | `render.py`, `notify/*` | layers 3 and 4 |
+| 5 — output | `render.py`, `notify/*` | layers 3 and 4; `notify/*` also layer 1 |
+
+`notify/*` reaching back to layer 1 is the one deliberate widening: a POST needs
+the same User-Agent, timeout, retry and per-host gap a GET does, and honouring a
+429's `Retry-After` is a transport concern rather than a per-channel one. The
+alternative was a second HTTP client inside `notify/`. See [[notify-channels]].
 
 `__main__.py` is the only module that knows about all five; it wires them and owns
 the schedule loop. `config.py`, `item.py` and `keywords.py` are leaves — they

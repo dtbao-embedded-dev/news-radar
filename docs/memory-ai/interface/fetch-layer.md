@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-05
 source: src/news_radar/fetch/http.py, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py, src/news_radar/item.py, src/news_radar/keywords.py
 confidence: confirmed
-keywords: Fetcher, HttpError, parse, read_source, read_fixed_feeds, build_urls, read_search_feeds, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle
+keywords: Fetcher, HttpError, post_json, Retry-After, RETRY_AFTER_MAX, parse, read_source, read_fixed_feeds, build_urls, read_search_feeds, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle
 order: 5
 ---
 
@@ -54,9 +54,18 @@ at all. A `#` starts a comment only at the start of a line, so the term
 
 ```
 Fetcher(user_agent, timeout_s=15, max_retries=2, interval_ms=2000, backoff_s=1.0)
-    .get(url) -> bytes          raises HttpError
-HttpError(message, status=None, url=None)
+    .get(url)               -> bytes    raises HttpError
+    .post_json(url, payload) -> bytes   raises HttpError
+HttpError(message, status=None, url=None, body=b"", retry_after=None)
+RETRY_AFTER_MAX = 60.0
 ```
+
+**Both verbs, one code path.** `get()` reads a feed and `post_json()` talks to a
+notification channel; both go through a private `_request()`, so the
+User-Agent, the timeout, the retry policy and the per-host gap are decided once.
+A POST is retried on the same statuses a GET is, which means a 5xx can deliver
+the same message twice - the trade [[notify-channels]] already takes, where a
+duplicate is the acceptable failure and a dropped story is not.
 
 - **One instance per cycle.** The `{hostname: last_request}` throttle state
   lives on it, so every source in the run shares one idea of how recently a
@@ -69,6 +78,17 @@ HttpError(message, status=None, url=None)
   errors, `max_retries` times with `backoff_s * 2**(n-1)` between attempts.
   **Not retried:** every other 4xx. A 403 answers the same however often it is
   asked.
+- **A 429 is slept for exactly as long as the server asked**, not for our own
+  guess: `Retry-After` first, then the JSON body's `retry_after` (Discord) or
+  `parameters.retry_after` (Telegram), capped at `RETRY_AFTER_MAX = 60 s`. A
+  server asking for fifteen minutes would stall a thirty-minute cycle past its
+  own interval. An unparseable value - `Retry-After` may also be an HTTP-date,
+  which nothing here sends - falls back to the exponential delay rather than
+  earning a date parser. Google News throttles on the GET path too, so this is
+  a transport rule rather than a notification one.
+- **`HttpError` carries the response body.** On the notification side that
+  sentence (`chat not found`, `Invalid Webhook Token`) is the fixable half of
+  the failure.
 - `Accept-Encoding: gzip, deflate` is sent and the response decoded by its
   `Content-Encoding` header. A body that claims an encoding it does not have is
   returned raw rather than losing the source.

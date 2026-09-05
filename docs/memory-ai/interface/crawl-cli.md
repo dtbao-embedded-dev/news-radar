@@ -81,7 +81,17 @@ INFO    Security - 0 item(s)
 INFO  rendered output/index.html (7 group(s), 90 story(ies))
 INFO  stored 43 match row(s) as run 20260905T081328Z; the page shows 90
       story(ies) across 7 group(s) today
-WARN  the senders are not implemented yet (P4) - nothing is notified this cycle
+INFO  notifying 2 channel(s) in incremental mode
+INFO    telegram 2 message(s), 43 story(ies)
+INFO    discord  5 message(s), 43 story(ies)
+```
+
+The next cycle over the same news says so instead:
+
+```
+INFO  notifying 2 channel(s) in incremental mode
+INFO    telegram nothing new to send
+INFO    discord  nothing new to send
 ```
 
 **Every group is reported, empty ones included.** `Security - 0 item(s)` is a
@@ -102,11 +112,22 @@ of "the radar is broken".
 
 **Storage and rendering cannot cost the fetch.** `_publish()` is wrapped whole: a
 locked database, a full disk or a read-only volume is logged with its traceback
-and the cycle still returns the shortlist it spent fifty seconds collecting.
+and the cycle still returns the shortlist it spent fifty seconds collecting. It
+returns the `run_id`, so a cycle whose storage failed notifies nothing rather
+than notifying a run that was never written.
+
+**Only new stories are pushed, and a quiet cycle is silent.** The run is read
+back out of the store and diffed against the per-channel seen-set; a story is
+recorded as sent only after the message carrying it was accepted. Two Telegram
+messages and five Discord ones for the same 43 stories is the 4000/1900 limit,
+not a bug. See [[notify-channels]].
+
+**A failing channel costs neither the page nor the other channel.** `_notify()`
+is guarded whole *and* once per channel, so a revoked webhook leaves Telegram
+still attempted.
 
 ## What it does not do yet
 
-Nothing is notified: the cycle ends on `the senders are not implemented yet
-(P4)`. P4 lands the Telegram and Discord senders and the new-only diff, which
-reads the seen-set P3 already writes. The flags and exit codes above do not
-change with it.
+Nothing here. P5 is deployment - the Cloudflare Tunnel route and the first
+unattended live run - and P6 is ops. Neither changes the flags or exit codes
+above.

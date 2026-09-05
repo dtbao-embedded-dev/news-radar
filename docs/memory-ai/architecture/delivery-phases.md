@@ -105,7 +105,7 @@ months old and the freshness term is `0` for nearly all of them - the shortlist
 currently ranks on source weight alone. Narrowing both queries to a recent
 window is a `config.yaml` change, not a code one.
 
-### P3 — Store and render *(done — this repo's current phase is P4)*
+### P3 — Store and render *(done)*
 
 | # | Task |
 |---|------|
@@ -119,15 +119,19 @@ window is a `config.yaml` change, not a code one.
 
 **P2's weak link was closed here too.** Narrowing Google News to `when:7d` and querying HN Algolia through `search_by_date` finally makes the freshness term fire; what it cost in volume is in `progress.md`.
 
-### P4 — Notify
+### P4 — Notify *(done — this repo's current phase is P5)*
 
 | # | Task |
 |---|------|
-| P4-1 | Telegram sender: bot API, message length limit, HTML/Markdown escaping |
-| P4-2 | Discord sender: webhook, embed limits, 2000-character body limit |
-| P4-3 | New-only diff against the seen-set; nothing new means nothing sent |
-| P4-4 | Batching and backoff: respect 429 and `Retry-After` on both channels |
-| P4-5 | Report modes: current run / daily digest / incremental |
+| P4-1 | ~~Telegram sender: bot API, message length limit, HTML/Markdown escaping~~ — `notify/telegram.py`, HTML at 4000 |
+| P4-2 | ~~Discord sender: webhook, embed limits, 2000-character body limit~~ — `notify/discord.py`, plain `content` at 1900, no embeds |
+| P4-3 | ~~New-only diff against the seen-set; nothing new means nothing sent~~ — `notify.pick()` over `store.unreported()` |
+| P4-4 | ~~Batching and backoff: respect 429 and `Retry-After` on both channels~~ — `Fetcher.post_json()`, capped at 60 s |
+| P4-5 | ~~Report modes: current run / daily digest / incremental~~ — `_rows_to_send()` picks the window, the diff picks the rest |
+
+**A story is marked sent only after the message carrying it was accepted.** A
+crash between the two re-sends; a duplicate is the acceptable failure where a
+silently dropped story is not. Signatures are in [[notify-channels]].
 
 ### P5 — Deploy
 

@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-05
 source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py
 confidence: confirmed
-keywords: open_db, start_run, finish_run, save, day_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot
+keywords: open_db, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot
 order: 7
 ---
 
@@ -29,6 +29,7 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `finish_run(conn, run_id, finished_at, items_fetched, items_matched, errors)` | `None` | Closes the row; `errors` is JSON-encoded as a list of pairs |
 | `save(conn, run_id, ranked, now)` | `int` | `{label: [Story]}` in, number of `matches` rows written out |
 | `day_matches(conn, start_utc, end_utc)` | `{label: [row]}` | Only labels that have rows. See the row shape below |
+| `run_matches(conn, run_id)` | `{label: [row]}` | The same row shape for one run - what a notification is built from |
 | `unreported(conn, dedup_keys, channel)` | `[dedup_key]` | The seen-set diff, in the caller's order. `[]` for an empty input |
 | `mark_reported(conn, dedup_keys, channel, when)` | `None` | Idempotent - `INSERT OR IGNORE` |
 | `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)` |
@@ -63,11 +64,17 @@ holds all three in one UPSERT:
    gives no timestamp must not erase one that did, so a `NULL` never wins.
 3. **The source set accumulates**, because `item_sources` ignores a duplicate.
 
-### The row `day_matches` returns
+### The row both readers return
 
-One row per `(story, group)` however many runs saw it - the **best** score any
-run in the window gave it wins, because a story that got fresher during the day
-should not be ranked by the run that noticed it first.
+`day_matches()` and `run_matches()` are two callers of one private `_matches()`,
+so the page and the senders can never disagree about the shape. One row per
+`(story, group)` however many runs saw it - the **best** score in the slice wins,
+because a story that got fresher during the day should not be ranked by the run
+that noticed it first. Over a single run that is a no-op: the `matches` primary
+key already allows one row per `(story, group, run)`.
+
+The page shows a day and a message shows a run. That is the whole difference
+between the two functions.
 
 | Key | Type | Meaning |
 |-----|------|---------|
@@ -130,7 +137,8 @@ fallback is exact there - a zone that *does* observe DST would need `tzdata`.
 
 `open_db` → `start_run` → `save` → `local_tz` + `day_bounds` → `day_matches` →
 `render.write` → `prune` → `finish_run`, the whole sequence inside one
-`try/except`. A locked database, a full disk or a read-only volume costs the
+`try/except`, returning the **`run_id`** (or `None`) so the senders can read the
+run back - see [[notify-channels]]. A locked database, a full disk or a read-only volume costs the
 page, never the fetch: the cycle logs the traceback and still returns the
 shortlist. **The page is rendered from `day_matches()`, never from the `ranked`
 mapping still in memory** - that one choice is what makes a restart at noon

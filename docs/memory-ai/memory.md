@@ -19,10 +19,44 @@ _Generated 2026-09-05 - 18 durable doc(s)._
 
 ## What works
 
-**P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, and P3
-Store and render are complete** (2026-09-05).
+**P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, P3 Store
+and render, and P4 Notify are complete** (2026-09-05).
 See `architecture/delivery-phases.md` for the phase map and the finished-product
 definition all of it serves.
+
+### P4 - Notify
+
+- **New stories arrive on the phone, and a quiet cycle is silent.** Measured in
+  the container on 2026-09-05: the first `--once` after the rebuild sent
+  **2 Telegram messages and 5 Discord messages carrying the same 43 stories**,
+  and the `--once` straight after it printed `nothing new to send` on both
+  channels and sent nothing. Both halves are P4's definition of done.
+- **Five messages on Discord against two on Telegram is arithmetic, not a bug.**
+  1900 characters is a quarter of Telegram's 4000, so the same run costs more
+  messages there. Both limits sit under the real ones (2000 and 4096) because
+  Telegram counts UTF-16 code units and `len()` does not.
+- **A story is marked sent only after the message carrying it was accepted**, and
+  the seen-set is per channel. A crash between the send and the write re-sends;
+  enabling Discord later does not replay everything Telegram already had.
+- **A refusal ends that channel for the run, and costs nothing else.** The page
+  is already written by then, and the other channel is still attempted - two
+  guards, the outer one around the store work and the inner one per channel.
+- **`report.mode` finally does something.** It was validated by `config.py` from
+  P0 and read by nothing, so `mode: daily` was accepted and silently ignored.
+  `incremental` sends this run's new matches, `current` the whole shortlist every
+  cycle, `daily` everything today that has not gone out yet.
+- **The transport learned to POST and to read `Retry-After`.** Both live in
+  `Fetcher`, so the GET path gets the 429 fix too - Google News throttles as
+  readily as a bot API. The delay is capped at 60 s: a server asking for fifteen
+  minutes would stall a thirty-minute cycle past its own interval.
+- **Three sets of dangerous characters, not one.** The page escapes for HTML,
+  Telegram for its own HTML subset, Discord for Markdown - and a `[` that is
+  harmless in the first two ends a Discord link early. `tests/test_notify.py`
+  pins each set, and pins that a story is never split across two messages.
+- **One more stdlib-only test file.** `test_notify.py` needs only `http.server`
+  and `json`, so ten of the twelve test files now run on a bare Windows
+  checkout.
+- **Still two runtime dependencies.** Both channels are `urllib` and `json`.
 
 ### P3 - Store and render
 
@@ -44,9 +78,9 @@ definition all of it serves.
 - **Three re-sighting rules are pinned by tests.** `first_seen_at` never moves;
   `published_at` keeps the earliest non-null and a `NULL` never overwrites a real
   timestamp; the source set accumulates.
-- **The seen-set is per channel and nothing calls it yet.** `unreported()` and
-  `mark_reported()` are written and tested; P4 is the first caller. Marking a
-  story sent on Telegram leaves it unreported on Discord.
+- **The seen-set is per channel.** `unreported()` and `mark_reported()` landed
+  here with no caller; P4 is the caller. Marking a story sent on Telegram leaves
+  it unreported on Discord.
 - **The page is self-contained, and the test asserts it.** No external
   stylesheet, script or image - a report that needs a CDN stops being readable
   exactly when the network is the thing you wanted to read about. Dark mode with
@@ -194,14 +228,14 @@ definition all of it serves.
 
 ## What's left
 
-Notification onwards. `src/news_radar/` now holds the entrypoint, the config
-loader, the item shape, the keyword parser, the whole fetch layer, the whole
-selection layer, the store and the renderer; only `notify/` is still
-**specified but not written**.
+Deployment onwards. **Every module the design bank specifies is now written**:
+the entrypoint, the config loader, the item shape, the keyword parser, the whole
+fetch layer, the whole selection layer, the store, the renderer and both
+senders. What is left is not code in this repository.
 
-- **P4 Notify** - Telegram and Discord senders, the new-only diff, and backoff.
 - **P5 Deploy** - the Cloudflare Tunnel route for `news.dtbao.org` and the first
-  unattended live run. The `Dockerfile` and the schedule loop are done.
+  unattended live run. The `Dockerfile`, the compose stack and the schedule loop
+  are done, so this is network configuration outside the repo.
 - **P6 Ops** - retention, heartbeat, failure alerting.
 
 ## Known issues
@@ -226,14 +260,14 @@ selection layer, the store and the renderer; only `notify/` is still
   does not delete the old objects: `91ea2d9` still answers over the API with the
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
-- **Four bank docs are still marked `inferred`**: `delivery-phases` and
-  `deployment-homelab` (both still describe work not done - P4 onwards, and the
-  tunnel), `config-and-env` and `notify-channels` (never checked key by key
-  against the code). Flip each once it is verified against the real
-  implementation. `news-item`, `news-sources`, `news-search`, `module-layout`,
-  `crawl-cli`, `selection-layer` and `storage-layer` are `confirmed`; P3 cleared
-  the last two 🟡 sections of `news-item`, so the bank now carries no inline
-  gap markers at all.
+- **Three bank docs are still marked `inferred`**: `delivery-phases` and
+  `deployment-homelab` (both still describe work not done - P5, P6 and the
+  tunnel), and `config-and-env` (never checked key by key against the code).
+  Flip each once it is verified against the real implementation.
+  `notify-channels` was flipped to `confirmed` by P4 and rewritten against the
+  real modules; `news-item`, `news-sources`, `news-search`, `module-layout`,
+  `crawl-cli`, `fetch-layer`, `selection-layer` and `storage-layer` are
+  `confirmed` too, and the bank carries no inline gap markers at all.
 - **`www.reddit.com` does not resolve from this homelab.** Both Reddit sources
   are therefore dead here, whatever User-Agent is sent. It is a network fact,
   not a code defect: failure isolation handles it, and the fixed feed stays
@@ -246,6 +280,18 @@ selection layer, the store and the renderer; only `notify/` is still
 - **`docker/docker-compose.yml` still carries a stale P0 note** saying the
   Dockerfile does not exist and only `caddy` is startable. That has been false
   since the Dockerfile landed.
+
+- **The image does not ship `tests/`, so the suite cannot be run with
+  `docker compose exec`.** It runs on the host (ten of twelve files) or, for the
+  two that need `feedparser`, in a throwaway container with the repo mounted:
+  `docker run --rm --entrypoint sh -v <repo>:/repo -w /repo news-radar-news-radar
+  -c 'for t in tests/test_*.py; do python "$t"; done'`. CI runs the same loop on
+  a checkout, so nothing is untested - it is only awkward locally.
+
+- **Nobody has read a whole cycle's worth of messages yet.** Five Discord
+  messages every thirty minutes may turn out to be noise rather than a report,
+  and no test can answer that. It is a tuning question for `report.max_per_group`
+  or `report.mode`, not a defect.
 - **No default-branch policy on GitHub**: the first pushed branch (`main`) is the
   default, so pull requests target `main` rather than `developing`.
 
@@ -257,86 +303,97 @@ selection layer, the store and the renderer; only `notify/` is still
 
 ## Current focus
 
-**P3 Store and render is done** (2026-09-05). `python -m news_radar --once`
-writes `output/news.db` and a self-contained `output/index.html` plus
-`output/days/<date>.html`, grouped by keyword group with a dark mode, a search
-box and a link to every past day. A second `--once` kept **all 50 of the first
-run's stories on the page**. That is the phase's definition of done.
+**P4 Notify is done** (2026-09-05). A cycle that finds something new now pushes
+it to Telegram and Discord instead of only writing the page. Measured live in
+the container: the first `--once` after the rebuild sent **2 Telegram messages
+and 5 Discord messages carrying the same 43 stories**, and the `--once` run
+straight after it printed `nothing new to send` on both channels and sent
+nothing. That is the phase's definition of done, both halves of it.
 
-The next piece of work is **P4 Notify**: the Telegram and Discord senders, the
-new-only diff against the seen-set `store.py` already writes, and the backoff
-both channels need. `store.unreported()` and `store.mark_reported()` exist,
-are tested, and have no caller yet - P4 is the first one.
+The next piece of work is **P5 Deploy**: the Cloudflare Tunnel route for
+`news.dtbao.org` and the first unattended live run. The `Dockerfile`, the
+compose stack and the schedule loop are already done, so P5 is mostly network
+configuration outside this repository.
 
 ## Recent changes
 
-- **P3 landed in six commits on `release/v0.1`** (2026-09-05): `store.py` (five
-  tables migrated on `user_version`, `save`, `day_matches`, the seen-set,
-  `prune`), `render.py` (`local_tz`, `day_bounds`, `write`), and the
-  `_publish()` wiring in `__main__.py`.
-- **The page is rendered from the store, never from the run in memory.** That
-  one choice is what makes "history survives a restart" true. It was proven, not
-  assumed: five stories scored higher in run 1 than in run 2 and the page
-  carried run 1's score for all five.
-- **The search templates were narrowed and it worked - at a cost.** `when:7d`
-  and `search_by_date` make the freshness term fire (ten stories now clear the
-  `0.40` source-only floor where none did), but Google News (vi) returned
-  **16 items instead of 253** because the Vietnamese index has almost no recent
-  embedded coverage. Kept deliberately; the detail is in `progress.md`.
-- **Two departures from the design bank, both recorded in [[news-item]]**: the
-  sources are a table rather than a JSON column on `items`, and
-  `days/<date>.html` is rewritten every run rather than once at midnight.
-- **`interface/storage-layer.md` is new**, and `news-item.md`,
-  `crawl-cli.md`, `module-layout.md`, `delivery-phases.md` are restamped against
-  the real modules. `news-item.md` carries no 🟡 markers any more.
+- **P4 landed in eight commits on `release/v0.1`** (2026-09-05):
+  `fetch/http.py` (`post_json()`, `Retry-After`), `store.py` (`run_matches()`),
+  `notify/__init__.py` (`SendResult`, `pick`, `chunk`, `clip`),
+  `notify/telegram.py`, `notify/discord.py`, and `_notify()` in `__main__.py`.
+- **The senders read the store, not `ranked`** - the same choice P3 made for the
+  page, for the same reason. The story that goes out carries the same score and
+  the same source list as the one on the page, and `report.mode` only changes
+  *which window* is read: `run_matches()` for `incremental` and `current`,
+  `day_matches()` for `daily`.
+- **`report.mode` finally does something.** It was validated by `config.py` from
+  P0 onward and read by nothing; `mode: daily` was accepted and silently
+  ignored. All three modes now behave as the config comment claims.
+- **The transport learned to POST, and learned to read `Retry-After`.** Both
+  changes live in `Fetcher` rather than in `notify/`, so the GET path gets the
+  429 fix too - Google News throttles as readily as a bot API does.
+- **One deliberate widening of the layering rule**: `notify/*` imports layer 1.
+  Recorded in [[module-layout]] and [[notify-channels]] rather than left to be
+  discovered.
+- **Two departures from the drafted contract, both recorded in
+  [[notify-channels]]**: `send()` takes no `RunMeta` (nothing consumed it), and
+  the secrets are read in `__main__` rather than inside each channel (which is
+  what lets both channels be tested with no environment at all).
 
-Before this session: P2 landed the selection layer, P1 the whole fetch layer,
-P0 the release tooling, the docker stack, the config loader and the design bank
-- see `progress.md`.
+Before this session: P3 landed the store and the page, P2 the selection layer,
+P1 the whole fetch layer, P0 the release tooling, the docker stack, the config
+loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **P4-1 Telegram sender** - bot API, the message length limit, HTML escaping.
-2. **P4-2 Discord sender** - webhook, embed limits, the 2000-character body.
-3. **P4-3 the new-only diff** - `store.unreported()` per channel; nothing new
-   means nothing sent, and `mark_reported()` is written only after the chunk was
-   accepted.
-4. **P4-4 backoff** - 429 and `Retry-After` on both channels.
-5. **Watch the page for a few days.** Retention is written but has never run
-   against a window that had anything to drop - `retention_days` is `0` in the
-   shipped config, so nothing prunes until someone sets it.
+1. **P5-3 Cloudflare Tunnel route** for `news.dtbao.org` to `caddy:8080`.
+2. **P5-4 first unattended live run**, verified from outside the LAN.
+3. **Watch the messages for a few days.** Two things are worth eyeballing that
+   no test can assert: whether 5 Discord messages per cycle is pleasant or
+   noisy, and whether any real headline trips an escaping case the fixtures
+   missed.
+4. **Retention has still never run against a window with anything to drop** -
+   `retention_days` is `0` in the shipped config, so nothing prunes until
+   someone sets it.
 
 ## Active decisions
 
-- **The page is rendered from the store, not from `ranked`.** `day_matches()`
-  returns the whole local day; rendering the in-memory shortlist would publish
-  an afternoon that has forgotten its own morning. A `render.write(..., ranked)`
-  anywhere is a bug, not a shortcut.
+- **A story is marked sent only after the message carrying it was accepted.** A
+  crash between the send and the write re-sends next cycle; a duplicate is the
+  acceptable failure where a silently dropped story is not. `mark_reported()`
+  after the sender returns, never before.
+- **A refusal ends the channel for that run.** The same answer is coming for
+  chunk two, and hammering a throttled bot is how throttled becomes banned.
+  Whatever was accepted before the refusal still counts as sent.
+- **Two guards around notification, and both are needed.** The outer one keeps a
+  locked store from costing the page; the inner one is per channel, because the
+  contract says a dead webhook must leave the other channel still attempted.
+- **The page is rendered from the store, not from `ranked`.** A
+  `render.write(..., ranked)` anywhere is a bug, not a shortcut.
 - **Layer 3 and layer 4 import no config and read no clock.** The weights, the
   `{source_id: rank_weight}` map, the data directory, the retention window and
-  `now` are all arguments `__main__.py` builds. It is why nine of the eleven
-  test files run with nothing installed.
-- **Everything off a feed is escaped at the render boundary.** Titles, links and
-  source ids all go through `html.escape`. A feed title is somebody else's text
-  arriving unreviewed every thirty minutes.
+  `now` are all arguments `__main__.py` builds. It is why ten of the twelve test
+  files run with nothing installed.
+- **Everything off a feed is escaped at the boundary it is crossing.** The page
+  escapes for HTML, Telegram for its own HTML subset, Discord for Markdown - and
+  the three sets of dangerous characters are not the same one. A feed title is
+  somebody else's text arriving unreviewed every thirty minutes.
 - **The page needs no network to be read.** Inline CSS and JavaScript, no
   external stylesheet, script or image - `test_render.py` asserts it rather than
   trusting it.
 - **Clean-room from TrendRadar.** It is a reference to consult when stuck, never
   a source to copy from - it is GPL-3.0. `rule/reference-trendradar.md` says
   where to look by problem and what may not cross back.
-- **Two runtime dependencies, total**: `pyyaml` and `feedparser`. HTTP, storage
-  and templating come from the standard library. A third needs justifying in the
-  changelog. P3 held the line - the store is `sqlite3` and the page is
-  f-strings. It is also why `render.local_tz()` falls back to the host offset
-  instead of the project taking `tzdata` for one lookup.
+- **Two runtime dependencies, total**: `pyyaml` and `feedparser`. HTTP, storage,
+  templating and both senders come from the standard library. A third needs
+  justifying in the changelog. P4 held the line - the channels are `urllib` and
+  `json`.
 - **One guard, not one per caller.** `feeds.read_source()` is the only place a
-  source failure is caught; `_publish()` is the only place a storage or render
-  failure is. A second guard anywhere is a bug.
+  source failure is caught; `_publish()` the only place a storage or render
+  failure is; `_notify()` the only place a send failure is.
 - **The changelog records technical changes only**, written by hand into
   `## Unreleased` in the same commit as the change. One entry per change, not
-  per commit: all of P3 is one `**crawl**` line, and the search-window fix is a
-  `**config**` line of its own because it is a separate change.
+  per commit: all of P4 is one `**crawl**` line.
 - **Both scripts stay stdlib-only** so they run on a bare checkout, before
   anything is installed.
 - **Self-hosted, not GitHub Pages.** The crawl and the site both run on the
@@ -445,7 +502,7 @@ months old and the freshness term is `0` for nearly all of them - the shortlist
 currently ranks on source weight alone. Narrowing both queries to a recent
 window is a `config.yaml` change, not a code one.
 
-### P3 — Store and render *(done — this repo's current phase is P4)*
+### P3 — Store and render *(done)*
 
 | # | Task |
 |---|------|
@@ -459,15 +516,19 @@ window is a `config.yaml` change, not a code one.
 
 **P2's weak link was closed here too.** Narrowing Google News to `when:7d` and querying HN Algolia through `search_by_date` finally makes the freshness term fire; what it cost in volume is in `progress.md`.
 
-### P4 — Notify
+### P4 — Notify *(done — this repo's current phase is P5)*
 
 | # | Task |
 |---|------|
-| P4-1 | Telegram sender: bot API, message length limit, HTML/Markdown escaping |
-| P4-2 | Discord sender: webhook, embed limits, 2000-character body limit |
-| P4-3 | New-only diff against the seen-set; nothing new means nothing sent |
-| P4-4 | Batching and backoff: respect 429 and `Retry-After` on both channels |
-| P4-5 | Report modes: current run / daily digest / incremental |
+| P4-1 | ~~Telegram sender: bot API, message length limit, HTML/Markdown escaping~~ — `notify/telegram.py`, HTML at 4000 |
+| P4-2 | ~~Discord sender: webhook, embed limits, 2000-character body limit~~ — `notify/discord.py`, plain `content` at 1900, no embeds |
+| P4-3 | ~~New-only diff against the seen-set; nothing new means nothing sent~~ — `notify.pick()` over `store.unreported()` |
+| P4-4 | ~~Batching and backoff: respect 429 and `Retry-After` on both channels~~ — `Fetcher.post_json()`, capped at 60 s |
+| P4-5 | ~~Report modes: current run / daily digest / incremental~~ — `_rows_to_send()` picks the window, the diff picks the rest |
+
+**A story is marked sent only after the message carrying it was accepted.** A
+crash between the two re-sends; a duplicate is the acceptable failure where a
+silently dropped story is not. Signatures are in [[notify-channels]].
 
 ### P5 — Deploy
 
@@ -534,9 +595,10 @@ news-radar/
 │   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
 │   ├── store.py                # DONE - SQLite persistence, seen-set, retention
 │   ├── render.py               # DONE - output/index.html + days/<date>.html
-│   └── notify/                 # P4
-│       ├── telegram.py
-│       └── discord.py
+│   └── notify/                 # DONE - P4
+│       ├── __init__.py         # SendResult, pick, chunk, clip
+│       ├── telegram.py         # bot API, HTML, 4000
+│       └── discord.py          # webhook, Markdown, 2000
 ├── tests/
 │   ├── test_config.py          # plain asserts, needs PyYAML
 │   ├── test_item.py            # plain asserts, stdlib only
@@ -548,6 +610,7 @@ news-radar/
 │   ├── test_rank.py            # plain asserts, stdlib only
 │   ├── test_store.py           # plain asserts, stdlib only (sqlite3)
 │   ├── test_render.py          # plain asserts, stdlib only
+│   ├── test_notify.py          # plain asserts, stdlib only, local http.server
 │   ├── test_release.py         # plain asserts, stdlib only
 │   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
@@ -572,7 +635,12 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
 | 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
 | 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
-| 5 — output | `render.py`, `notify/*` | layers 3 and 4 |
+| 5 — output | `render.py`, `notify/*` | layers 3 and 4; `notify/*` also layer 1 |
+
+`notify/*` reaching back to layer 1 is the one deliberate widening: a POST needs
+the same User-Agent, timeout, retry and per-host gap a GET does, and honouring a
+429's `Retry-After` is a transport concern rather than a per-channel one. The
+alternative was a second HTTP client inside `notify/`. See [[notify-channels]].
 
 `__main__.py` is the only module that knows about all five; it wires them and owns
 the schedule loop. `config.py`, `item.py` and `keywords.py` are leaves — they
@@ -1169,31 +1237,63 @@ chain it drives.
 - Neither imports anything from `src/news_radar`, and neither needs PyYAML: the
   config template is copied verbatim, not parsed.
 
-### [interface] Notification Channels - Telegram and Discord  🟡 [inferred - verify]
-*`interface/notify-channels.md` - The exact contract news-radar has with the Telegram Bot API and a Discord webhook, including limits and error handling. - status: draft - source: conversation - keywords: telegram, sendMessage, bot token, chat_id, discord, webhook, embeds, 429, retry_after, rate limit, message format, 4096, 2000*
+### [interface] Notification Channels - Telegram and Discord
+*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set*
 
 # Notification Channels - Telegram and Discord
 
-> Two channels, one payload. `notify/` receives the ranked, already-deduplicated
-> match list and is the only place that knows what a message looks like.
+> Two channels, one payload. `notify/` receives rows the store already selected
+> and is the only place that knows what a message looks like. It decides nothing
+> about *which* stories go out - `__main__._notify()` does that, and hands the
+> answer down.
 
-## What a channel receives
+## The layer
 
-A channel implementation is handed the run's match list grouped by keyword group,
-already filtered to what should be sent under `report.mode`. It decides nothing
-about *which* stories go out - only how they are rendered and split.
+`notify/` is layer 5 beside `render.py`, and it imports **layer 1** as well as
+layer 4: a POST needs the same User-Agent, timeout, retry and per-host gap a GET
+does, and honouring a 429's `Retry-After` is a transport concern rather than a
+per-channel one. The alternative was a second HTTP client inside `notify/`.
 
-Contract, as text:
+Neither channel reads the environment, the config or the clock. The secrets, the
+row set and the group order all arrive as arguments, which is why
+`tests/test_notify.py` exercises both channels against a local `http.server`
+with nothing installed and nothing configured.
 
-```
-send(groups: list[Group], run: RunMeta) -> SendResult
-Group    = {label: str, items: list[RankedItem]}
-RunMeta  = {run_id: str, started_at: datetime, source_count: int, error_count: int}
-SendResult = {sent: int, skipped: int, failed: int, retry_after: float | None}
-```
+## `notify/__init__.py` - what both channels share
 
-An empty `groups` means **send nothing at all** - not an empty message. A quiet
-run must be quiet.
+| Signature | Returns | Notes |
+|-----------|---------|-------|
+| `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order + the seen-set diff. Empty groups dropped |
+| `chunk(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. Every text under `limit` |
+| `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
+| `SendResult(sent, failed, keys)` | dataclass | `.stories` is `len(keys)` |
+
+`TITLE_MAX` is `240`: long enough that no real headline is touched, short enough
+that one absurd title plus its link cannot on its own overflow the smaller of the
+two budgets and cost the story its message.
+
+**`pick()` does the two things that decide what a channel is even shown.**
+`labels` is the group order the keyword file fixes - the same order the page
+renders in, because a mapping's own order would shuffle the sections between runs
+for no reason a reader could follow. `keys` is the seen-set answer: `None` sends
+everything (`report.mode: current`), while an **empty set** means everything has
+already gone out - not the same thing, and it must send nothing at all.
+
+**`chunk()` splits on a group boundary first and an item boundary second**, and a
+single story is never split across two messages: half a headline with no link is
+worse than the same story arriving one message later. When a group has to be
+split, its header is repeated on every part - the second message is the one most
+likely to be read on its own.
+
+**An empty group contributes nothing.** The page prints `Security - 0 item(s)`
+because a reader is looking for the keyword that went quiet; a phone should not
+buzz to say nothing happened.
+
+## The row a channel is given
+
+The same row `store.day_matches()` and `store.run_matches()` return - see
+[[storage-layer]]. A channel reads `dedup_key`, `title`, `url`,
+`canonical_url` and `sources`, and ignores the rest.
 
 ## Telegram
 
@@ -1202,19 +1302,30 @@ run must be quiet.
 | Endpoint | `POST https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/sendMessage` |
 | Required env | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | Body | JSON: `chat_id`, `text`, `parse_mode: "HTML"`, `disable_web_page_preview: true` |
-| Hard limit | 4096 characters per message (UTF-16 code units, not bytes) |
-| Rate limit | ~30 messages/second overall, ~20 per minute to one group chat |
-| Throttle response | HTTP 429 with `parameters.retry_after` in seconds |
+| Hard limit | 4096 characters (UTF-16 code units, not bytes) |
+| `LIMIT` used | `4000` |
+| Throttle response | HTTP 429, `Retry-After` header and `parameters.retry_after` |
 
-Formatting rules:
+| Signature | Returns |
+|-----------|---------|
+| `build(groups, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
+| `send(fetcher, groups, token, chat_id)` | `SendResult` |
 
-- `parse_mode: HTML` with only `<b>`, `<i>`, `<a href>` and `<code>` used. Every
-  title is escaped for `&`, `<` and `>` **before** being wrapped in a tag -
-  an unescaped `&` in a headline makes the whole message fail with
-  `Bad Request: can't parse entities`, and the story is lost.
-- Link preview is disabled: one preview per message would bury the list.
-- A group longer than the limit is split on a **group boundary first**, then on an
-  item boundary. A single item is never split across two messages.
+Formatting: `<b>label</b>` per group, then
+`• <a href="url">title</a> <i>sources</i>` per story.
+
+- **HTML, not Markdown.** Telegram's Markdown refuses a message over any
+  unbalanced `*` or `_` in a headline and the whole message is lost; HTML has one
+  escaping rule.
+- Every title, link and source id goes through `html.escape(..., quote=True)`
+  **before** being wrapped in a tag. An unescaped `&` makes the message fail with
+  `Bad Request: can't parse entities` and every story in it disappears.
+- Link preview is off: one preview per message would bury the list under a single
+  story's thumbnail.
+- `LIMIT` is `4000` rather than `4096` because Telegram counts UTF-16 code units
+  and `len()` does not - an emoji in a headline is one Python character and two of
+  Telegram's. The headroom is cheaper than carrying a UTF-16 counter.
+- `API` is a module-level string so a test can point it at a local server.
 
 ## Discord
 
@@ -1222,37 +1333,96 @@ Formatting rules:
 |--------|-------|
 | Endpoint | `POST <DISCORD_WEBHOOK_URL>` |
 | Required env | `DISCORD_WEBHOOK_URL` |
-| Body | JSON: `content`, optionally `embeds` |
-| Hard limits | `content` 2000 characters; at most 10 embeds; 6000 characters total across all embeds; embed `description` 4096 |
-| Rate limit | Per-webhook bucket; headers `X-RateLimit-Remaining` and `X-RateLimit-Reset-After` |
-| Throttle response | HTTP 429 with a JSON body carrying `retry_after` **in seconds as a float** |
+| Body | JSON: `content` |
+| Hard limit | `content` 2000 characters |
+| `LIMIT` used | `1900` |
+| Success | **204 with no body**, not 200 with JSON |
+| Throttle response | HTTP 429, `retry_after` at the top level of the JSON body |
 
-Formatting rules:
+| Signature | Returns |
+|-----------|---------|
+| `build(groups, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
+| `send(fetcher, groups, webhook_url)` | `SendResult` |
 
-- Markdown, not HTML. A title is escaped for `*`, `_`, `` ` `` and `~`, and the
-  link is written as `[title](url)` so the raw URL never widens the line.
-- Default shape is plain `content` with one line per story. Embeds are used only
-  when a group needs a coloured header; the 6000-character total is easier to
-  overrun than the per-embed limit, so the check is on the sum.
-- 2000 characters is a quarter of Telegram's budget: the same run produces more
-  Discord messages than Telegram messages, which is expected, not a bug.
+Formatting: `**label**` per group, then ``• [title](url) `sources` `` per story.
+
+- **Plain `content`, no embeds.** The 6000-character total across embeds is
+  easier to overrun than any per-embed limit, and it buys nothing here.
+- A title is escaped for `\` `` ` `` `*` `_` `~` `|` `[` `]`. The brackets matter
+  as much as the formatting: a `[` in a headline ends the masked link early and
+  leaves a raw URL in the middle of the sentence.
+- `(` and `)` are encoded in the **url** half instead, by `_url()` - a closing
+  paren there would end the link early.
+- A **masked** link rather than a bare url, on two counts: the raw address would
+  widen every line past a phone's width, and Discord does not auto-embed a masked
+  link, so ten stories stay ten lines instead of ten preview cards.
+- Sources sit in a code span because a source id may carry an underscore
+  (`hn_algolia`, `r_embedded`) that italics would eat.
+- 1900 is a quarter of Telegram's budget: **the same run makes more Discord
+  messages than Telegram messages**, which is expected rather than a bug.
+  Measured on 2026-09-05, 43 stories were 2 Telegram messages and 5 Discord ones.
 
 ## Error handling, both channels
 
 | Condition | Behaviour |
 |-----------|-----------|
-| HTTP 429 | Sleep the channel's own `retry_after`, then retry the same chunk once. A second 429 gives up for this run and records `failed` |
-| HTTP 5xx | Retry with exponential backoff up to `advanced.max_retries` |
-| HTTP 4xx other than 429 | Do **not** retry - it is a bad token, a bad chat id, or a malformed body. Log the response body and fail the channel |
-| Network timeout | Same as 5xx |
-| Channel fails entirely | The run continues; the page is still rendered and the other channel is still attempted |
+| HTTP 429 | `Fetcher` sleeps the server's own `Retry-After` (header, else the JSON body) and retries, up to `advanced.max_retries`. Capped at `RETRY_AFTER_MAX = 60 s` |
+| HTTP 5xx, timeout, network error | Retried with exponential backoff up to `advanced.max_retries` |
+| HTTP 4xx other than 429 | Not retried - a bad token, a bad chat id, a revoked webhook or a body the channel could not parse. The response body is logged, because that is where the fixable half of the failure is |
+| Any refusal | **The channel stops for this run.** The same answer is coming for chunk two, and hammering a throttled bot is how throttled becomes banned |
+| Channel fails entirely | The run continues: the page is already written, and the other channel is still attempted |
 
-A story is written to the `reported` table **only after** its chunk was accepted.
-A crash between send and write re-sends on the next run - a duplicate is the
-acceptable failure, a silently dropped story is not.
+Whatever was accepted **before** a refusal still counts as sent, so those stories
+are not pushed again tomorrow.
 
-`reported` is keyed per channel, so enabling Discord later does not mark stories
-already pushed to Telegram as sent - see [[news-item]].
+`retry_after` is read off the `Retry-After` header first and the JSON body second,
+because the two channels disagree: Telegram nests it under
+`parameters.retry_after`, Discord puts it at the top level as a float, and neither
+guarantees the header alongside it. An unparseable value (`Retry-After` may also
+be an HTTP-date) falls back to the exponential delay rather than earning a date
+parser.
+
+## What `__main__._notify()` wires
+
+`enabled_channels()` → `open_db` → `_rows_to_send()` → per channel:
+`unreported()` → `pick()` → `send()` → `mark_reported()`.
+
+**Two levels of guard, both in the contract.** The outer one keeps a locked store
+or an unreadable run from costing the page, which is already written by the time
+this runs. The inner one is per channel: a dead webhook must leave the *other*
+channel still attempted, so it cannot be allowed to unwind the loop.
+
+### `report.mode`
+
+| Mode | Rows read | Diffed against the seen-set |
+|------|-----------|-----------------------------|
+| `incremental` (default) | `run_matches(run_id)` | yes |
+| `current` | `run_matches(run_id)` | **no** - re-sends the shortlist every cycle |
+| `daily` | `day_matches(day bounds)` | yes - picks up anything today that never went out |
+
+Both read the **store**, never the `ranked` mapping still in memory, so the story
+that goes out is the same row, with the same score and the same source list, as
+the one on the page.
+
+### The seen-set rule
+
+A story is written to `reported` **only after** the message carrying it was
+accepted. A crash between the send and the write re-sends on the next run - a
+duplicate is the acceptable failure, a silently dropped story is not.
+
+`reported` is keyed per channel, so enabling Discord later does not count stories
+already pushed to Telegram as sent - see [[news-item]] and [[storage-layer]].
+
+## Departures from the original design
+
+Recorded rather than quietly dropped:
+
+- **`send()` takes no `RunMeta`.** The draft passed a run summary so a message
+  could carry `run_id`, source and error counts. Nothing consumed it - the page
+  already carries that footer - so the parameter was not built.
+- **The secrets are read in `__main__`, not in `notify/`.** The draft had each
+  channel read its own environment. Passing them in is what lets both channels be
+  exercised with no environment at all.
 
 ### [interface] Crawl CLI - python -m news_radar
 *`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile - keywords: python -m news_radar, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
@@ -1328,7 +1498,17 @@ INFO    Security - 0 item(s)
 INFO  rendered output/index.html (7 group(s), 90 story(ies))
 INFO  stored 43 match row(s) as run 20260905T081328Z; the page shows 90
       story(ies) across 7 group(s) today
-WARN  the senders are not implemented yet (P4) - nothing is notified this cycle
+INFO  notifying 2 channel(s) in incremental mode
+INFO    telegram 2 message(s), 43 story(ies)
+INFO    discord  5 message(s), 43 story(ies)
+```
+
+The next cycle over the same news says so instead:
+
+```
+INFO  notifying 2 channel(s) in incremental mode
+INFO    telegram nothing new to send
+INFO    discord  nothing new to send
 ```
 
 **Every group is reported, empty ones included.** `Security - 0 item(s)` is a
@@ -1349,17 +1529,28 @@ of "the radar is broken".
 
 **Storage and rendering cannot cost the fetch.** `_publish()` is wrapped whole: a
 locked database, a full disk or a read-only volume is logged with its traceback
-and the cycle still returns the shortlist it spent fifty seconds collecting.
+and the cycle still returns the shortlist it spent fifty seconds collecting. It
+returns the `run_id`, so a cycle whose storage failed notifies nothing rather
+than notifying a run that was never written.
+
+**Only new stories are pushed, and a quiet cycle is silent.** The run is read
+back out of the store and diffed against the per-channel seen-set; a story is
+recorded as sent only after the message carrying it was accepted. Two Telegram
+messages and five Discord ones for the same 43 stories is the 4000/1900 limit,
+not a bug. See [[notify-channels]].
+
+**A failing channel costs neither the page nor the other channel.** `_notify()`
+is guarded whole *and* once per channel, so a revoked webhook leaves Telegram
+still attempted.
 
 ## What it does not do yet
 
-Nothing is notified: the cycle ends on `the senders are not implemented yet
-(P4)`. P4 lands the Telegram and Discord senders and the new-only diff, which
-reads the seen-set P3 already writes. The flags and exit codes above do not
-change with it.
+Nothing here. P5 is deployment - the Cloudflare Tunnel route and the first
+unattended live run - and P6 is ops. Neither changes the flags or exit codes
+above.
 
 ### [interface] Fetch Layer Contracts
-*`interface/fetch-layer.md` - Every public signature of the fetch layer and the two leaf modules it stands on - what each returns, what it raises, and what it deliberately does not. - status: active - source: src/news_radar/fetch/http.py, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py, src/news_radar/item.py, src/news_radar/keywords.py - keywords: Fetcher, HttpError, parse, read_source, read_fixed_feeds, build_urls, read_search_feeds, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle*
+*`interface/fetch-layer.md` - Every public signature of the fetch layer and the two leaf modules it stands on - what each returns, what it raises, and what it deliberately does not. - status: active - source: src/news_radar/fetch/http.py, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py, src/news_radar/item.py, src/news_radar/keywords.py - keywords: Fetcher, HttpError, post_json, Retry-After, RETRY_AFTER_MAX, parse, read_source, read_fixed_feeds, build_urls, read_search_feeds, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle*
 
 # Fetch Layer Contracts
 
@@ -1405,9 +1596,18 @@ at all. A `#` starts a comment only at the start of a line, so the term
 
 ```
 Fetcher(user_agent, timeout_s=15, max_retries=2, interval_ms=2000, backoff_s=1.0)
-    .get(url) -> bytes          raises HttpError
-HttpError(message, status=None, url=None)
+    .get(url)               -> bytes    raises HttpError
+    .post_json(url, payload) -> bytes   raises HttpError
+HttpError(message, status=None, url=None, body=b"", retry_after=None)
+RETRY_AFTER_MAX = 60.0
 ```
+
+**Both verbs, one code path.** `get()` reads a feed and `post_json()` talks to a
+notification channel; both go through a private `_request()`, so the
+User-Agent, the timeout, the retry policy and the per-host gap are decided once.
+A POST is retried on the same statuses a GET is, which means a 5xx can deliver
+the same message twice - the trade [[notify-channels]] already takes, where a
+duplicate is the acceptable failure and a dropped story is not.
 
 - **One instance per cycle.** The `{hostname: last_request}` throttle state
   lives on it, so every source in the run shares one idea of how recently a
@@ -1420,6 +1620,17 @@ HttpError(message, status=None, url=None)
   errors, `max_retries` times with `backoff_s * 2**(n-1)` between attempts.
   **Not retried:** every other 4xx. A 403 answers the same however often it is
   asked.
+- **A 429 is slept for exactly as long as the server asked**, not for our own
+  guess: `Retry-After` first, then the JSON body's `retry_after` (Discord) or
+  `parameters.retry_after` (Telegram), capped at `RETRY_AFTER_MAX = 60 s`. A
+  server asking for fifteen minutes would stall a thirty-minute cycle past its
+  own interval. An unparseable value - `Retry-After` may also be an HTTP-date,
+  which nothing here sends - falls back to the exponential delay rather than
+  earning a date parser. Google News throttles on the GET path too, so this is
+  a transport rule rather than a notification one.
+- **`HttpError` carries the response body.** On the notification side that
+  sentence (`chat not found`, `Invalid Webhook Token`) is the fixable half of
+  the failure.
 - `Accept-Encoding: gzip, deflate` is sent and the response decoded by its
   `Content-Encoding` header. A body that claims an encoding it does not have is
   returned raw rather than losing the source.
@@ -1546,7 +1757,7 @@ The scoring formula itself, and the two timestamp rules it enforces (unknown
 scores `0`, future is clamped to age `0`), are in [[news-search]] stage 6.
 
 ### [interface] Storage and Render Layer Contracts
-*`interface/storage-layer.md` - Every public signature of the store and render modules - what each writes, what the page is built from, and the row shape that travels between them. - status: active - source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py - keywords: open_db, start_run, finish_run, save, day_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot*
+*`interface/storage-layer.md` - Every public signature of the store and render modules - what each writes, what the page is built from, and the row shape that travels between them. - status: active - source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py - keywords: open_db, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot*
 
 # Storage and Render Layer Contracts
 
@@ -1567,6 +1778,7 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `finish_run(conn, run_id, finished_at, items_fetched, items_matched, errors)` | `None` | Closes the row; `errors` is JSON-encoded as a list of pairs |
 | `save(conn, run_id, ranked, now)` | `int` | `{label: [Story]}` in, number of `matches` rows written out |
 | `day_matches(conn, start_utc, end_utc)` | `{label: [row]}` | Only labels that have rows. See the row shape below |
+| `run_matches(conn, run_id)` | `{label: [row]}` | The same row shape for one run - what a notification is built from |
 | `unreported(conn, dedup_keys, channel)` | `[dedup_key]` | The seen-set diff, in the caller's order. `[]` for an empty input |
 | `mark_reported(conn, dedup_keys, channel, when)` | `None` | Idempotent - `INSERT OR IGNORE` |
 | `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)` |
@@ -1601,11 +1813,17 @@ holds all three in one UPSERT:
    gives no timestamp must not erase one that did, so a `NULL` never wins.
 3. **The source set accumulates**, because `item_sources` ignores a duplicate.
 
-### The row `day_matches` returns
+### The row both readers return
 
-One row per `(story, group)` however many runs saw it - the **best** score any
-run in the window gave it wins, because a story that got fresher during the day
-should not be ranked by the run that noticed it first.
+`day_matches()` and `run_matches()` are two callers of one private `_matches()`,
+so the page and the senders can never disagree about the shape. One row per
+`(story, group)` however many runs saw it - the **best** score in the slice wins,
+because a story that got fresher during the day should not be ranked by the run
+that noticed it first. Over a single run that is a no-op: the `matches` primary
+key already allows one row per `(story, group, run)`.
+
+The page shows a day and a message shows a run. That is the whole difference
+between the two functions.
 
 | Key | Type | Meaning |
 |-----|------|---------|
@@ -1668,7 +1886,8 @@ fallback is exact there - a zone that *does* observe DST would need `tzdata`.
 
 `open_db` → `start_run` → `save` → `local_tz` + `day_bounds` → `day_matches` →
 `render.write` → `prune` → `finish_run`, the whole sequence inside one
-`try/except`. A locked database, a full disk or a read-only volume costs the
+`try/except`, returning the **`run_id`** (or `None`) so the senders can read the
+run back - see [[notify-channels]]. A locked database, a full disk or a read-only volume costs the
 page, never the fetch: the cycle logs the traceback and still returns the
 shortlist. **The page is rendered from `day_matches()`, never from the `ranked`
 mapping still in memory** - that one choice is what makes a restart at noon

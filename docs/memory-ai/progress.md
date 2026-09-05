@@ -9,10 +9,44 @@ updated: 2026-09-05
 
 ## What works
 
-**P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, and P3
-Store and render are complete** (2026-09-05).
+**P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, P3 Store
+and render, and P4 Notify are complete** (2026-09-05).
 See `architecture/delivery-phases.md` for the phase map and the finished-product
 definition all of it serves.
+
+### P4 - Notify
+
+- **New stories arrive on the phone, and a quiet cycle is silent.** Measured in
+  the container on 2026-09-05: the first `--once` after the rebuild sent
+  **2 Telegram messages and 5 Discord messages carrying the same 43 stories**,
+  and the `--once` straight after it printed `nothing new to send` on both
+  channels and sent nothing. Both halves are P4's definition of done.
+- **Five messages on Discord against two on Telegram is arithmetic, not a bug.**
+  1900 characters is a quarter of Telegram's 4000, so the same run costs more
+  messages there. Both limits sit under the real ones (2000 and 4096) because
+  Telegram counts UTF-16 code units and `len()` does not.
+- **A story is marked sent only after the message carrying it was accepted**, and
+  the seen-set is per channel. A crash between the send and the write re-sends;
+  enabling Discord later does not replay everything Telegram already had.
+- **A refusal ends that channel for the run, and costs nothing else.** The page
+  is already written by then, and the other channel is still attempted - two
+  guards, the outer one around the store work and the inner one per channel.
+- **`report.mode` finally does something.** It was validated by `config.py` from
+  P0 and read by nothing, so `mode: daily` was accepted and silently ignored.
+  `incremental` sends this run's new matches, `current` the whole shortlist every
+  cycle, `daily` everything today that has not gone out yet.
+- **The transport learned to POST and to read `Retry-After`.** Both live in
+  `Fetcher`, so the GET path gets the 429 fix too - Google News throttles as
+  readily as a bot API. The delay is capped at 60 s: a server asking for fifteen
+  minutes would stall a thirty-minute cycle past its own interval.
+- **Three sets of dangerous characters, not one.** The page escapes for HTML,
+  Telegram for its own HTML subset, Discord for Markdown - and a `[` that is
+  harmless in the first two ends a Discord link early. `tests/test_notify.py`
+  pins each set, and pins that a story is never split across two messages.
+- **One more stdlib-only test file.** `test_notify.py` needs only `http.server`
+  and `json`, so ten of the twelve test files now run on a bare Windows
+  checkout.
+- **Still two runtime dependencies.** Both channels are `urllib` and `json`.
 
 ### P3 - Store and render
 
@@ -34,9 +68,9 @@ definition all of it serves.
 - **Three re-sighting rules are pinned by tests.** `first_seen_at` never moves;
   `published_at` keeps the earliest non-null and a `NULL` never overwrites a real
   timestamp; the source set accumulates.
-- **The seen-set is per channel and nothing calls it yet.** `unreported()` and
-  `mark_reported()` are written and tested; P4 is the first caller. Marking a
-  story sent on Telegram leaves it unreported on Discord.
+- **The seen-set is per channel.** `unreported()` and `mark_reported()` landed
+  here with no caller; P4 is the caller. Marking a story sent on Telegram leaves
+  it unreported on Discord.
 - **The page is self-contained, and the test asserts it.** No external
   stylesheet, script or image - a report that needs a CDN stops being readable
   exactly when the network is the thing you wanted to read about. Dark mode with
@@ -184,14 +218,14 @@ definition all of it serves.
 
 ## What's left
 
-Notification onwards. `src/news_radar/` now holds the entrypoint, the config
-loader, the item shape, the keyword parser, the whole fetch layer, the whole
-selection layer, the store and the renderer; only `notify/` is still
-**specified but not written**.
+Deployment onwards. **Every module the design bank specifies is now written**:
+the entrypoint, the config loader, the item shape, the keyword parser, the whole
+fetch layer, the whole selection layer, the store, the renderer and both
+senders. What is left is not code in this repository.
 
-- **P4 Notify** - Telegram and Discord senders, the new-only diff, and backoff.
 - **P5 Deploy** - the Cloudflare Tunnel route for `news.dtbao.org` and the first
-  unattended live run. The `Dockerfile` and the schedule loop are done.
+  unattended live run. The `Dockerfile`, the compose stack and the schedule loop
+  are done, so this is network configuration outside the repo.
 - **P6 Ops** - retention, heartbeat, failure alerting.
 
 ## Known issues
@@ -216,14 +250,14 @@ selection layer, the store and the renderer; only `notify/` is still
   does not delete the old objects: `91ea2d9` still answers over the API with the
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
-- **Four bank docs are still marked `inferred`**: `delivery-phases` and
-  `deployment-homelab` (both still describe work not done - P4 onwards, and the
-  tunnel), `config-and-env` and `notify-channels` (never checked key by key
-  against the code). Flip each once it is verified against the real
-  implementation. `news-item`, `news-sources`, `news-search`, `module-layout`,
-  `crawl-cli`, `selection-layer` and `storage-layer` are `confirmed`; P3 cleared
-  the last two 🟡 sections of `news-item`, so the bank now carries no inline
-  gap markers at all.
+- **Three bank docs are still marked `inferred`**: `delivery-phases` and
+  `deployment-homelab` (both still describe work not done - P5, P6 and the
+  tunnel), and `config-and-env` (never checked key by key against the code).
+  Flip each once it is verified against the real implementation.
+  `notify-channels` was flipped to `confirmed` by P4 and rewritten against the
+  real modules; `news-item`, `news-sources`, `news-search`, `module-layout`,
+  `crawl-cli`, `fetch-layer`, `selection-layer` and `storage-layer` are
+  `confirmed` too, and the bank carries no inline gap markers at all.
 - **`www.reddit.com` does not resolve from this homelab.** Both Reddit sources
   are therefore dead here, whatever User-Agent is sent. It is a network fact,
   not a code defect: failure isolation handles it, and the fixed feed stays
@@ -236,5 +270,17 @@ selection layer, the store and the renderer; only `notify/` is still
 - **`docker/docker-compose.yml` still carries a stale P0 note** saying the
   Dockerfile does not exist and only `caddy` is startable. That has been false
   since the Dockerfile landed.
+
+- **The image does not ship `tests/`, so the suite cannot be run with
+  `docker compose exec`.** It runs on the host (ten of twelve files) or, for the
+  two that need `feedparser`, in a throwaway container with the repo mounted:
+  `docker run --rm --entrypoint sh -v <repo>:/repo -w /repo news-radar-news-radar
+  -c 'for t in tests/test_*.py; do python "$t"; done'`. CI runs the same loop on
+  a checkout, so nothing is untested - it is only awkward locally.
+
+- **Nobody has read a whole cycle's worth of messages yet.** Five Discord
+  messages every thirty minutes may turn out to be noise rather than a report,
+  and no test can answer that. It is a tuning question for `report.max_per_group`
+  or `report.mode`, not a defect.
 - **No default-branch policy on GitHub**: the first pushed branch (`main`) is the
   default, so pull requests target `main` rather than `developing`.

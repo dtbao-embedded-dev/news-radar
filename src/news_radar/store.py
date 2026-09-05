@@ -27,7 +27,7 @@ from .item import dedup_key
 
 __all__ = [
     "StoreError", "SCHEMA_VERSION", "DB_NAME", "open_db", "to_db", "from_db",
-    "start_run", "finish_run", "save", "day_matches",
+    "start_run", "finish_run", "save", "day_matches", "run_matches",
     "unreported", "mark_reported", "prune",
 ]
 
@@ -213,17 +213,16 @@ def save(conn, run_id, ranked, now):
     return written
 
 
-def day_matches(conn, start_utc, end_utc):
-    """Every story matched by a run inside the window, grouped by label.
+def _matches(conn, where, params):
+    """{label: [row]} for whichever slice of `matches` the caller selects.
 
-    This - not the shortlist still in memory - is what the page renders. A
-    restart at noon would otherwise publish an afternoon that has forgotten its
-    own morning, and "history survives a restart" is the phase's definition of
-    done.
+    One row per (story, group) whatever the run count, and the **best** score in
+    the slice wins: a story that got fresher during the day should not be ranked
+    by the run that saw it first. Over a single run that MAX is a no-op, because
+    the primary key already allows one row per (story, group, run).
 
-    One row per (story, group) whatever the run count: the best score any run in
-    the window gave it wins, because a story that got fresher during the day
-    should not be ranked by the run that saw it first.
+    The row shape is the one contract the page and the senders share - change it
+    here and both of them see the change.
     """
     rows = conn.execute(
         "SELECT m.group_name, i.dedup_key, i.title, i.url, i.canonical_url,"
@@ -233,10 +232,10 @@ def day_matches(conn, start_utc, end_utc):
         "  FROM matches m"
         "  JOIN items i ON i.dedup_key = m.dedup_key"
         "  JOIN runs  r ON r.run_id    = m.run_id"
-        " WHERE r.started_at >= ? AND r.started_at < ?"
+        " WHERE " + where +
         " GROUP BY m.group_name, i.dedup_key"
         " ORDER BY m.group_name, score DESC, i.first_seen_at",
-        (to_db(start_utc), to_db(end_utc))).fetchall()
+        params).fetchall()
 
     grouped = {}
     for row in rows:
@@ -252,6 +251,29 @@ def day_matches(conn, start_utc, end_utc):
                        else (),
         })
     return grouped
+
+
+def day_matches(conn, start_utc, end_utc):
+    """Every story matched by a run inside the window, grouped by label.
+
+    This - not the shortlist still in memory - is what the page renders. A
+    restart at noon would otherwise publish an afternoon that has forgotten its
+    own morning, and "history survives a restart" is the phase's definition of
+    done.
+    """
+    return _matches(conn, "r.started_at >= ? AND r.started_at < ?",
+                    (to_db(start_utc), to_db(end_utc)))
+
+
+def run_matches(conn, run_id):
+    """Just this run's stories, in the row shape `day_matches()` returns.
+
+    What a notification is built from. The page shows a day and a message shows
+    a run, but both read the store rather than the shortlist in memory - so the
+    story that goes out is the same row, with the same score and the same source
+    list, as the one on the page.
+    """
+    return _matches(conn, "m.run_id = ?", (run_id,))
 
 
 def unreported(conn, dedup_keys, channel):

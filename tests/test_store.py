@@ -181,6 +181,25 @@ eq("a run outside the window cannot raise today's score",
    mod.day_matches(conn, NOW - HOUR, NOW + 6 * HOUR)["Rust"][0]["score"], 0.42)
 
 
+# -- run_matches: the read-back a notification sends ------------------------
+
+# The page shows a day; a message shows a run. Same row shape, different
+# window - and a different score, because a run reports what *it* scored the
+# story at rather than the best any run managed today.
+this_run = mod.run_matches(conn, r2)
+
+eq("run_matches sees only the groups that run matched", set(this_run), {"ESP32"})
+eq("one row per story per group", len(this_run["ESP32"]), 1)
+eq("the row carries that run's own score, not the day's best",
+   this_run["ESP32"][0]["score"], 0.77)
+eq("the row shape is the one the page already renders",
+   set(this_run["ESP32"][0]), set(day["ESP32"][0]))
+eq("the accumulated sources travel with it",
+   set(this_run["ESP32"][0]["sources"]), {"hn", "lobsters", "genk"})
+eq("a run id nothing was saved under is empty, not an error",
+   mod.run_matches(conn, "20990101T000000Z"), {})
+
+
 # -- the seen-set ----------------------------------------------------------
 
 keys = [dedup_key(esp), dedup_key(quiet)]

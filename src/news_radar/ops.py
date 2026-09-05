@@ -26,9 +26,17 @@ import logging
 
 from .fetch.http import HttpError
 
-__all__ = ["heartbeat"]
+__all__ = ["heartbeat", "Health", "ALERT_AFTER"]
 
 log = logging.getLogger("news_radar.ops")
+
+# Consecutive failed cycles before a phone is allowed to buzz. Two, at the
+# default half-hour interval, is one hour of trouble before anyone is woken -
+# and one cycle of headroom for a feed having a bad afternoon. It is not a
+# config key on purpose: the dead-man's switch carries its own grace period, so
+# this number decides how *chatty* the alert is, not how fast a real outage is
+# noticed.
+ALERT_AFTER = 2
 
 
 def heartbeat(fetcher, site_url, ping_url, healthy=True):
@@ -83,3 +91,46 @@ def heartbeat(fetcher, site_url, ping_url, healthy=True):
                     "is fine, the switch will trip anyway", exc)
 
     return problems
+
+
+class Health:
+    """Consecutive failures across cycles, and the one message per transition.
+
+    The interesting question is not *did it alert* but **did it alert again**.
+    A broken thing stays broken and reports itself every thirty minutes; an
+    alert that repeats alongside it is an alert you learn to swipe away, and
+    the next real one goes with it. So there are exactly two messages in an
+    outage of any length: one when it starts, one when it ends.
+
+    State lives in memory and dies with the process, which is the honest
+    behaviour rather than a limitation: a container that restarted has lost the
+    context that made the first alert true, and re-arming means a crash-looping
+    stack says so again instead of going quiet forever.
+    """
+
+    def __init__(self, alert_after=ALERT_AFTER):
+        self.alert_after = alert_after
+        self.failures = 0
+        self.alerted = False
+
+    def update(self, problems):
+        """One cycle's problems in, the text to send out - or None for silence."""
+        if problems:
+            self.failures += 1
+            if self.failures >= self.alert_after and not self.alerted:
+                self.alerted = True
+                return self._down(problems)
+            log.info("health: %d consecutive failed cycle(s), alerting at %d",
+                     self.failures, self.alert_after)
+            return None
+
+        recovered = self.alerted
+        self.failures = 0
+        self.alerted = False
+        if recovered:
+            return "news-radar recovered: the last cycle completed cleanly."
+        return None
+
+    def _down(self, problems):
+        return "news-radar: {} cycles in a row have failed.\n{}".format(
+            self.failures, "\n".join("- " + str(p) for p in problems))

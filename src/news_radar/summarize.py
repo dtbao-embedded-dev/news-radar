@@ -167,6 +167,9 @@ def summarize(fetcher, api_url, api_key, model, rows_by_label, labels,
         log.warning("summary: the endpoint answered with an empty summary")
         return None
 
-    log.info("summary: %d character(s) over %d topic(s)",
-             len(text), len(text.splitlines()))
+    # Non-blank lines only. Models separate the topics with a blank line as
+    # often as not, and counting those made the log claim eleven topics for a
+    # page showing six - the number here has to be the number the reader sees.
+    topics = sum(1 for line in text.splitlines() if line.strip())
+    log.info("summary: %d character(s) over %d topic(s)", len(text), topics)
     return text

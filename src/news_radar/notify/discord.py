@@ -21,7 +21,7 @@ import re
 from . import SendResult, chunk, clip
 from ..fetch.http import HttpError
 
-__all__ = ["NAME", "LIMIT", "build", "send"]
+__all__ = ["NAME", "LIMIT", "build", "send", "alert"]
 
 log = logging.getLogger("news_radar.notify.discord")
 
@@ -95,6 +95,22 @@ def send(fetcher, groups, webhook_url):
         result.keys += keys
 
     return result
+
+
+def alert(fetcher, text, webhook_url):
+    """One operational message. Returns True if the webhook took it.
+
+    Escaped, unlike Telegram's `alert()`: Discord renders Markdown in plain
+    `content` whether asked to or not, so an exception message carrying `*` or
+    `_` would come out reformatted or half-eaten. The two channels lose
+    different characters, which is why neither escaping rule is reused blindly.
+    """
+    try:
+        fetcher.post_json(webhook_url, {"content": _e(text)})
+    except HttpError as exc:
+        log.error("discord refused the alert (%s): %s", exc, _why(exc.body))
+        return False
+    return True
 
 
 def _why(body):

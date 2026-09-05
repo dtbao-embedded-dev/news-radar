@@ -17,7 +17,7 @@ import logging
 from . import SendResult, chunk, clip
 from ..fetch.http import HttpError
 
-__all__ = ["NAME", "LIMIT", "build", "send"]
+__all__ = ["NAME", "LIMIT", "build", "send", "alert"]
 
 log = logging.getLogger("news_radar.notify.telegram")
 
@@ -89,6 +89,27 @@ def send(fetcher, groups, token, chat_id):
         result.keys += keys
 
     return result
+
+
+def alert(fetcher, text, token, chat_id):
+    """One operational message. Returns True if Telegram took it.
+
+    **No `parse_mode`, and therefore no escaping.** `send()` needs HTML because
+    a story is a link; an alert is a sentence, and the only thing HTML mode
+    could add here is a way for a stray `<` in an exception message to cost the
+    whole alert. The one message you must not lose is the one saying something
+    is broken.
+    """
+    try:
+        fetcher.post_json(API.format(token=token), {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        })
+    except HttpError as exc:
+        log.error("telegram refused the alert (%s): %s", exc, _why(exc.body))
+        return False
+    return True
 
 
 def _why(body):

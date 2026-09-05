@@ -37,29 +37,16 @@ RELEASE_BRANCH_RE = re.compile(r"^release/")
 
 VERSION_RE = re.compile(r"^[vV]?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
-# "type(scope)!: description" - scope and the breaking bang are optional.
-SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]+)\))?(?P<bang>!)?:\s*(?P<desc>.+)$")
+# The section entries are written into while the work happens. Matched
+# loosely so "## Unreleased" survives casing and trailing whitespace.
+UNRELEASED = "Unreleased"
+UNRELEASED_RE = re.compile(r"^##\s+Unreleased\s*$", re.IGNORECASE)
 
-# A release commit describes the release, not what is in it.
-RELEASE_SUBJECT_RE = re.compile(r"^chore\(release\):\s*v?\d+\.\d+\.\d+\s*$")
-
-CHANGELOG_HEADER = "# Changelog\n\nEverything notable in this project, newest first.\n"
-
-# Heading order in a section. Anything unlisted falls into "other".
-SECTION_ORDER = [
-    ("breaking", "Breaking Changes"),
-    ("feat", "Features"),
-    ("fix", "Fixes"),
-    ("perf", "Performance"),
-    ("refactor", "Refactoring"),
-    ("docs", "Documentation"),
-    ("build", "Build"),
-    ("ci", "CI"),
-    ("test", "Tests"),
-    ("style", "Style"),
-    ("chore", "Chores"),
-    ("other", "Other"),
-]
+CHANGELOG_HEADER = (
+    "# Changelog\n"
+    "\n"
+    "Everything notable in this project, newest first.\n"
+)
 
 
 def say(tag, msg):
@@ -83,73 +70,65 @@ def normalise_version(raw):
     return "v{}.{}.{}".format(*m.groups())
 
 
-def parse_subjects(subjects):
-    """Conventional-commit subjects -> dicts. Release commits are dropped."""
-    out = []
-    for raw in subjects:
-        subject = raw.strip()
-        if not subject or RELEASE_SUBJECT_RE.match(subject):
-            continue
-        m = SUBJECT_RE.match(subject)
-        if m:
-            out.append({
-                "type": m.group("type"),
-                "scope": m.group("scope"),
-                "description": m.group("desc").strip(),
-                "breaking": bool(m.group("bang")),
-            })
-        else:
-            # Kept rather than dropped: a release note that silently omits a
-            # commit is worse than one with an untyped line in it.
-            out.append({
-                "type": "other",
-                "scope": None,
-                "description": subject,
-                "breaking": False,
-            })
-    return out
+def _unreleased_bounds(text):
+    """(lines, start, end) around the Unreleased section, or None if absent.
 
-
-def build_changelog_section(version, date, commits):
-    """One '## <version> - <date>' block, grouped by type, breaking first."""
-    buckets = {}
-    for c in commits:
-        key = "breaking" if c["breaking"] else c["type"]
-        if key not in dict(SECTION_ORDER):
-            key = "other"
-        buckets.setdefault(key, []).append(c)
-
-    lines = ["## {} - {}".format(version, date), ""]
-    if not commits:
-        lines.append("No changes recorded.")
-        lines.append("")
-    for key, title in SECTION_ORDER:
-        entries = buckets.get(key)
-        if not entries:
-            continue
-        lines.append("### {}".format(title))
-        lines.append("")
-        for c in entries:
-            scope = "**{}**: ".format(c["scope"]) if c["scope"] else ""
-            lines.append("- {}{}".format(scope, c["description"]))
-        lines.append("")
-    return "\n".join(lines) + "\n"
-
-
-def insert_changelog_section(existing, section):
-    """Put section directly under the preamble, above the previous newest."""
-    text = existing or ""
-    if not text.strip():
-        return CHANGELOG_HEADER + "\n" + section
-
-    lines = text.splitlines(keepends=True)
+    `start` is the heading line; `end` is the next '## ' heading, or EOF.
+    """
+    lines = (text or "").splitlines()
+    start = None
     for i, line in enumerate(lines):
-        if line.startswith("## "):
-            return "".join(lines[:i]) + section + "\n" + "".join(lines[i:])
+        if UNRELEASED_RE.match(line):
+            start = i
+            break
+    if start is None:
+        return None
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if lines[j].startswith("## "):
+            end = j
+            break
+    return lines, start, end
 
-    # A changelog with a preamble but no releases yet.
-    tail = "" if text.endswith("\n") else "\n"
-    return text + tail + "\n" + section
+
+def unreleased_body(text):
+    """The Unreleased section's body, heading excluded.
+
+    '' when the section exists but nothing has been recorded in it, None when
+    there is no such section at all. The two are different problems.
+    """
+    found = _unreleased_bounds(text)
+    if found is None:
+        return None
+    lines, start, end = found
+    return "\n".join(lines[start + 1:end]).strip()
+
+
+def promote_unreleased(text, version, date):
+    """Rename Unreleased to the version and open a fresh empty Unreleased.
+
+    Raises ValueError when the section is missing or empty: a release with
+    nothing recorded is a mistake, not a valid empty release.
+    """
+    found = _unreleased_bounds(text)
+    if found is None:
+        raise ValueError("CHANGELOG.md has no '## {}' section".format(UNRELEASED))
+    lines, start, end = found
+    body = "\n".join(lines[start + 1:end]).strip()
+    if not body:
+        raise ValueError(
+            "the {} section is empty - record what is being released "
+            "before cutting it".format(UNRELEASED))
+
+    promoted = [
+        "## {}".format(UNRELEASED),
+        "",
+        "## {} - {}".format(version, date),
+        "",
+        body,
+        "",
+    ]
+    return "\n".join(lines[:start] + promoted + lines[end:]).rstrip("\n") + "\n"
 
 
 def extract_changelog_section(text, version):
@@ -226,19 +205,6 @@ def tag_exists(name, remote):
     return bool(proc.stdout.strip())
 
 
-def previous_tag():
-    proc = git("describe", "--tags", "--abbrev=0", check=False)
-    return proc.stdout.strip() if proc.returncode == 0 else ""
-
-
-def commit_subjects_since(tag):
-    span = "{}..HEAD".format(tag) if tag else "HEAD"
-    proc = git("log", span, "--no-merges", "--pretty=%s", check=False)
-    if proc.returncode != 0:
-        return []
-    return [line for line in proc.stdout.splitlines() if line.strip()]
-
-
 def preflight(version, strict, remote):
     """Report every check. Returns True when the release may proceed."""
     ok = True
@@ -270,7 +236,25 @@ def preflight(version, strict, remote):
     else:
         say("ok", "tag {} is free".format(version))
 
+    body = unreleased_body(read_changelog())
+    if body is None:
+        say("warn" if not strict else "fail",
+            "{} has no '## {}' section".format(CHANGELOG.name, UNRELEASED))
+        ok = False
+    elif not body:
+        say("warn" if not strict else "fail",
+            "nothing recorded under {} - there is no release to cut".format(UNRELEASED))
+        ok = False
+    else:
+        entries = len([l for l in body.splitlines() if l.lstrip().startswith("- ")])
+        say("ok", "{} entr{} under {}".format(
+            entries, "y" if entries == 1 else "ies", UNRELEASED))
+
     return ok
+
+
+def read_changelog():
+    return CHANGELOG.read_text(encoding="utf-8") if CHANGELOG.is_file() else ""
 
 
 # --------------------------------------------------------------------------
@@ -303,17 +287,17 @@ def main(argv=None):
     # the plan, including from a branch that could not release yet.
     passed = preflight(version, strict=not args.dry_run, remote=args.remote)
 
-    prev = previous_tag()
-    commits = parse_subjects(commit_subjects_since(prev))
-    say("ok", "{} commit(s) since {}".format(len(commits), prev or "the first commit"))
-
-    section = build_changelog_section(version, date, commits)
+    body = unreleased_body(read_changelog())
     commands = release_commands(version, branch, args.remote)
 
     if args.dry_run:
-        print("\nwould write {} and {}:\n".format(CHANGELOG.name, VERSION_FILE.name))
-        for line in section.rstrip("\n").splitlines():
-            print("    " + line)
+        if body:
+            print("\nwould promote {} to '## {} - {}':\n".format(
+                UNRELEASED, version, date))
+            for line in body.splitlines():
+                print("    " + line)
+        else:
+            print("\nnothing to promote - {} is empty or missing".format(UNRELEASED))
         print("\nwould run, in order:\n")
         for cmd in commands:
             print("    " + " ".join(cmd))
@@ -339,9 +323,13 @@ def main(argv=None):
             say("warn", "aborted - nothing was changed")
             return 1
 
-    existing = CHANGELOG.read_text(encoding="utf-8") if CHANGELOG.is_file() else ""
-    CHANGELOG.write_text(insert_changelog_section(existing, section), encoding="utf-8")
-    say("new", "{} updated".format(CHANGELOG.name))
+    try:
+        promoted = promote_unreleased(read_changelog(), version, date)
+    except ValueError as exc:
+        say("fail", str(exc))
+        return 1
+    CHANGELOG.write_text(promoted, encoding="utf-8")
+    say("new", "{} - {} promoted to {}".format(CHANGELOG.name, UNRELEASED, version))
     VERSION_FILE.write_text(version.lstrip("v") + "\n", encoding="utf-8")
     say("new", "{} = {}".format(VERSION_FILE.name, version.lstrip("v")))
 

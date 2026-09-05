@@ -4,7 +4,8 @@
     python tests/test_release.py
 
 Covers only the pure logic: version parsing, the git command chain, and the
-changelog build/insert/extract round trip. Nothing here runs git.
+changelog promote/extract round trip. Nothing here runs git, and nothing here
+reads the repository's own CHANGELOG.md.
 """
 
 from __future__ import annotations
@@ -112,46 +113,17 @@ check("release branch name is honoured", any("release/v9.9" in " ".join(c) for c
 
 
 # --------------------------------------------------------------------------
-# changelog
+# changelog - hand-written Unreleased section, not derived from commits
 # --------------------------------------------------------------------------
 
-SUBJECTS = [
-    "feat(fetch): add the rss reader",
-    "fix: survive a 403 from reddit",
-    "feat(notify)!: drop the feishu channel",
-    "chore(release): v0.0.9",
-    "docs(memory-ai): add architecture docs",
-    "not a conventional commit at all",
-]
+NO_SECTION = "# Changelog\n\nPreamble only.\n"
 
-parsed = release.parse_subjects(SUBJECTS)
-kinds = [p["type"] for p in parsed]
-
-check("release commits are dropped", not any(
-    p["type"] == "chore" and p["description"].startswith("v0.") for p in parsed))
-check("feat parsed", "feat" in kinds)
-check("fix parsed", "fix" in kinds)
-check("scope kept", any(p["scope"] == "fetch" for p in parsed))
-check("breaking flagged", any(p["breaking"] for p in parsed))
-check("non-conventional subject kept as other",
-      any(p["type"] == "other" for p in parsed),
-      "kinds: {}".format(kinds))
-
-section = release.build_changelog_section("v0.1.0", "2026-09-04", parsed)
-
-check("section header carries version and date",
-      section.startswith("## v0.1.0 - 2026-09-04"), section.splitlines()[:1])
-check("breaking changes get their own heading", "Breaking Changes" in section)
-check("features heading present", "Features" in section)
-check("fixes heading present", "Fixes" in section)
-check("scope is rendered", "**fetch**" in section)
-check("description is rendered", "add the rss reader" in section)
-check("section ends with a newline", section.endswith("\n"))
-
-EXISTING = (
+EMPTY_SECTION = (
     "# Changelog\n"
     "\n"
-    "Everything notable, newest first.\n"
+    "Preamble.\n"
+    "\n"
+    "## Unreleased\n"
     "\n"
     "## v0.0.9 - 2026-08-01\n"
     "\n"
@@ -160,26 +132,77 @@ EXISTING = (
     "- an older fix\n"
 )
 
-merged = release.insert_changelog_section(EXISTING, section)
+FILLED = (
+    "# Changelog\n"
+    "\n"
+    "Preamble.\n"
+    "\n"
+    "## Unreleased\n"
+    "\n"
+    "### Features\n"
+    "\n"
+    "- **fetch**: add the rss reader\n"
+    "\n"
+    "### Fixes\n"
+    "\n"
+    "- survive a 403 from reddit\n"
+    "\n"
+    "## v0.0.9 - 2026-08-01\n"
+    "\n"
+    "### Fixes\n"
+    "\n"
+    "- an older fix\n"
+)
 
-check("preamble survives", merged.startswith("# Changelog"))
-check("new version is inserted", "## v0.1.0 - 2026-09-04" in merged)
-check("old version survives", "## v0.0.9 - 2026-08-01" in merged)
-check("newest first", merged.index("## v0.1.0") < merged.index("## v0.0.9"))
-check("old body survives", "an older fix" in merged)
+check("no Unreleased section reads as None",
+      release.unreleased_body(NO_SECTION) is None)
+check("an empty Unreleased section reads as empty, not None",
+      release.unreleased_body(EMPTY_SECTION) == "")
+check("a filled section returns its body",
+      "add the rss reader" in release.unreleased_body(FILLED))
+check("the body stops at the next version heading",
+      "an older fix" not in release.unreleased_body(FILLED),
+      "got: {!r}".format(release.unreleased_body(FILLED)))
+check("the heading itself is not part of the body",
+      not release.unreleased_body(FILLED).lower().startswith("## unreleased"))
+check("casing and trailing space on the heading still match",
+      release.unreleased_body("## UNRELEASED  \n\n- x\n") == "- x")
 
-empty_merged = release.insert_changelog_section("", section)
-check("insert into an empty changelog still yields a header",
-      empty_merged.startswith("# Changelog") and "## v0.1.0" in empty_merged)
+check_raises("promoting a missing section raises", ValueError,
+             release.promote_unreleased, NO_SECTION, "v0.1.0", "2026-09-05")
+check_raises("promoting an empty section raises", ValueError,
+             release.promote_unreleased, EMPTY_SECTION, "v0.1.0", "2026-09-05")
 
-notes = release.extract_changelog_section(merged, "v0.1.0")
-check("extract returns only the requested version", "v0.0.9" not in notes)
+promoted = release.promote_unreleased(FILLED, "v0.1.0", "2026-09-05")
+
+check("preamble survives", promoted.startswith("# Changelog"))
+check("the version heading is written", "## v0.1.0 - 2026-09-05" in promoted)
+check("a fresh empty Unreleased is opened", "## Unreleased" in promoted)
+check("Unreleased sits above the new version",
+      promoted.index("## Unreleased") < promoted.index("## v0.1.0"))
+check("newest version first",
+      promoted.index("## v0.1.0") < promoted.index("## v0.0.9"))
+check("the promoted body moved with the version",
+      promoted.index("add the rss reader") > promoted.index("## v0.1.0")
+      and promoted.index("add the rss reader") < promoted.index("## v0.0.9"))
+check("the older release survives untouched", "an older fix" in promoted)
+check("the new Unreleased is empty", release.unreleased_body(promoted) == "",
+      "got: {!r}".format(release.unreleased_body(promoted)))
+check_raises("a second promote with nothing recorded raises", ValueError,
+             release.promote_unreleased, promoted, "v0.2.0", "2026-09-06")
+check("file ends with exactly one newline",
+      promoted.endswith("\n") and not promoted.endswith("\n\n"))
+
+notes = release.extract_changelog_section(promoted, "v0.1.0")
+check("extract returns only the requested version", "an older fix" not in notes)
 check("extract keeps the body", "add the rss reader" in notes)
 check("extract drops the version heading line",
       not notes.lstrip().startswith("## v0.1.0"),
       "notes start: {!r}".format(notes[:40]))
+check("extract does not bleed into Unreleased",
+      "Unreleased" not in notes)
 check("extract of a missing version is empty",
-      release.extract_changelog_section(merged, "v7.7.7").strip() == "")
+      release.extract_changelog_section(promoted, "v7.7.7").strip() == "")
 
 
 # --------------------------------------------------------------------------

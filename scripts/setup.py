@@ -169,8 +169,14 @@ def write_env_value(path, key, value):
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def ensure_secrets(dry_run, interactive):
-    """True when every required secret is non-empty."""
+def ensure_secrets(dry_run, interactive, verify=False):
+    """True when every required secret is non-empty.
+
+    `verify` is --check: a blank secret is a finding, not a plan. --dry-run
+    describes a checkout that does not exist yet and only lists what it would
+    ask for; --check inspects one that does, so it has to report the gap or it
+    would call an install ready that cannot start.
+    """
     env_abs = ROOT / ENV_FILE
     values = read_env(env_abs)
     missing = []
@@ -181,7 +187,7 @@ def ensure_secrets(dry_run, interactive):
                 say("ok", "{} set ({})".format(key, channel))
                 continue
 
-            if dry_run:
+            if dry_run and not verify:
                 say("dry", "would ask for {} ({}, {})".format(
                     key, channel, HINTS.get(key, "")))
                 continue
@@ -283,7 +289,7 @@ def main(argv=None):
         ok = ensure_file(src, dst, dry, args.force) and ok
 
     interactive = not args.non_interactive and not dry
-    secrets_ok = ensure_secrets(dry, interactive)
+    secrets_ok = ensure_secrets(dry, interactive, verify=args.check)
 
     print()
     if args.dry_run:

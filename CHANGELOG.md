@@ -16,6 +16,11 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Fixes
+
+- **setup**: `--check` reports a blank notification secret and exits non-zero
+  instead of calling the checkout ready when it cannot start
+
 ## v0.1.0 - 2026-09-05
 
 ### Features

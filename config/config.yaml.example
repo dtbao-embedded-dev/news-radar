@@ -57,15 +57,19 @@ feeds:
 # Cost per run is len(groups) x len(enabled templates) - keep that in mind
 # before enabling all three.
 search_templates:
+  # `when:7d` is the whole reason this template earns its slot. Google News
+  # answers relevance-first: without a window it returns hits aged months,
+  # which score 0 for freshness and leave the group ordered by source weight
+  # alone. Widen it and the page goes stale, not fuller.
   - id: google_news
     name: Google News (vi)
-    url: "https://news.google.com/rss/search?q={kw}&hl=vi&gl=VN&ceid=VN:vi"
+    url: "https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi"
     format: rss
     enabled: true
     rank_weight: 0.8
   - id: hn_algolia
     name: Hacker News search
-    url: "https://hn.algolia.com/api/v1/search?query={kw}"
+    url: "https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story"
     format: hn_algolia_json
     enabled: true
     rank_weight: 0.8

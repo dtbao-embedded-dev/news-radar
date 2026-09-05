@@ -5,9 +5,14 @@
 # Secrets come from docker/.env, which Compose loads automatically because it
 # sits next to this file. scripts/setup.py creates it from .env.example.
 #
-# NOTE (P0): the crawl service builds from a Dockerfile that does not exist
-# yet - the application layer lands in P1..P5. Until then only `caddy` is
-# startable:  docker compose -f docker/docker-compose.yml up -d caddy
+# The `cloudflared` service is behind the `tunnel` profile, so the two lines
+# above start the crawl loop and the web server and nothing else. Publishing
+# news.dtbao.org is opt-in:
+#
+#   docker compose -f docker/docker-compose.yml --profile tunnel up -d
+#
+# scripts/setup.py adds that flag by itself once docker/tunnel-credentials.json
+# is in place.
 
 name: news-radar
 
@@ -48,6 +53,29 @@ services:
     # renegotiated the next time something else on the host wants 8080.
     ports:
       - "${NEWS_RADAR_HTTP_PORT:-8088}:8080"
+
+  # Publishes caddy as https://news.dtbao.org through the `news` Cloudflare
+  # Tunnel. Outbound-only: nothing is port-forwarded and no inbound rule
+  # exists, which is the whole reason for a tunnel rather than a public port.
+  #
+  # Behind a profile because the credentials file is not in the repo: a fresh
+  # clone would otherwise get a container crash-looping on a missing mount.
+  # Start it with --profile tunnel, or let scripts/setup.py notice the file.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.8.3
+    container_name: news-radar-tunnel
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    # No `tunnel run <name>`: the name would be looked up over the API, and
+    # this connector should need nothing but the two files it is handed.
+    command: tunnel --config /etc/cloudflared/config.yml run
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      - ./tunnel-credentials.json:/etc/cloudflared/creds.json:ro
+    depends_on:
+      - caddy
 
 volumes:
   caddy_data:

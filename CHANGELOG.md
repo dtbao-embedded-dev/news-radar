@@ -18,6 +18,16 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **deploy**: the tunnel - `https://news.dtbao.org` now serves the report. The
+  Cloudflare Tunnel connector runs as a `cloudflared` service inside the compose
+  stack rather than on the host, which is what lets the origin be `caddy:8080`
+  at all: a tunnel running on the host cannot resolve a docker service name, and
+  restarting one that already carries other hostnames costs those too. The
+  ingress is a committed file (`docker/cloudflared.yml`) because a tunnel id is
+  not a secret; only `docker/tunnel-credentials.json` is, and it is gitignored.
+  The service sits behind the `tunnel` compose profile, so a checkout without
+  that credentials file starts exactly what it started before instead of a
+  container crash-looping on a missing mount
 - **crawl**: the senders - a cycle that finds something new now pushes it to
   Telegram and Discord instead of only writing the page. Only what is **new**
   goes out: the run is read back out of the store, diffed against the per-channel

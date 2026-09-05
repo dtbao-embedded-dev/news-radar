@@ -22,7 +22,7 @@ order: 2
 |-------|-----|
 | Python 3.11+ | Runs `setup.py` and `release.py`; `setup.py` checks the version and refuses an older one |
 | Docker Engine + Compose v2 | Runs the stack. `setup.py` reports both versions before doing anything else |
-| A free host port | `8080` is already taken on this homelab by ntfy - the default published port is `8088`, overridable with `NEWS_RADAR_HTTP_PORT` |
+| A free host port | The default published port is `8088`, overridable with `NEWS_RADAR_HTTP_PORT`. `8080` is deliberately not the default even though it is free - see [[deployment-homelab]] |
 
 Nothing else. There are no API keys for fetching news; every secret is a
 notification secret.

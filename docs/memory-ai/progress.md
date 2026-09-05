@@ -85,9 +85,6 @@ not written** - `src/news_radar/` does not exist yet.
   does not delete the old objects: `91ea2d9` still answers over the API with the
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
-- **Host port 8080 is taken by ntfy on this homelab.** Caddy is published on
-  `NEWS_RADAR_HTTP_PORT`, default `8088`. A probe of `localhost:8080` answers
-  from ntfy, which looks like success and is not.
 - **Eight bank docs are marked `inferred`.** They describe code that does not exist
   yet. Flip each to `confirmed` as its phase lands and the doc is checked against
   the real implementation.

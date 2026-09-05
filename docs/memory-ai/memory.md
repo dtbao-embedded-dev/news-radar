@@ -95,9 +95,6 @@ not written** - `src/news_radar/` does not exist yet.
   does not delete the old objects: `91ea2d9` still answers over the API with the
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
-- **Host port 8080 is taken by ntfy on this homelab.** Caddy is published on
-  `NEWS_RADAR_HTTP_PORT`, default `8088`. A probe of `localhost:8080` answers
-  from ntfy, which looks like success and is not.
 - **Eight bank docs are marked `inferred`.** They describe code that does not exist
   yet. Flip each to `confirmed` as its phase lands and the doc is checked against
   the real implementation.
@@ -134,6 +131,17 @@ something a human can look at.
   request; `release.py --dry-run 0.1.0` was exercised against the real history.
 - Caddy's published host port moved to `NEWS_RADAR_HTTP_PORT` (default `8088`)
   after 8080 turned out to be taken by ntfy on the homelab.
+- **The predecessor stack was removed on 2026-09-05.** Six containers - `ntfy`,
+  `rsshub`, `zenfeed-web`, `zenfeed`, `tunnel`, `apprise` - were still running
+  from `compose/docker-compose.yml`, a file that had been deleted and was never
+  in git. They carried the compose project name `news-radar`, so
+  `docker compose ... down` would have swept them along with our Caddy. All six
+  are gone; the volumes `ntfy-data` and `news-radar_caddy_data` were left in
+  place. `8080` is free again, and the default stays `8088` by choice.
+- Removed the empty directories Docker had created under `config/` as
+  bind-mount targets for that stack: `zenfeed.yaml/`, `cloudflared.yml/` and
+  `apprise/newsradar.yml/`. Git never saw them - it does not track empty
+  directories - so they never appeared in `git status`.
 - `LICENSE` added: Apache-2.0, closing the decision `adr-0001` had left open.
 - README restructured: badges, standard section order, no hardcoded deployment
   host, and no pointers into `docs/memory-ai` - the bank is working state for an
@@ -454,12 +462,18 @@ the news sources, Telegram and Discord, and nothing talks in to it.
 | `news-radar` | built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
 | `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` inside the network; published on the host as `NEWS_RADAR_HTTP_PORT`, default `8088` |
 
-**Host port 8080 is already taken on this homelab by ntfy** - binding it makes the
-Caddy container fail to start with `port is already allocated`, and a probe of
-`localhost:8080` silently answers from ntfy instead. The published port is
-therefore `NEWS_RADAR_HTTP_PORT` (default `8088`) and exists only for local
-debugging; the tunnel talks to `caddy:8080` over the docker network and ignores
-it entirely. Verified 2026-09-04 by starting the stack on this machine.
+**The published host port is `NEWS_RADAR_HTTP_PORT`, default `8088`**, and it
+exists only for local debugging: the tunnel talks to `caddy:8080` over the docker
+network and ignores it entirely.
+
+`8088` was originally forced - ntfy held `127.0.0.1:8080` on this homelab, so
+binding `8080` failed with `port is already allocated` and a probe of
+`localhost:8080` silently answered from ntfy. That container was removed on
+2026-09-05 and `8080` is free again, but the default stays `8088` **by choice**:
+a port of our own does not have to be renegotiated the next time something else
+on the homelab wants the obvious one. Verified 2026-09-05 - Caddy answers `200`
+on `8088` with the `Cache-Control` headers from our Caddyfile, and nothing
+listens on `8080`.
 
 Add a `cloudflared` service only if the homelab does not already run a tunnel.
 It already serves `mcp.dtbao.org`, so the cheaper path is to add one public
@@ -1233,7 +1247,7 @@ Recovery is ordinary git. Find out which step failed from the output, then:
 |-------|-----|
 | Python 3.11+ | Runs `setup.py` and `release.py`; `setup.py` checks the version and refuses an older one |
 | Docker Engine + Compose v2 | Runs the stack. `setup.py` reports both versions before doing anything else |
-| A free host port | `8080` is already taken on this homelab by ntfy - the default published port is `8088`, overridable with `NEWS_RADAR_HTTP_PORT` |
+| A free host port | The default published port is `8088`, overridable with `NEWS_RADAR_HTTP_PORT`. `8080` is deliberately not the default even though it is free - see [[deployment-homelab]] |
 
 Nothing else. There are no API keys for fetching news; every secret is a
 notification secret.

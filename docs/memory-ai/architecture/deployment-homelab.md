@@ -3,7 +3,7 @@ title: Homelab Deployment
 category: architecture
 purpose: How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world.
 status: draft
-updated: 2026-09-04
+updated: 2026-09-05
 source: conversation
 confidence: inferred
 keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflare tunnel, schedule, volumes, restart policy
@@ -43,12 +43,18 @@ the news sources, Telegram and Discord, and nothing talks in to it.
 | `news-radar` | built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
 | `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` inside the network; published on the host as `NEWS_RADAR_HTTP_PORT`, default `8088` |
 
-**Host port 8080 is already taken on this homelab by ntfy** - binding it makes the
-Caddy container fail to start with `port is already allocated`, and a probe of
-`localhost:8080` silently answers from ntfy instead. The published port is
-therefore `NEWS_RADAR_HTTP_PORT` (default `8088`) and exists only for local
-debugging; the tunnel talks to `caddy:8080` over the docker network and ignores
-it entirely. Verified 2026-09-04 by starting the stack on this machine.
+**The published host port is `NEWS_RADAR_HTTP_PORT`, default `8088`**, and it
+exists only for local debugging: the tunnel talks to `caddy:8080` over the docker
+network and ignores it entirely.
+
+`8088` was originally forced - ntfy held `127.0.0.1:8080` on this homelab, so
+binding `8080` failed with `port is already allocated` and a probe of
+`localhost:8080` silently answered from ntfy. That container was removed on
+2026-09-05 and `8080` is free again, but the default stays `8088` **by choice**:
+a port of our own does not have to be renegotiated the next time something else
+on the homelab wants the obvious one. Verified 2026-09-05 - Caddy answers `200`
+on `8088` with the `Cache-Control` headers from our Caddyfile, and nothing
+listens on `8080`.
 
 Add a `cloudflared` service only if the homelab does not already run a tunnel.
 It already serves `mcp.dtbao.org`, so the cheaper path is to add one public

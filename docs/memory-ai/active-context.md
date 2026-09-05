@@ -31,6 +31,17 @@ something a human can look at.
   request; `release.py --dry-run 0.1.0` was exercised against the real history.
 - Caddy's published host port moved to `NEWS_RADAR_HTTP_PORT` (default `8088`)
   after 8080 turned out to be taken by ntfy on the homelab.
+- **The predecessor stack was removed on 2026-09-05.** Six containers - `ntfy`,
+  `rsshub`, `zenfeed-web`, `zenfeed`, `tunnel`, `apprise` - were still running
+  from `compose/docker-compose.yml`, a file that had been deleted and was never
+  in git. They carried the compose project name `news-radar`, so
+  `docker compose ... down` would have swept them along with our Caddy. All six
+  are gone; the volumes `ntfy-data` and `news-radar_caddy_data` were left in
+  place. `8080` is free again, and the default stays `8088` by choice.
+- Removed the empty directories Docker had created under `config/` as
+  bind-mount targets for that stack: `zenfeed.yaml/`, `cloudflared.yml/` and
+  `apprise/newsradar.yml/`. Git never saw them - it does not track empty
+  directories - so they never appeared in `git status`.
 - `LICENSE` added: Apache-2.0, closing the decision `adr-0001` had left open.
 - README restructured: badges, standard section order, no hardcoded deployment
   host, and no pointers into `docs/memory-ai` - the bank is working state for an

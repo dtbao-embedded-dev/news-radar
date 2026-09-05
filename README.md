@@ -46,24 +46,25 @@ what has not been reported before.
 git clone git@github.com:dtbao-embedded-dev/news-radar.git
 cd news-radar
 python scripts/setup.py
-docker compose -f docker/docker-compose.yml up -d
 ```
 
-Same steps on Windows and Linux. `setup.py` checks Python and Docker, creates
-`config/config.yaml` and `docker/.env` from their templates without ever
-overwriting an existing file, and asks for the Telegram and Discord secrets. Run
-it with `--dry-run` first to see what it would do, and `--check` to verify an
-existing checkout without writing anything.
+That is the whole install, and it is the same on Windows and Linux. `setup.py`
+checks Python and Docker, creates `config/config.yaml` and `docker/.env` from
+their templates without ever overwriting an existing file, asks for the Telegram
+and Discord secrets, then brings the stack up and prints the URL the page is
+served on — default `http://localhost:8088`, overridable with
+`NEWS_RADAR_HTTP_PORT`.
 
-The crawl service builds from a `Dockerfile`. While that file is absent from the
-checkout, a full `up -d` dies on the build and only the web half can start:
+| Flag | For |
+|---|---|
+| `--dry-run` | See every step, including the compose command. Writes nothing, starts nothing |
+| `--check` | Verify an existing checkout. Creates nothing, starts nothing |
+| `--non-interactive` | Unattended: report a blank secret instead of prompting |
+| `--force` | Regenerate a config file from its template on purpose |
 
-```bash
-docker compose -f docker/docker-compose.yml up -d caddy
-```
-
-`setup.py` ends by printing whichever of the two commands applies — follow that
-line. Caddy serves the rendered page on `NEWS_RADAR_HTTP_PORT`, default `8088`.
+A compose failure is reported and exits non-zero — the script never claims a
+stack it could not start. While the checkout has no `Dockerfile` the crawl
+service cannot build, so only the web half is started and the script says so.
 
 ## Configuration
 

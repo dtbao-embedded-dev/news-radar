@@ -35,7 +35,7 @@ import logging
 
 from .fetch.http import HttpError
 
-__all__ = ["summarize", "build_prompt", "SENTENCES_MAX"]
+__all__ = ["summarize", "build_prompt", "daily_key", "SENTENCES_MAX"]
 
 log = logging.getLogger("news_radar.summarize")
 
@@ -61,6 +61,24 @@ omit that topic's line entirely rather than writing that nothing happened.
 
 Topics and their top stories:
 """
+
+
+def daily_key(local_date):
+    """The seen-set key one day's summary is remembered by, per channel.
+
+    The page's summary is rewritten every cycle; the *message* goes out once a
+    local day. So the identity is the date and nothing else - not a timestamp
+    and not a hash of the text, either of which would move with the rewrite and
+    buzz a phone every thirty minutes.
+
+    It rides in the `reported` table beside the story keys, which is what makes
+    "already sent today" survive a container restart. Two consequences worth
+    knowing: the `summary:` prefix is what keeps it from ever colliding with a
+    story's dedup key, and `store.prune()` deletes keys by joining against
+    `items`, so these rows are never pruned - one row per day per channel,
+    which is ~730 a year and cheaper than a second mechanism.
+    """
+    return "summary:{}".format(local_date.isoformat())
 
 
 def build_prompt(rows_by_label, labels, max_per_topic):

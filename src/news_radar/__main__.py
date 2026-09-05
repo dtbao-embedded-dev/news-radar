@@ -28,7 +28,7 @@ from .fetch.search import read_search_feeds
 from .filter import select
 from .keywords import KeywordError, parse as parse_keywords
 from .rank import collapse, rank_groups
-from . import notify, ops, render, store
+from . import notify, ops, render, store, summarize
 from .notify import discord, telegram
 
 log = logging.getLogger("news_radar")
@@ -50,11 +50,16 @@ def _install_signal_handlers():
             signal.signal(sig, handler)
 
 
-def _fetcher(cfg):
-    """One Fetcher per cycle: the per-host throttle state lives on it."""
+def _fetcher(cfg, timeout_s=None):
+    """One Fetcher per cycle: the per-host throttle state lives on it.
+
+    `timeout_s` overrides the feed timeout for the one caller that needs it: a
+    chat completion is slower than an RSS file by an order of magnitude, and
+    fifteen seconds would time out every summary while looking like an outage.
+    """
     return Fetcher(
         user_agent=cfg.user_agent(),
-        timeout_s=cfg.get("advanced.request_timeout_s", 15),
+        timeout_s=timeout_s or cfg.get("advanced.request_timeout_s", 15),
         max_retries=cfg.get("advanced.max_retries", 2),
         interval_ms=cfg.get("advanced.request_interval_ms", 2000),
     )
@@ -104,11 +109,40 @@ def _report_groups(ranked):
                      ", ".join(story.source_ids))
 
 
+def _summarize(cfg, day, labels):
+    """Today's AI summary, or None. Never a reason the cycle failed.
+
+    Off is the shipped case, and the whole point of P6-4's reversal: `ai.enabled`
+    defaults to false, so a config that says nothing about `ai` never reaches
+    the network and never sees a bill.
+
+    Guarded even though `summarize.summarize()` already swallows every failure
+    of its own: the Fetcher constructor refuses an empty User-Agent, and the one
+    thing an *optional* feature may never do is take the page down with it. That
+    is also why the caller adds nothing to `problems` - an endpoint having a bad
+    afternoon is not a news-radar outage, and it must not withhold the ping.
+    """
+    if not cfg.get("ai.enabled"):
+        return None
+    try:
+        return summarize.summarize(
+            _fetcher(cfg, cfg.get("ai.timeout_s", 60)),
+            cfg.get("ai.api_url"), os.environ.get("OPENAI_API_KEY"),
+            cfg.get("ai.model"), day, labels,
+            cfg.get("ai.max_per_topic", 5))
+    except Exception:
+        log.exception("the summary failed; the page is written without one")
+        return None
+
+
 def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
-    """Persist the run and rewrite the page. Returns the run id, or None.
+    """Persist the run and rewrite the page. Returns `(run_id, summary)`.
 
     The id is what the senders read the run back by, so a cycle whose storage
     failed notifies nothing rather than notifying a run that was never written.
+    The summary is produced here rather than in `crawl()` because it is built
+    from the same `day` rows the page renders - one read of the store, and the
+    paragraph at the top of the page describes exactly what is under it.
 
     Guarded as a whole, for the same reason the keyword file is: a full disk, a
     locked database or a read-only volume must not throw away the 597 items that
@@ -117,6 +151,7 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
     """
     data_dir = cfg.get("storage.data_dir", "output")
     conn = None
+    summary = None
     try:
         conn = store.open_db(data_dir)
         run_id = store.start_run(conn, fetched_at)
@@ -130,13 +165,15 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
         day = store.day_matches(conn, start, end)
 
         if groups:
+            summary = _summarize(cfg, day, [g.label for g in groups])
             render.write(
                 data_dir, [g.label for g in groups], day,
                 {"run_id": run_id, "fetched": fetched, "matched": matched,
                  "sources": len(cfg.enabled_feeds())
                             + len(cfg.enabled_search_templates()),
                  "errors": len(errors), "generated_at": fetched_at},
-                tz, threshold=cfg.get("report.rank_threshold", 5))
+                tz, threshold=cfg.get("report.rank_threshold", 5),
+                summary=summary)
         else:
             # No keyword file means no group order to render in, and a page with
             # no sections at all is worse than yesterday's page: it reads as "no
@@ -158,10 +195,10 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
         log.info("stored %d match row(s) as run %s; the page shows %d "
                  "story(ies) across %d group(s) today", rows, run_id,
                  sum(len(v) for v in day.values()), len(day))
-        return run_id
+        return run_id, summary
     except Exception:
         log.exception("storing or rendering failed, the fetched items are kept")
-        return None
+        return None, None
     finally:
         if conn is not None:
             conn.close()
@@ -304,6 +341,76 @@ def _notify(cfg, fetcher, run_id, labels, fetched_at):
             conn.close()
 
 
+def _send_summary(cfg, summary, fetched_at):
+    """Push the day's summary to every enabled channel, once per local day.
+
+    The page gets a fresh summary every cycle; a phone gets one a day. That
+    asymmetry is the whole design: the page is somewhere you go and the message
+    is something that interrupts you, and forty-eight interruptions a day
+    saying roughly the same thing is how a channel gets muted - taking the
+    outage alerts with it.
+
+    "Once" survives a restart because it is not remembered in memory. The
+    `reported` table already answers *"has this channel been told about X"* per
+    channel and idempotently, so the summary rides in it under
+    `summarize.daily_key()` - no schema, no second mechanism, and a container
+    that came back at noon still knows this morning's went out.
+
+    Sent through the channels' `alert()` rather than `send()`: a summary is
+    sentences, not a list of links, which is exactly the payload `alert()` was
+    shaped for - and on Telegram that means no `parse_mode`, so an em dash or a
+    stray `<` from a model cannot cost the message.
+
+    Guarded throughout. Nothing here may end the cycle: the page is already
+    written by the time it runs.
+    """
+    if not summary:
+        return
+
+    tz = render.local_tz(cfg.get("app.timezone") or "UTC")
+    local = fetched_at.astimezone(tz)
+    hour = cfg.get("ai.notify_at_hour", 8)
+    if local.hour < hour:
+        log.info("summary: holding until %02d:00 local", hour)
+        return
+
+    channels = [c for c in cfg.enabled_channels() if c in ALERTERS]
+    if not channels:
+        return
+
+    key = summarize.daily_key(local.date())
+    conn = None
+    try:
+        conn = store.open_db(cfg.get("storage.data_dir", "output"))
+        todo = [c for c in channels if store.unreported(conn, [key], c)]
+        if not todo:
+            log.info("summary: already sent today")
+            return
+
+        fetcher = _fetcher(cfg)
+        taken = []
+        for name in todo:
+            try:
+                if ALERTERS[name](fetcher, summary, os.environ):
+                    # Marked per channel and only on acceptance, the same rule
+                    # the stories follow: a refused message is retried next
+                    # cycle rather than counted as delivered.
+                    store.mark_reported(conn, [key], name, fetched_at)
+                    taken.append(name)
+            except Exception:
+                log.exception("could not send the summary on %s; the other "
+                              "channels and the cycle are unaffected", name)
+
+        log.info("summary: sent to %d of %d channel(s) [%s]",
+                 len(taken), len(todo), ", ".join(taken) or "none")
+    except Exception:
+        log.exception("sending the summary failed; the page and the run are "
+                      "unaffected")
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def _dead_sources(cfg, errors):
     """A problem when *every* enabled source failed, and nothing otherwise.
 
@@ -386,10 +493,14 @@ def crawl(cfg):
     _report_groups(ranked)
     problems += _dead_sources(cfg, errors)
 
-    run_id = _publish(cfg, ranked, groups, fetched_at, len(items),
-                      len(matched), errors)
+    run_id, summary = _publish(cfg, ranked, groups, fetched_at, len(items),
+                               len(matched), errors)
     if run_id:
         _notify(cfg, fetcher, run_id, [g.label for g in groups], fetched_at)
+        # After the stories and outside the problem list on purpose: the
+        # summary is optional, so a failed one is a page without a paragraph
+        # and never a cycle that withholds its heartbeat ping.
+        _send_summary(cfg, summary, fetched_at)
     else:
         # `_publish` already logged the traceback. Without this line the cycle
         # would go on to ping the heartbeat and claim it succeeded, which is

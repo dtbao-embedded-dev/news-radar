@@ -172,6 +172,51 @@ check("a day with no matches still renders every group",
 eq("and highlights nothing", html.count("story hot"), 0)
 
 
+# -- the AI summary block (P6-4) -------------------------------------------
+
+# Absent is the shipped case: `ai.enabled` is false by default, so the page a
+# clone renders must be exactly the page it rendered before this feature.
+plain_root = data_dir()
+mod.write(plain_root, LABELS, rows, META, VN, threshold=2)
+plain = (plain_root / "index.html").read_text(encoding="utf-8")
+check("no summary means no summary block at all",
+      'class="summary"' not in plain, plain[:200])
+
+sum_root = data_dir()
+mod.write(sum_root, LABELS, rows, META, VN, threshold=2,
+          summary="ESP32 — Hai bài đáng đọc.\nRust — Bản 1.9 ra.")
+html = (sum_root / "index.html").read_text(encoding="utf-8")
+
+check("the summary block is on the page", 'class="summary"' in html)
+eq("one paragraph per topic", html.count("<p><strong>"), 2)
+check("the topic name is the bold half",
+      "<strong>ESP32</strong>" in html and "<strong>Rust</strong>" in html, html)
+check("the sentences survive", "Hai bài đáng đọc." in html, html)
+eq("the summary sits above the first group",
+   html.index('class="summary"') < html.index('class="group"'), True)
+
+# A model that ignored the format still wrote a sentence, and a sentence the
+# reader cannot see is worse than an unbolded one.
+odd_root = data_dir()
+mod.write(odd_root, LABELS, rows, META, VN, threshold=2,
+          summary="Hôm nay không có gì nổi bật")
+odd = (odd_root / "index.html").read_text(encoding="utf-8")
+check("a line with no separator is still rendered",
+      "Hôm nay không có gì nổi bật" in odd, odd)
+
+# The trust boundary. This text came off an endpoint, and an endpoint is
+# somebody else's machine answering every thirty minutes.
+xss_root = data_dir()
+mod.write(xss_root, LABELS, rows, META, VN, threshold=2,
+          summary="AI — <script>alert(1)</script> & <b>bold</b>")
+xss = (xss_root / "index.html").read_text(encoding="utf-8")
+check("a script tag from the model is escaped",
+      "&lt;script&gt;alert(1)&lt;/script&gt;" in xss, xss)
+check("...and no live script tag reaches the page",
+      "<script>alert(1)</script>" not in xss, xss)
+check("an ampersand from the model is escaped", "&amp;" in xss, xss)
+
+
 # --------------------------------------------------------------------------
 
 if FAILURES:

@@ -242,6 +242,12 @@ def start_stack():
         say("warn", "no Dockerfile in the checkout - starting caddy only")
     say("run", " ".join(argv))
 
+    # docker writes to this same stdout unbuffered, but Python block-buffers it
+    # whenever it is not a tty - a piped run or a CI log would otherwise show
+    # docker's lines above the banner that explains them.
+    sys.stdout.flush()
+    sys.stderr.flush()
+
     try:
         proc = subprocess.run([exe] + argv[1:], cwd=str(ROOT), check=False)
     except OSError as exc:

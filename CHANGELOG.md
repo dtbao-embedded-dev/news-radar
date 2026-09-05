@@ -20,6 +20,8 @@ one makes the file and the tags disagree.
 
 - **setup**: `--check` reports a blank notification secret and exits non-zero
   instead of calling the checkout ready when it cannot start
+- **setup**: flush stdout before handing over to docker, so its output lands
+  under the line that announces it instead of above the banner in a piped log
 
 ## v0.1.0 - 2026-09-05
 

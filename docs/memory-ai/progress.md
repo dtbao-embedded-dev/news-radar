@@ -10,9 +10,44 @@ updated: 2026-09-05
 ## What works
 
 **P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, P3 Store
-and render, and P4 Notify are complete** (2026-09-05).
+and render, P4 Notify and P5 Deploy are complete** (2026-09-05).
 See `architecture/delivery-phases.md` for the phase map and the finished-product
 definition all of it serves.
+
+### P5 - Deploy
+
+- **`https://news.dtbao.org` serves the report.** Measured 2026-09-05 from this
+  machine, which leaves the LAN and comes back through the Cloudflare edge:
+  `GET /` answered **200** with `<title>news-radar &middot; 2026-09-05</title>`
+  and 42914 bytes, `GET /news.db` answered **404**, `GET /days/` answered
+  **404**. That is P5's definition of done.
+- **The connector runs in the stack, not on the host.** A `cloudflared` service
+  in `docker/docker-compose.yml` carries the `news` tunnel
+  (`94fedb96-98c6-4683-8ae5-6addda3d9c9e`) and registered four edge connections
+  on first start (`hkg01`, `hkg09`, `hkg13` x2).
+- **The bank had this topology wrong, and it is now corrected.** It said the
+  homelab already ran a tunnel *container* for `mcp.dtbao.org` that this project
+  would attach to. Reality: cloudflared runs here as a Windows service named
+  `win-dev` carrying `ssh.dtbao.org` and `remote.dtbao.org`. A host connector
+  cannot resolve `caddy`, so the documented `http://caddy:8080` origin was only
+  reachable by putting a connector inside the stack - which also means the news
+  route never shares a restart with the operator's own ssh and rdp.
+- **The route existed before the connector did.** `news.dtbao.org` was already
+  a DNS record pointing at the `news` tunnel, and the tunnel had never been run:
+  the site answered Cloudflare error `1033`. Starting the container was the
+  whole of P5-3.
+- **A tunnel id is not a secret; the credentials file is.**
+  `docker/cloudflared.yml` carries the id and the ingress and is committed;
+  `docker/tunnel-credentials.json` is gitignored, and `git check-ignore` was run
+  to prove it before the first commit.
+- **The service is behind the `tunnel` compose profile**, so `docker compose up
+  -d` on a fresh clone starts exactly what it started before rather than a
+  container crash-looping on a missing bind mount. `scripts/setup.py` adds
+  `--profile tunnel` on its own when it sees the credentials file, so installing
+  is still two steps on a machine that publishes.
+- **One more stdlib-only test file.** `tests/test_setup.py` needs only
+  `pathlib` and `tempfile`; eleven of the thirteen test files now run on a bare
+  Windows checkout.
 
 ### P4 - Notify
 
@@ -218,18 +253,27 @@ definition all of it serves.
 
 ## What's left
 
-Deployment onwards. **Every module the design bank specifies is now written**:
-the entrypoint, the config loader, the item shape, the keyword parser, the whole
-fetch layer, the whole selection layer, the store, the renderer and both
-senders. What is left is not code in this repository.
+Ops, and the unattended week that proves it. **Every module the design bank
+specifies is now written**: the entrypoint, the config loader, the item shape,
+the keyword parser, the whole fetch layer, the whole selection layer, the store,
+the renderer and both senders - and the whole thing is now reachable at
+`https://news.dtbao.org`.
 
-- **P5 Deploy** - the Cloudflare Tunnel route for `news.dtbao.org` and the first
-  unattended live run. The `Dockerfile`, the compose stack and the schedule loop
-  are done, so this is network configuration outside the repo.
-- **P6 Ops** - retention, heartbeat, failure alerting.
+- **P6 Ops** - retention, heartbeat, failure alerting, backup of the store.
+- **Seven days unattended** is P6's definition of done, and nothing has run
+  unattended for longer than a cycle yet.
 
 ## Known issues
 
+- **The archive is public now.** Every `output/days/*.html` ever written is
+  readable by anyone with the URL - that is finished-product statement 3, not a
+  defect, but it is worth stating plainly: only `news.db*` and directory
+  listings are withheld, both by the Caddyfile, and there is no Cloudflare
+  Access policy in front of the hostname.
+- **A tunnel restart is the one thing that takes the site down.** The crawl keeps
+  running and `output/` stays correct, but `news.dtbao.org` answers Cloudflare
+  `1033` until a connector registers again. `restart: unless-stopped` covers a
+  crash; nothing yet alerts on it - that is P6-1.
 - **Google News (vi) has almost no recent embedded coverage.** P2's
   relevance-first problem is fixed - `when:7d` on Google News and
   `search_by_date` on HN Algolia mean the freshness term finally fires, and ten
@@ -250,10 +294,10 @@ senders. What is left is not code in this repository.
   does not delete the old objects: `91ea2d9` still answers over the API with the
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
-- **Three bank docs are still marked `inferred`**: `delivery-phases` and
-  `deployment-homelab` (both still describe work not done - P5, P6 and the
-  tunnel), and `config-and-env` (never checked key by key against the code).
-  Flip each once it is verified against the real implementation.
+- **One bank doc is still marked `inferred`**: `config-and-env`, never checked
+  key by key against the code. Flip it once it is verified against the real
+  implementation. `delivery-phases` and `deployment-homelab` were flipped to
+  `confirmed` by P5 and rewritten against the real stack.
   `notify-channels` was flipped to `confirmed` by P4 and rewritten against the
   real modules; `news-item`, `news-sources`, `news-search`, `module-layout`,
   `crawl-cli`, `fetch-layer`, `selection-layer` and `storage-layer` are
@@ -267,10 +311,6 @@ senders. What is left is not code in this repository.
   `news.google.com/rss/articles/CBMi...`, so the same story from Google News and
   from Hacker News will not collapse on `canonical_url` in P2. Accepted, of the
   same class as the AMP limit already recorded.
-- **`docker/docker-compose.yml` still carries a stale P0 note** saying the
-  Dockerfile does not exist and only `caddy` is startable. That has been false
-  since the Dockerfile landed.
-
 - **The image does not ship `tests/`, so the suite cannot be run with
   `docker compose exec`.** It runs on the host (ten of twelve files) or, for the
   two that need `feedparser`, in a throwaway container with the repo mounted:

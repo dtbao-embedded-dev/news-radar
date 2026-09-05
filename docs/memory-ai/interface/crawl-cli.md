@@ -128,6 +128,6 @@ still attempted.
 
 ## What it does not do yet
 
-Nothing here. P5 is deployment - the Cloudflare Tunnel route and the first
-unattended live run - and P6 is ops. Neither changes the flags or exit codes
-above.
+Nothing here. P5 was deployment - the Cloudflare Tunnel connector and the first
+unattended live run - and it changed neither the flags nor the exit codes above;
+P6 is ops, and is not expected to either.

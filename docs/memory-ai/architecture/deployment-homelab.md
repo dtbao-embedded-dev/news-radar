@@ -2,19 +2,19 @@
 title: Homelab Deployment
 category: architecture
 purpose: How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world.
-status: draft
+status: active
 updated: 2026-09-05
-source: conversation
-confidence: inferred
-keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflare tunnel, schedule, volumes, restart policy
+source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, scripts/setup.py
+confidence: confirmed
+keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, schedule, volumes, restart policy
 order: 3
 ---
 
 # Homelab Deployment
 
-> Two containers on the homelab: one crawls on a loop and writes `output/`, one
-> serves `output/` over HTTP. A Cloudflare Tunnel maps `news.dtbao.org` onto the
-> second one. Nothing is published from GitHub.
+> Three containers on the homelab: one crawls on a loop and writes `output/`,
+> one serves `output/` over HTTP, one carries that to `news.dtbao.org` through a
+> Cloudflare Tunnel. Nothing is published from GitHub.
 
 ## Topology
 
@@ -23,18 +23,22 @@ order: 3
                |
         Cloudflare edge          TLS terminates here
                |
-      Cloudflare Tunnel          outbound-only, no port forwarding
-               |
-   +-----------+-------------------------+   docker network (homelab)
-   |                                     |
-   |   caddy  :8080  ---- reads ---->  output/  <---- writes ---- news-radar
-   |   serves static files              (volume)                 (crawl loop)
-   |                                                             reads config/
-   +-------------------------------------------------------------------------+
+   +-----------+-------------------------------------------------------------+
+   |           |                                   docker network (homelab)  |
+   |     cloudflared                 outbound-only, no port forwarding        |
+   |           |  http://caddy:8080                                           |
+   |           v                                                              |
+   |   caddy  :8080  ---- reads ---->  output/  <---- writes ---- news-radar  |
+   |   serves static files             (volume)                  (crawl loop) |
+   |                                                            reads config/ |
+   +--------------------------------------------------------------------------+
 ```
 
-Only Caddy is reachable. The crawl container exposes no port; it talks outward to
-the news sources, Telegram and Discord, and nothing talks in to it.
+Only Caddy is reachable, and only from inside the network. The crawl container
+exposes no port; it talks outward to the news sources, Telegram and Discord, and
+nothing talks in to it. `cloudflared` exposes no port either - it dials the
+Cloudflare edge outbound and the edge answers the public request over that
+connection.
 
 ## Services
 
@@ -42,6 +46,7 @@ the news sources, Telegram and Discord, and nothing talks in to it.
 |---------|-------|------|-------|
 | `news-radar` | built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
 | `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` inside the network; published on the host as `NEWS_RADAR_HTTP_PORT`, default `8088` |
+| `cloudflared` | `cloudflare/cloudflared:2026.8.3` | Carries `news.dtbao.org` to `http://caddy:8080`. Behind the `tunnel` compose profile | none |
 
 **The published host port is `NEWS_RADAR_HTTP_PORT`, default `8088`**, and it
 exists only for local debugging: the tunnel talks to `caddy:8080` over the docker
@@ -71,13 +76,39 @@ server has to be told the difference:
 The store is not part of the report: serving it hands a stranger the whole
 archive in one request. `404` rather than `403`, because there is no reason to
 confirm the file is there. Directory listing is off for the same reason and
-costs nothing - `index.html` already links every snapshot. Both matter more once
-P5 puts this on the public internet, and both are cheap enough to have now.
+costs nothing - `index.html` already links every snapshot. Both rules are load
+bearing now that P5 has put this on the public internet: verified 2026-09-05
+against the live hostname, `https://news.dtbao.org/news.db` and
+`https://news.dtbao.org/days/` both answer `404` while `/` answers `200`.
 
-Add a `cloudflared` service only if the homelab does not already run a tunnel.
-It already serves `mcp.dtbao.org`, so the cheaper path is to add one public
-hostname route to the existing tunnel, pointing `news.dtbao.org` at
-`http://caddy:8080` - the in-network port, not the published one.
+### The tunnel
+
+`news.dtbao.org` is carried by a dedicated Cloudflare Tunnel named `news`
+(`94fedb96-98c6-4683-8ae5-6addda3d9c9e`), whose connector runs **as a container
+in this compose project**:
+
+| Piece | Where | Committed |
+|-------|-------|-----------|
+| Ingress: `news.dtbao.org` -> `http://caddy:8080`, else `http_status:404` | `docker/cloudflared.yml` | yes - a tunnel id is not a secret |
+| Connector credentials | `docker/tunnel-credentials.json`, mounted at `/etc/cloudflared/creds.json` | **no** - gitignored |
+| The service itself | `docker/docker-compose.yml`, `profiles: ["tunnel"]` | yes |
+
+**In the stack rather than on the host, for two reasons.** The origin can only
+be the service name `caddy:8080` from inside the docker network - a connector
+running on the host cannot resolve it, and would have to be pointed at the
+published debug port instead. And a host connector is usually already carrying
+other hostnames: this homelab runs one as a Windows service (`win-dev`) for
+`ssh.dtbao.org` and `remote.dtbao.org`, so restarting it to change the news
+route would drop the operator's own remote access.
+
+**Behind a profile**, so `docker compose up -d` starts the crawl loop and the
+web server and nothing else. The credentials file is not in the repo, and
+without the profile a fresh clone would get a container crash-looping on a
+missing bind mount. `scripts/setup.py` adds `--profile tunnel` on its own once
+the file is there - see [[cli-scripts]].
+
+The published host port therefore remains what it always was: local debugging.
+Nothing outside the LAN reaches it.
 
 ## Volumes
 
@@ -85,6 +116,8 @@ hostname route to the existing tunnel, pointing `news.dtbao.org` at
 |-----------|----------------|------|-------|
 | `./config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` |
 | `./output` | `/app/output` | read-write (crawl) / read-only (caddy, as `/srv`) | `index.html`, `news.db`, per-day snapshots |
+| `./docker/cloudflared.yml` | `/etc/cloudflared/config.yml` | read-only | the tunnel's ingress |
+| `./docker/tunnel-credentials.json` | `/etc/cloudflared/creds.json` | read-only | the connector's credentials |
 
 `output/` is a bind mount, not a named volume, so a human can open
 `output/index.html` directly on the host to debug a render without touching the
@@ -121,7 +154,8 @@ nothing outside the process will kill it.
 | What breaks | Symptom | Where it is handled |
 |-------------|---------|---------------------|
 | One source is down or rate-limits | That source contributes nothing this run | `fetch/` isolates per-source failures (P1-5) |
-| Tunnel drops | `news.dtbao.org` unreachable, crawl keeps working | Cloudflare reconnects; `output/` is still correct on the host |
+| Tunnel drops | `news.dtbao.org` unreachable, crawl keeps working | Cloudflare reconnects; `restart: unless-stopped` covers a connector crash; `output/` is still correct on the host and on `NEWS_RADAR_HTTP_PORT` |
+| Credentials file missing or wrong | `cloudflared` crash-loops, the site answers Cloudflare error `1033` | `docker compose ps` shows it restarting; the profile keeps a checkout without the file from ever starting it |
 | Disk fills with snapshots | Writes fail | Retention window (P3-5, P6) |
 | Crawl crashes on a bad item | Container exits | `restart: unless-stopped` plus a heartbeat so a crash loop is visible (P6-1) |
 | Clock skew | Freshness ranking goes wrong | `TZ` pinned in the container, not inherited from the host |

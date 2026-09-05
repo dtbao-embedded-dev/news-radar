@@ -44,7 +44,10 @@ Steps, in order:
 5. For each notification channel enabled in the config, ensure its variables are
    present and non-empty in `docker/.env`; prompt unless `--non-interactive`.
 6. `docker compose -f docker/docker-compose.yml up -d`, with docker's own output
-   inherited rather than captured. While no `Dockerfile` is present in the
+   inherited rather than captured. `--profile tunnel` is inserted before `up`
+   when `docker/tunnel-credentials.json` exists, so the `cloudflared` service
+   starts on a machine that publishes `news.dtbao.org` and stays out of the way
+   on one that does not. While no `Dockerfile` is present in the
    checkout the crawl service cannot build, so only `caddy` is named; the
    narrowing lifts by itself once the file exists.
 7. Print the URL the page is served on, taking `NEWS_RADAR_HTTP_PORT` from

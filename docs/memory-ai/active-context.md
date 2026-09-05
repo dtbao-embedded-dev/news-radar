@@ -9,20 +9,30 @@ updated: 2026-09-05
 
 ## Current focus
 
-**P4 Notify is done** (2026-09-05). A cycle that finds something new now pushes
-it to Telegram and Discord instead of only writing the page. Measured live in
-the container: the first `--once` after the rebuild sent **2 Telegram messages
-and 5 Discord messages carrying the same 43 stories**, and the `--once` run
-straight after it printed `nothing new to send` on both channels and sent
-nothing. That is the phase's definition of done, both halves of it.
+**P5 Deploy is done** (2026-09-05). `https://news.dtbao.org` serves the report:
+`GET /` answers **200** with today's page, `GET /news.db` and `GET /days/`
+answer **404**. The request leaves the LAN and comes back through the Cloudflare
+edge, which is the phase's definition of done.
 
-The next piece of work is **P5 Deploy**: the Cloudflare Tunnel route for
-`news.dtbao.org` and the first unattended live run. The `Dockerfile`, the
-compose stack and the schedule loop are already done, so P5 is mostly network
-configuration outside this repository.
+The next piece of work is **P6 Ops**: heartbeat, failure alerting, backup of the
+store, and the seven unattended days that prove it.
 
 ## Recent changes
 
+- **P5 landed in four commits on `release/v0.1`** (2026-09-05):
+  `docker/cloudflared.yml` (new, the ingress), `docker/docker-compose.yml` (the
+  `cloudflared` service behind `profiles: ["tunnel"]`), `.gitignore`,
+  `scripts/setup.py` (`compose_argv()` takes a `root` and detects the
+  credentials file), `tests/test_setup.py` (new).
+- **The bank was wrong about the tunnel and P5 corrected it.** It described a
+  tunnel *container* the homelab already ran for `mcp.dtbao.org`, to be attached
+  to this project's network. Reality: cloudflared runs here as the Windows
+  service `win-dev`, carrying `ssh.dtbao.org` and `remote.dtbao.org`. A host
+  connector cannot resolve `caddy`, so the connector had to move into the stack
+  for the documented `http://caddy:8080` origin to exist at all.
+- **The route was already there; the connector was not.** `news.dtbao.org` was
+  a DNS record pointing at a tunnel named `news` that had never been run - the
+  site answered Cloudflare `1033`. All of P5-3 was starting the container.
 - **P4 landed in eight commits on `release/v0.1`** (2026-09-05):
   `fetch/http.py` (`post_json()`, `Retry-After`), `store.py` (`run_matches()`),
   `notify/__init__.py` (`SendResult`, `pick`, `chunk`, `clip`),
@@ -52,8 +62,10 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **P5-3 Cloudflare Tunnel route** for `news.dtbao.org` to `caddy:8080`.
-2. **P5-4 first unattended live run**, verified from outside the LAN.
+1. **P6-1 heartbeat** - a run that fails silently must be visible. A tunnel that
+   stops registering is the same class of problem: the page goes to `1033` while
+   everything else looks healthy.
+2. **P6-2 failure alerting** into the same Telegram and Discord channels.
 3. **Watch the messages for a few days.** Two things are worth eyeballing that
    no test can assert: whether 5 Discord messages per cycle is pleasant or
    noisy, and whether any real headline trips an escaping case the fixtures
@@ -103,6 +115,13 @@ loader and the design bank - see `progress.md`.
 - **Both scripts stay stdlib-only** so they run on a bare checkout, before
   anything is installed.
 - **Self-hosted, not GitHub Pages.** The crawl and the site both run on the
-  homelab; `news.dtbao.org` is reached through the existing Cloudflare Tunnel.
+  homelab; `news.dtbao.org` is reached through a Cloudflare Tunnel whose
+  connector is a container **in this stack**, not on the host. A host connector
+  cannot resolve `caddy`, and restarting one that carries other hostnames costs
+  those too.
+- **A tunnel id is not a secret, a credentials file is.**
+  `docker/cloudflared.yml` is committed; `docker/tunnel-credentials.json` is
+  gitignored. The `tunnel` compose profile keeps a checkout without that file
+  from ever starting the connector.
 - **Secrets live only in `docker/.env`.** `config.yaml` is committed as a
   template and a leaked copy must be harmless.

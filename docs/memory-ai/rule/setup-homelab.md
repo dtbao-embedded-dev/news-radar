@@ -4,9 +4,9 @@ category: rule
 purpose: The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux.
 status: active
 updated: 2026-09-05
-source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile
+source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile, docker/cloudflared.yml
 confidence: confirmed
-keywords: setup, setup.py, docker compose, homelab, cloudflare tunnel, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088
+keywords: setup, setup.py, docker compose, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088
 order: 2
 ---
 
@@ -54,10 +54,11 @@ to replace one deliberately.
 **Step 3 happens inside step 2.** Once the checks pass and the secrets are
 filled, `setup.py` runs `docker compose -f docker/docker-compose.yml up -d`
 itself and prints the URL the page is served on. There is no separate command to
-type. While the checkout has no `Dockerfile` the crawl service cannot build, so
-the script names `caddy` alone and says so; that narrowing disappears when P5
-adds the file. A compose failure is reported and exits non-zero - the script
-never claims a stack it could not start.
+type. Two things it decides for itself by looking at the checkout: it names
+`caddy` alone when there is no `Dockerfile` to build the crawl service from, and
+it adds `--profile tunnel` when `docker/tunnel-credentials.json` is there. A
+compose failure is reported and exits non-zero - the script never claims a stack
+it could not start.
 
 | Flag | Use it when |
 |------|-------------|
@@ -79,28 +80,50 @@ Both live only in `docker/.env`, which is gitignored. They never go into
 ## Exposing news.dtbao.org
 
 Caddy serves `output/` inside the docker network on port `8080`. The published
-host port (`8088` by default) is for local debugging only.
+host port (`8088` by default) is for local debugging only - the tunnel never
+touches it.
 
-The homelab already runs a Cloudflare Tunnel for `mcp.dtbao.org`, so the cheap
-path is to add one public hostname to it rather than run a second tunnel:
+The connector runs as the `cloudflared` service in this same compose project,
+behind the `tunnel` profile. Two steps, once per machine:
 
-| Field | Value |
-|-------|-------|
-| Public hostname | `news.dtbao.org` |
-| Service | `http://caddy:8080` |
+1. **Have a tunnel.** `cloudflared tunnel create news` if there is none, then
+   `cloudflared tunnel route dns news news.dtbao.org` to point the hostname at
+   it. Both write to the Cloudflare account, not to this repo.
+2. **Give the container its credentials.** Copy the tunnel's credentials JSON
+   (`~/.cloudflared/<tunnel-id>.json`, written by `tunnel create`) to
+   `docker/tunnel-credentials.json`. It is gitignored; the tunnel id in
+   `docker/cloudflared.yml` is not a secret and stays committed. A different
+   tunnel means editing that id.
 
-The tunnel container must be on the same docker network as `caddy` for that
-service name to resolve. If it lives in another compose project, attach it to
-this project's network as an external network rather than publishing more ports.
+After that `python scripts/setup.py` starts the tunnel too - it adds
+`--profile tunnel` on its own once it sees the credentials file. By hand:
+
+```
+docker compose -f docker/docker-compose.yml --profile tunnel up -d
+```
+
+**Do not add `news.dtbao.org` to a connector running on the host instead.** A
+host connector cannot resolve `caddy`, so it would have to be pointed at the
+published debug port; and this homelab's host connector (`win-dev`) carries
+`ssh.dtbao.org` and `remote.dtbao.org`, so restarting it for a news route drops
+the operator's own remote access. See [[deployment-homelab]].
 
 ## Verifying it works
 
-1. `docker compose -f docker/docker-compose.yml ps` - both services `running`.
+1. `docker compose -f docker/docker-compose.yml --profile tunnel ps` - all
+   three services `running`. Drop `--profile tunnel` and `cloudflared`
+   disappears from the listing; that is the profile working, not a fault.
 2. `curl http://localhost:8088/` - Caddy answers with the current report.
    A 200 from a *different* service means the port is taken; change
    `NEWS_RADAR_HTTP_PORT` rather than guessing.
-3. Open `https://news.dtbao.org` from outside the LAN.
-4. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
+3. `curl https://news.dtbao.org/` - `200`, and the same report. This already
+   leaves the LAN: the request goes out to the Cloudflare edge and comes back
+   in through the tunnel. `curl https://news.dtbao.org/news.db` must answer
+   `404`.
+4. Cloudflare error `1033` there means the hostname is routed to a tunnel with
+   no connector - read `docker compose logs cloudflared`, which prints
+   `Registered tunnel connection` once per edge connection when it is healthy.
+5. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
    received exactly one message.
 
 ## Updating
@@ -108,7 +131,7 @@ this project's network as an external network rather than publishing more ports.
 ```
 git pull
 python scripts/setup.py --check
-docker compose -f docker/docker-compose.yml up -d --build
+docker compose -f docker/docker-compose.yml --profile tunnel up -d --build
 ```
 
 `--check` catches a config key added upstream that the local `config.yaml` does

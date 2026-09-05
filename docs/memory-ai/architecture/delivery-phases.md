@@ -5,7 +5,7 @@ purpose: The finished product news-radar aims at, and the phase-by-phase task br
 status: active
 updated: 2026-09-05
 source: conversation, CHANGELOG.md
-confidence: inferred
+confidence: confirmed
 keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, scope, milestones, definition of done
 order: 1
 ---
@@ -119,7 +119,7 @@ window is a `config.yaml` change, not a code one.
 
 **P2's weak link was closed here too.** Narrowing Google News to `when:7d` and querying HN Algolia through `search_by_date` finally makes the freshness term fire; what it cost in volume is in `progress.md`.
 
-### P4 — Notify *(done — this repo's current phase is P5)*
+### P4 — Notify *(done)*
 
 | # | Task |
 |---|------|
@@ -133,14 +133,20 @@ window is a `config.yaml` change, not a code one.
 crash between the two re-sends; a duplicate is the acceptable failure where a
 silently dropped story is not. Signatures are in [[notify-channels]].
 
-### P5 — Deploy
+### P5 — Deploy *(done - this repo's current phase is P6)*
 
 | # | Task |
 |---|------|
 | P5-1 | ~~Dockerfile for the crawl service; pin the base image~~ - **done early**, it blocked every P1 verification |
-| P5-2 | Compose: crawl service with an internal schedule loop + Caddy serving `output/` |
-| P5-3 | Cloudflare Tunnel route for `news.dtbao.org` |
-| P5-4 | First live run on the homelab, verified from outside the LAN |
+| P5-2 | ~~Compose: crawl service with an internal schedule loop + Caddy serving `output/`~~ - `docker/docker-compose.yml` |
+| P5-3 | ~~Cloudflare Tunnel route for `news.dtbao.org`~~ - a `cloudflared` service in the same stack, behind the `tunnel` profile |
+| P5-4 | ~~First live run on the homelab, verified from outside the LAN~~ - `https://news.dtbao.org/` answers `200` |
+
+**The connector runs in the stack, not on the host.** That is what lets the
+origin be `caddy:8080` at all, and it keeps the news route from sharing a
+restart with whatever else a host connector is carrying. The tunnel id lives in
+a committed `docker/cloudflared.yml`; only the credentials file is a secret.
+Details in [[deployment-homelab]], the procedure in [[setup-homelab]].
 
 ### P6 — Ops
 

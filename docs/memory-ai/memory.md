@@ -20,9 +20,44 @@ _Generated 2026-09-05 - 18 durable doc(s)._
 ## What works
 
 **P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, P3 Store
-and render, and P4 Notify are complete** (2026-09-05).
+and render, P4 Notify and P5 Deploy are complete** (2026-09-05).
 See `architecture/delivery-phases.md` for the phase map and the finished-product
 definition all of it serves.
+
+### P5 - Deploy
+
+- **`https://news.dtbao.org` serves the report.** Measured 2026-09-05 from this
+  machine, which leaves the LAN and comes back through the Cloudflare edge:
+  `GET /` answered **200** with `<title>news-radar &middot; 2026-09-05</title>`
+  and 42914 bytes, `GET /news.db` answered **404**, `GET /days/` answered
+  **404**. That is P5's definition of done.
+- **The connector runs in the stack, not on the host.** A `cloudflared` service
+  in `docker/docker-compose.yml` carries the `news` tunnel
+  (`94fedb96-98c6-4683-8ae5-6addda3d9c9e`) and registered four edge connections
+  on first start (`hkg01`, `hkg09`, `hkg13` x2).
+- **The bank had this topology wrong, and it is now corrected.** It said the
+  homelab already ran a tunnel *container* for `mcp.dtbao.org` that this project
+  would attach to. Reality: cloudflared runs here as a Windows service named
+  `win-dev` carrying `ssh.dtbao.org` and `remote.dtbao.org`. A host connector
+  cannot resolve `caddy`, so the documented `http://caddy:8080` origin was only
+  reachable by putting a connector inside the stack - which also means the news
+  route never shares a restart with the operator's own ssh and rdp.
+- **The route existed before the connector did.** `news.dtbao.org` was already
+  a DNS record pointing at the `news` tunnel, and the tunnel had never been run:
+  the site answered Cloudflare error `1033`. Starting the container was the
+  whole of P5-3.
+- **A tunnel id is not a secret; the credentials file is.**
+  `docker/cloudflared.yml` carries the id and the ingress and is committed;
+  `docker/tunnel-credentials.json` is gitignored, and `git check-ignore` was run
+  to prove it before the first commit.
+- **The service is behind the `tunnel` compose profile**, so `docker compose up
+  -d` on a fresh clone starts exactly what it started before rather than a
+  container crash-looping on a missing bind mount. `scripts/setup.py` adds
+  `--profile tunnel` on its own when it sees the credentials file, so installing
+  is still two steps on a machine that publishes.
+- **One more stdlib-only test file.** `tests/test_setup.py` needs only
+  `pathlib` and `tempfile`; eleven of the thirteen test files now run on a bare
+  Windows checkout.
 
 ### P4 - Notify
 
@@ -228,18 +263,27 @@ definition all of it serves.
 
 ## What's left
 
-Deployment onwards. **Every module the design bank specifies is now written**:
-the entrypoint, the config loader, the item shape, the keyword parser, the whole
-fetch layer, the whole selection layer, the store, the renderer and both
-senders. What is left is not code in this repository.
+Ops, and the unattended week that proves it. **Every module the design bank
+specifies is now written**: the entrypoint, the config loader, the item shape,
+the keyword parser, the whole fetch layer, the whole selection layer, the store,
+the renderer and both senders - and the whole thing is now reachable at
+`https://news.dtbao.org`.
 
-- **P5 Deploy** - the Cloudflare Tunnel route for `news.dtbao.org` and the first
-  unattended live run. The `Dockerfile`, the compose stack and the schedule loop
-  are done, so this is network configuration outside the repo.
-- **P6 Ops** - retention, heartbeat, failure alerting.
+- **P6 Ops** - retention, heartbeat, failure alerting, backup of the store.
+- **Seven days unattended** is P6's definition of done, and nothing has run
+  unattended for longer than a cycle yet.
 
 ## Known issues
 
+- **The archive is public now.** Every `output/days/*.html` ever written is
+  readable by anyone with the URL - that is finished-product statement 3, not a
+  defect, but it is worth stating plainly: only `news.db*` and directory
+  listings are withheld, both by the Caddyfile, and there is no Cloudflare
+  Access policy in front of the hostname.
+- **A tunnel restart is the one thing that takes the site down.** The crawl keeps
+  running and `output/` stays correct, but `news.dtbao.org` answers Cloudflare
+  `1033` until a connector registers again. `restart: unless-stopped` covers a
+  crash; nothing yet alerts on it - that is P6-1.
 - **Google News (vi) has almost no recent embedded coverage.** P2's
   relevance-first problem is fixed - `when:7d` on Google News and
   `search_by_date` on HN Algolia mean the freshness term finally fires, and ten
@@ -260,10 +304,10 @@ senders. What is left is not code in this repository.
   does not delete the old objects: `91ea2d9` still answers over the API with the
   trailer in it, and the repository is public. It clears when GitHub garbage
   collects, which cannot be triggered from here.
-- **Three bank docs are still marked `inferred`**: `delivery-phases` and
-  `deployment-homelab` (both still describe work not done - P5, P6 and the
-  tunnel), and `config-and-env` (never checked key by key against the code).
-  Flip each once it is verified against the real implementation.
+- **One bank doc is still marked `inferred`**: `config-and-env`, never checked
+  key by key against the code. Flip it once it is verified against the real
+  implementation. `delivery-phases` and `deployment-homelab` were flipped to
+  `confirmed` by P5 and rewritten against the real stack.
   `notify-channels` was flipped to `confirmed` by P4 and rewritten against the
   real modules; `news-item`, `news-sources`, `news-search`, `module-layout`,
   `crawl-cli`, `fetch-layer`, `selection-layer` and `storage-layer` are
@@ -277,10 +321,6 @@ senders. What is left is not code in this repository.
   `news.google.com/rss/articles/CBMi...`, so the same story from Google News and
   from Hacker News will not collapse on `canonical_url` in P2. Accepted, of the
   same class as the AMP limit already recorded.
-- **`docker/docker-compose.yml` still carries a stale P0 note** saying the
-  Dockerfile does not exist and only `caddy` is startable. That has been false
-  since the Dockerfile landed.
-
 - **The image does not ship `tests/`, so the suite cannot be run with
   `docker compose exec`.** It runs on the host (ten of twelve files) or, for the
   two that need `feedparser`, in a throwaway container with the repo mounted:
@@ -303,20 +343,30 @@ senders. What is left is not code in this repository.
 
 ## Current focus
 
-**P4 Notify is done** (2026-09-05). A cycle that finds something new now pushes
-it to Telegram and Discord instead of only writing the page. Measured live in
-the container: the first `--once` after the rebuild sent **2 Telegram messages
-and 5 Discord messages carrying the same 43 stories**, and the `--once` run
-straight after it printed `nothing new to send` on both channels and sent
-nothing. That is the phase's definition of done, both halves of it.
+**P5 Deploy is done** (2026-09-05). `https://news.dtbao.org` serves the report:
+`GET /` answers **200** with today's page, `GET /news.db` and `GET /days/`
+answer **404**. The request leaves the LAN and comes back through the Cloudflare
+edge, which is the phase's definition of done.
 
-The next piece of work is **P5 Deploy**: the Cloudflare Tunnel route for
-`news.dtbao.org` and the first unattended live run. The `Dockerfile`, the
-compose stack and the schedule loop are already done, so P5 is mostly network
-configuration outside this repository.
+The next piece of work is **P6 Ops**: heartbeat, failure alerting, backup of the
+store, and the seven unattended days that prove it.
 
 ## Recent changes
 
+- **P5 landed in four commits on `release/v0.1`** (2026-09-05):
+  `docker/cloudflared.yml` (new, the ingress), `docker/docker-compose.yml` (the
+  `cloudflared` service behind `profiles: ["tunnel"]`), `.gitignore`,
+  `scripts/setup.py` (`compose_argv()` takes a `root` and detects the
+  credentials file), `tests/test_setup.py` (new).
+- **The bank was wrong about the tunnel and P5 corrected it.** It described a
+  tunnel *container* the homelab already ran for `mcp.dtbao.org`, to be attached
+  to this project's network. Reality: cloudflared runs here as the Windows
+  service `win-dev`, carrying `ssh.dtbao.org` and `remote.dtbao.org`. A host
+  connector cannot resolve `caddy`, so the connector had to move into the stack
+  for the documented `http://caddy:8080` origin to exist at all.
+- **The route was already there; the connector was not.** `news.dtbao.org` was
+  a DNS record pointing at a tunnel named `news` that had never been run - the
+  site answered Cloudflare `1033`. All of P5-3 was starting the container.
 - **P4 landed in eight commits on `release/v0.1`** (2026-09-05):
   `fetch/http.py` (`post_json()`, `Retry-After`), `store.py` (`run_matches()`),
   `notify/__init__.py` (`SendResult`, `pick`, `chunk`, `clip`),
@@ -346,8 +396,10 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **P5-3 Cloudflare Tunnel route** for `news.dtbao.org` to `caddy:8080`.
-2. **P5-4 first unattended live run**, verified from outside the LAN.
+1. **P6-1 heartbeat** - a run that fails silently must be visible. A tunnel that
+   stops registering is the same class of problem: the page goes to `1033` while
+   everything else looks healthy.
+2. **P6-2 failure alerting** into the same Telegram and Discord channels.
 3. **Watch the messages for a few days.** Two things are worth eyeballing that
    no test can assert: whether 5 Discord messages per cycle is pleasant or
    noisy, and whether any real headline trips an escaping case the fixtures
@@ -397,14 +449,21 @@ loader and the design bank - see `progress.md`.
 - **Both scripts stay stdlib-only** so they run on a bare checkout, before
   anything is installed.
 - **Self-hosted, not GitHub Pages.** The crawl and the site both run on the
-  homelab; `news.dtbao.org` is reached through the existing Cloudflare Tunnel.
+  homelab; `news.dtbao.org` is reached through a Cloudflare Tunnel whose
+  connector is a container **in this stack**, not on the host. A host connector
+  cannot resolve `caddy`, and restarting one that carries other hostnames costs
+  those too.
+- **A tunnel id is not a secret, a credentials file is.**
+  `docker/cloudflared.yml` is committed; `docker/tunnel-credentials.json` is
+  gitignored. The `tunnel` compose profile keeps a checkout without that file
+  from ever starting the connector.
 - **Secrets live only in `docker/.env`.** `config.yaml` is committed as a
   template and a leaked copy must be harmless.
 
 
 ## Memory
 
-### [architecture] Delivery Phases  🟡 [inferred - verify]
+### [architecture] Delivery Phases
 *`architecture/delivery-phases.md` - The finished product news-radar aims at, and the phase-by-phase task breakdown that gets there. - status: active - source: conversation, CHANGELOG.md - keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, scope, milestones, definition of done*
 
 # Delivery Phases
@@ -516,7 +575,7 @@ window is a `config.yaml` change, not a code one.
 
 **P2's weak link was closed here too.** Narrowing Google News to `when:7d` and querying HN Algolia through `search_by_date` finally makes the freshness term fire; what it cost in volume is in `progress.md`.
 
-### P4 — Notify *(done — this repo's current phase is P5)*
+### P4 — Notify *(done)*
 
 | # | Task |
 |---|------|
@@ -530,14 +589,20 @@ window is a `config.yaml` change, not a code one.
 crash between the two re-sends; a duplicate is the acceptable failure where a
 silently dropped story is not. Signatures are in [[notify-channels]].
 
-### P5 — Deploy
+### P5 — Deploy *(done - this repo's current phase is P6)*
 
 | # | Task |
 |---|------|
 | P5-1 | ~~Dockerfile for the crawl service; pin the base image~~ - **done early**, it blocked every P1 verification |
-| P5-2 | Compose: crawl service with an internal schedule loop + Caddy serving `output/` |
-| P5-3 | Cloudflare Tunnel route for `news.dtbao.org` |
-| P5-4 | First live run on the homelab, verified from outside the LAN |
+| P5-2 | ~~Compose: crawl service with an internal schedule loop + Caddy serving `output/`~~ - `docker/docker-compose.yml` |
+| P5-3 | ~~Cloudflare Tunnel route for `news.dtbao.org`~~ - a `cloudflared` service in the same stack, behind the `tunnel` profile |
+| P5-4 | ~~First live run on the homelab, verified from outside the LAN~~ - `https://news.dtbao.org/` answers `200` |
+
+**The connector runs in the stack, not on the host.** That is what lets the
+origin be `caddy:8080` at all, and it keeps the news route from sharing a
+restart with whatever else a host connector is carrying. The tunnel id lives in
+a committed `docker/cloudflared.yml`; only the credentials file is a secret.
+Details in [[deployment-homelab]], the procedure in [[setup-homelab]].
 
 ### P6 — Ops
 
@@ -687,14 +752,14 @@ Secrets — bot tokens, webhook URLs — live **only** in the environment layer.
 `config.yaml` never holds one; it is committed as `.example` and a leaked copy
 must be harmless.
 
-### [architecture] Homelab Deployment  🟡 [inferred - verify]
-*`architecture/deployment-homelab.md` - How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world. - status: draft - source: conversation - keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflare tunnel, schedule, volumes, restart policy*
+### [architecture] Homelab Deployment
+*`architecture/deployment-homelab.md` - How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world. - status: active - source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, scripts/setup.py - keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, schedule, volumes, restart policy*
 
 # Homelab Deployment
 
-> Two containers on the homelab: one crawls on a loop and writes `output/`, one
-> serves `output/` over HTTP. A Cloudflare Tunnel maps `news.dtbao.org` onto the
-> second one. Nothing is published from GitHub.
+> Three containers on the homelab: one crawls on a loop and writes `output/`,
+> one serves `output/` over HTTP, one carries that to `news.dtbao.org` through a
+> Cloudflare Tunnel. Nothing is published from GitHub.
 
 ## Topology
 
@@ -703,18 +768,22 @@ must be harmless.
                |
         Cloudflare edge          TLS terminates here
                |
-      Cloudflare Tunnel          outbound-only, no port forwarding
-               |
-   +-----------+-------------------------+   docker network (homelab)
-   |                                     |
-   |   caddy  :8080  ---- reads ---->  output/  <---- writes ---- news-radar
-   |   serves static files              (volume)                 (crawl loop)
-   |                                                             reads config/
-   +-------------------------------------------------------------------------+
+   +-----------+-------------------------------------------------------------+
+   |           |                                   docker network (homelab)  |
+   |     cloudflared                 outbound-only, no port forwarding        |
+   |           |  http://caddy:8080                                           |
+   |           v                                                              |
+   |   caddy  :8080  ---- reads ---->  output/  <---- writes ---- news-radar  |
+   |   serves static files             (volume)                  (crawl loop) |
+   |                                                            reads config/ |
+   +--------------------------------------------------------------------------+
 ```
 
-Only Caddy is reachable. The crawl container exposes no port; it talks outward to
-the news sources, Telegram and Discord, and nothing talks in to it.
+Only Caddy is reachable, and only from inside the network. The crawl container
+exposes no port; it talks outward to the news sources, Telegram and Discord, and
+nothing talks in to it. `cloudflared` exposes no port either - it dials the
+Cloudflare edge outbound and the edge answers the public request over that
+connection.
 
 ## Services
 
@@ -722,6 +791,7 @@ the news sources, Telegram and Discord, and nothing talks in to it.
 |---------|-------|------|-------|
 | `news-radar` | built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
 | `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` inside the network; published on the host as `NEWS_RADAR_HTTP_PORT`, default `8088` |
+| `cloudflared` | `cloudflare/cloudflared:2026.8.3` | Carries `news.dtbao.org` to `http://caddy:8080`. Behind the `tunnel` compose profile | none |
 
 **The published host port is `NEWS_RADAR_HTTP_PORT`, default `8088`**, and it
 exists only for local debugging: the tunnel talks to `caddy:8080` over the docker
@@ -751,13 +821,39 @@ server has to be told the difference:
 The store is not part of the report: serving it hands a stranger the whole
 archive in one request. `404` rather than `403`, because there is no reason to
 confirm the file is there. Directory listing is off for the same reason and
-costs nothing - `index.html` already links every snapshot. Both matter more once
-P5 puts this on the public internet, and both are cheap enough to have now.
+costs nothing - `index.html` already links every snapshot. Both rules are load
+bearing now that P5 has put this on the public internet: verified 2026-09-05
+against the live hostname, `https://news.dtbao.org/news.db` and
+`https://news.dtbao.org/days/` both answer `404` while `/` answers `200`.
 
-Add a `cloudflared` service only if the homelab does not already run a tunnel.
-It already serves `mcp.dtbao.org`, so the cheaper path is to add one public
-hostname route to the existing tunnel, pointing `news.dtbao.org` at
-`http://caddy:8080` - the in-network port, not the published one.
+### The tunnel
+
+`news.dtbao.org` is carried by a dedicated Cloudflare Tunnel named `news`
+(`94fedb96-98c6-4683-8ae5-6addda3d9c9e`), whose connector runs **as a container
+in this compose project**:
+
+| Piece | Where | Committed |
+|-------|-------|-----------|
+| Ingress: `news.dtbao.org` -> `http://caddy:8080`, else `http_status:404` | `docker/cloudflared.yml` | yes - a tunnel id is not a secret |
+| Connector credentials | `docker/tunnel-credentials.json`, mounted at `/etc/cloudflared/creds.json` | **no** - gitignored |
+| The service itself | `docker/docker-compose.yml`, `profiles: ["tunnel"]` | yes |
+
+**In the stack rather than on the host, for two reasons.** The origin can only
+be the service name `caddy:8080` from inside the docker network - a connector
+running on the host cannot resolve it, and would have to be pointed at the
+published debug port instead. And a host connector is usually already carrying
+other hostnames: this homelab runs one as a Windows service (`win-dev`) for
+`ssh.dtbao.org` and `remote.dtbao.org`, so restarting it to change the news
+route would drop the operator's own remote access.
+
+**Behind a profile**, so `docker compose up -d` starts the crawl loop and the
+web server and nothing else. The credentials file is not in the repo, and
+without the profile a fresh clone would get a container crash-looping on a
+missing bind mount. `scripts/setup.py` adds `--profile tunnel` on its own once
+the file is there - see [[cli-scripts]].
+
+The published host port therefore remains what it always was: local debugging.
+Nothing outside the LAN reaches it.
 
 ## Volumes
 
@@ -765,6 +861,8 @@ hostname route to the existing tunnel, pointing `news.dtbao.org` at
 |-----------|----------------|------|-------|
 | `./config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` |
 | `./output` | `/app/output` | read-write (crawl) / read-only (caddy, as `/srv`) | `index.html`, `news.db`, per-day snapshots |
+| `./docker/cloudflared.yml` | `/etc/cloudflared/config.yml` | read-only | the tunnel's ingress |
+| `./docker/tunnel-credentials.json` | `/etc/cloudflared/creds.json` | read-only | the connector's credentials |
 
 `output/` is a bind mount, not a named volume, so a human can open
 `output/index.html` directly on the host to debug a render without touching the
@@ -801,7 +899,8 @@ nothing outside the process will kill it.
 | What breaks | Symptom | Where it is handled |
 |-------------|---------|---------------------|
 | One source is down or rate-limits | That source contributes nothing this run | `fetch/` isolates per-source failures (P1-5) |
-| Tunnel drops | `news.dtbao.org` unreachable, crawl keeps working | Cloudflare reconnects; `output/` is still correct on the host |
+| Tunnel drops | `news.dtbao.org` unreachable, crawl keeps working | Cloudflare reconnects; `restart: unless-stopped` covers a connector crash; `output/` is still correct on the host and on `NEWS_RADAR_HTTP_PORT` |
+| Credentials file missing or wrong | `cloudflared` crash-loops, the site answers Cloudflare error `1033` | `docker compose ps` shows it restarting; the profile keeps a checkout without the file from ever starting it |
 | Disk fills with snapshots | Writes fail | Retention window (P3-5, P6) |
 | Crawl crashes on a bad item | Container exits | `restart: unless-stopped` plus a heartbeat so a crash loop is visible (P6-1) |
 | Clock skew | Freshness ranking goes wrong | `TZ` pinned in the container, not inherited from the host |
@@ -1164,7 +1263,10 @@ Steps, in order:
 5. For each notification channel enabled in the config, ensure its variables are
    present and non-empty in `docker/.env`; prompt unless `--non-interactive`.
 6. `docker compose -f docker/docker-compose.yml up -d`, with docker's own output
-   inherited rather than captured. While no `Dockerfile` is present in the
+   inherited rather than captured. `--profile tunnel` is inserted before `up`
+   when `docker/tunnel-credentials.json` exists, so the `cloudflared` service
+   starts on a machine that publishes `news.dtbao.org` and stays out of the way
+   on one that does not. While no `Dockerfile` is present in the
    checkout the crawl service cannot build, so only `caddy` is named; the
    narrowing lifts by itself once the file exists.
 7. Print the URL the page is served on, taking `NEWS_RADAR_HTTP_PORT` from
@@ -1545,9 +1647,9 @@ still attempted.
 
 ## What it does not do yet
 
-Nothing here. P5 is deployment - the Cloudflare Tunnel route and the first
-unattended live run - and P6 is ops. Neither changes the flags or exit codes
-above.
+Nothing here. P5 was deployment - the Cloudflare Tunnel connector and the first
+unattended live run - and it changed neither the flags nor the exit codes above;
+P6 is ops, and is not expected to either.
 
 ### [interface] Fetch Layer Contracts
 *`interface/fetch-layer.md` - Every public signature of the fetch layer and the two leaf modules it stands on - what each returns, what it raises, and what it deliberately does not. - status: active - source: src/news_radar/fetch/http.py, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py, src/news_radar/item.py, src/news_radar/keywords.py - keywords: Fetcher, HttpError, post_json, Retry-After, RETRY_AFTER_MAX, parse, read_source, read_fixed_feeds, build_urls, read_search_feeds, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle*
@@ -2131,7 +2233,7 @@ Recovery is ordinary git. Find out which step failed from the output, then:
   reset the release commit; then re-run.
 
 ### [rule] Setting Up on the Homelab
-*`rule/setup-homelab.md` - The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux. - status: active - source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile - keywords: setup, setup.py, docker compose, homelab, cloudflare tunnel, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088*
+*`rule/setup-homelab.md` - The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux. - status: active - source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile, docker/cloudflared.yml - keywords: setup, setup.py, docker compose, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088*
 
 # Setting Up on the Homelab
 
@@ -2177,10 +2279,11 @@ to replace one deliberately.
 **Step 3 happens inside step 2.** Once the checks pass and the secrets are
 filled, `setup.py` runs `docker compose -f docker/docker-compose.yml up -d`
 itself and prints the URL the page is served on. There is no separate command to
-type. While the checkout has no `Dockerfile` the crawl service cannot build, so
-the script names `caddy` alone and says so; that narrowing disappears when P5
-adds the file. A compose failure is reported and exits non-zero - the script
-never claims a stack it could not start.
+type. Two things it decides for itself by looking at the checkout: it names
+`caddy` alone when there is no `Dockerfile` to build the crawl service from, and
+it adds `--profile tunnel` when `docker/tunnel-credentials.json` is there. A
+compose failure is reported and exits non-zero - the script never claims a stack
+it could not start.
 
 | Flag | Use it when |
 |------|-------------|
@@ -2202,28 +2305,50 @@ Both live only in `docker/.env`, which is gitignored. They never go into
 ## Exposing news.dtbao.org
 
 Caddy serves `output/` inside the docker network on port `8080`. The published
-host port (`8088` by default) is for local debugging only.
+host port (`8088` by default) is for local debugging only - the tunnel never
+touches it.
 
-The homelab already runs a Cloudflare Tunnel for `mcp.dtbao.org`, so the cheap
-path is to add one public hostname to it rather than run a second tunnel:
+The connector runs as the `cloudflared` service in this same compose project,
+behind the `tunnel` profile. Two steps, once per machine:
 
-| Field | Value |
-|-------|-------|
-| Public hostname | `news.dtbao.org` |
-| Service | `http://caddy:8080` |
+1. **Have a tunnel.** `cloudflared tunnel create news` if there is none, then
+   `cloudflared tunnel route dns news news.dtbao.org` to point the hostname at
+   it. Both write to the Cloudflare account, not to this repo.
+2. **Give the container its credentials.** Copy the tunnel's credentials JSON
+   (`~/.cloudflared/<tunnel-id>.json`, written by `tunnel create`) to
+   `docker/tunnel-credentials.json`. It is gitignored; the tunnel id in
+   `docker/cloudflared.yml` is not a secret and stays committed. A different
+   tunnel means editing that id.
 
-The tunnel container must be on the same docker network as `caddy` for that
-service name to resolve. If it lives in another compose project, attach it to
-this project's network as an external network rather than publishing more ports.
+After that `python scripts/setup.py` starts the tunnel too - it adds
+`--profile tunnel` on its own once it sees the credentials file. By hand:
+
+```
+docker compose -f docker/docker-compose.yml --profile tunnel up -d
+```
+
+**Do not add `news.dtbao.org` to a connector running on the host instead.** A
+host connector cannot resolve `caddy`, so it would have to be pointed at the
+published debug port; and this homelab's host connector (`win-dev`) carries
+`ssh.dtbao.org` and `remote.dtbao.org`, so restarting it for a news route drops
+the operator's own remote access. See [[deployment-homelab]].
 
 ## Verifying it works
 
-1. `docker compose -f docker/docker-compose.yml ps` - both services `running`.
+1. `docker compose -f docker/docker-compose.yml --profile tunnel ps` - all
+   three services `running`. Drop `--profile tunnel` and `cloudflared`
+   disappears from the listing; that is the profile working, not a fault.
 2. `curl http://localhost:8088/` - Caddy answers with the current report.
    A 200 from a *different* service means the port is taken; change
    `NEWS_RADAR_HTTP_PORT` rather than guessing.
-3. Open `https://news.dtbao.org` from outside the LAN.
-4. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
+3. `curl https://news.dtbao.org/` - `200`, and the same report. This already
+   leaves the LAN: the request goes out to the Cloudflare edge and comes back
+   in through the tunnel. `curl https://news.dtbao.org/news.db` must answer
+   `404`.
+4. Cloudflare error `1033` there means the hostname is routed to a tunnel with
+   no connector - read `docker compose logs cloudflared`, which prints
+   `Registered tunnel connection` once per edge connection when it is healthy.
+5. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
    received exactly one message.
 
 ## Updating
@@ -2231,7 +2356,7 @@ this project's network as an external network rather than publishing more ports.
 ```
 git pull
 python scripts/setup.py --check
-docker compose -f docker/docker-compose.yml up -d --build
+docker compose -f docker/docker-compose.yml --profile tunnel up -d --build
 ```
 
 `--check` catches a config key added upstream that the local `config.yaml` does

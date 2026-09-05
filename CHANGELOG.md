@@ -18,6 +18,35 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **ai**: the day's matches now get a summary, one line per keyword group - the
+  group's name and at most two sentences about what actually stood out in it,
+  in Vietnamese. It sits above the stories on the page and is rewritten every
+  cycle; the same line-per-topic text goes to Telegram and Discord **once a
+  local day**, at or after `ai.notify_at_hour`, because a page is somewhere you
+  go and a message is something that interrupts you - forty-eight interruptions
+  a day saying roughly the same thing is how a channel gets muted, taking the
+  outage alerts with it. A group whose day held nothing notable is left out of
+  the prompt entirely rather than given a sentence saying so, which is what
+  keeps the message a glance. "Once a day" is not remembered in memory: the
+  summary rides in the existing `reported` table under `summary:<local date>`,
+  per channel, so a container that restarted at noon still knows this morning's
+  went out. This task (P6-4) had been recorded as deliberately not built,
+  against an API key, a per-run bill and a third runtime dependency - and one
+  of those three had quietly expired: `Fetcher.post_json()` already exists, so
+  an OpenAI-compatible `/v1/chat/completions` is a POST with a bearer header
+  and **no new import**. The other two are opt-in, `ai.enabled` shipping
+  `false`, so a config that says nothing about `ai` upgrades untouched and
+  never reaches the network. Naming the wire format rather than a vendor is
+  what makes the bill optional too: OpenRouter, DeepSeek, Groq and a local
+  Ollama all answer the same endpoint. And it may never cost a cycle -
+  `summarize()` has exactly one failure mode, no summary, and a refused
+  endpoint adds nothing to the run's problem list, so it can neither withhold
+  the heartbeat ping nor trip an ops alert
+- **fetch**: `post_json()` takes caller-supplied headers, which is what lets an
+  authenticated endpoint be talked to without a second HTTP client in the tree.
+  They are merged *underneath* the transport's own rather than over them, so a
+  caller can add a header and can never take one away - losing the User-Agent
+  to a typo is the 403 on both Reddit sources arriving from a new direction
 - **ops**: a run that fails silently is now visible. A radar cannot report its
   own death - a killed container, a host that lost power and a daemon that never
   came back all look identical from inside: silence. So each clean cycle GETs a

@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-05
 source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py
 confidence: confirmed
-keywords: open_db, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot
+keywords: backup, restore, open_db, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot
 order: 7
 ---
 
@@ -32,7 +32,8 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `run_matches(conn, run_id)` | `{label: [row]}` | The same row shape for one run - what a notification is built from |
 | `unreported(conn, dedup_keys, channel)` | `[dedup_key]` | The seen-set diff, in the caller's order. `[]` for an empty input |
 | `mark_reported(conn, dedup_keys, channel, when)` | `None` | Idempotent - `INSERT OR IGNORE` |
-| `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)` |
+| `backup(conn, backup_dir, now, keep)` | `(path \| None, removed)` | One `news-<UTC date>.db` per day via `conn.backup()`. A second call the same day returns `(None, 0)`. `keep <= 0` writes nothing and creates no directory |
+| `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)`. The shipped `config.yaml` sets `90`; the fallback for an **absent** key stays `0` |
 | `to_db(moment)` / `from_db(text)` | `str \| None` / `datetime \| None` | The one serialisation, both ways |
 
 `StoreError` is raised only when the file's `user_version` is **higher** than
@@ -136,7 +137,7 @@ fallback is exact there - a zone that *does* observe DST would need `tzdata`.
 ## What `__main__._publish()` wires
 
 `open_db` → `start_run` → `save` → `local_tz` + `day_bounds` → `day_matches` →
-`render.write` → `prune` → `finish_run`, the whole sequence inside one
+`render.write` → `backup` → `prune` → `finish_run`, the whole sequence inside one
 `try/except`, returning the **`run_id`** (or `None`) so the senders can read the
 run back - see [[notify-channels]]. A locked database, a full disk or a read-only volume costs the
 page, never the fetch: the cycle logs the traceback and still returns the
@@ -150,3 +151,36 @@ news" rather than "the radar is broken", which is the wrong lie to tell.
 
 See [[selection-layer]] for what produces `ranked`, and [[news-item]] for the
 dedup key everything here is filed under.
+
+## Backup and restore
+
+`backup()` runs **immediately before `prune()`**, inside the same guard, and the
+ordering is the point: if the copy cannot be written, the deletion below it never
+runs either. No backup, no deletion.
+
+Taken with SQLite's own `conn.backup()` rather than by copying the file - the
+crawl service holds the connection open and a `-wal` may be mid-flush, so a
+filesystem copy can produce a database that opens cleanly and is missing the last
+write. The copy is written under `news-<date>.db.part` and renamed into place, so
+an interrupted backup is never left looking like a good one.
+
+**`ops.backup_dir` must never be under `storage.data_dir`.** Caddy serves that
+directory to the public web, and a dated copy of the whole archive sitting in it
+would be one Caddyfile line from being downloadable by anyone with the URL. The
+shipped value is `backups`, bind-mounted to the crawl service only; `caddy` has
+no mount for that path at all. `store.py` cannot enforce this - it does not know
+what is being served - so it is a config rule, stated here and in the template.
+
+**Restore is a manual procedure, deliberately.** A `--restore` flag would be more
+code than the problem needs and would live on the one process that must not be
+running while it happens:
+
+```bash
+docker compose -f docker/docker-compose.yml stop news-radar
+cp backups/news-<date>.db output/news.db     # -wal / -shm are not restored
+docker compose -f docker/docker-compose.yml start news-radar
+```
+
+The next cycle rewrites `index.html` from the restored store. Day snapshots under
+`output/days/` are **not** in the backup: they are rendered output, and every one
+of them is reproducible from the rows that are.

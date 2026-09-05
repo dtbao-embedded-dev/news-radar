@@ -275,6 +275,35 @@ eq("a revoked webhook marks no story as reported", dbad.keys, ())
 eq("a 400 is not retried", HITS.get("/webhook-bad"), 1)
 
 
+# --- alert(): the operational message, not a story ------------------------
+
+# An alert is read by a human at a bad moment. Nothing in it is allowed to be
+# eaten by the channel's own formatting - and the two channels lose different
+# characters, so neither escaping rule is reused blindly.
+ALERT = "news-radar: 2 cycles failed.\n* the site is down (500) _twice_"
+
+ok = telegram.alert(fetcher, ALERT, "tok", "-100")
+eq("telegram accepts the alert", ok, True)
+eq("...as exactly one message", HITS.get("/bottok/sendMessage"), 1)
+body = BODIES["/bottok/sendMessage"][-1]
+eq("the alert text is sent verbatim", body["text"], ALERT)
+check("no parse_mode, so nothing in the text can break the message",
+      "parse_mode" not in body, repr(body))
+
+ok = discord.alert(fetcher, ALERT, WEBHOOK)
+eq("discord accepts the alert", ok, True)
+content = BODIES["/webhook"][-1]["content"]
+check("markdown that would eat the text is escaped", "\\*" in content, content)
+check("...and the underscores too", "\\_" in content, content)
+check("the words themselves survive", "the site is down (500)" in content,
+      content)
+
+bad = telegram.alert(fetcher, ALERT, "tok-bad", "-100")
+eq("a refused alert is reported, not raised", bad, False)
+bad = discord.alert(fetcher, ALERT, WEBHOOK + "-bad")
+eq("a refused discord alert is reported too", bad, False)
+
+
 server.shutdown()
 
 # --------------------------------------------------------------------------

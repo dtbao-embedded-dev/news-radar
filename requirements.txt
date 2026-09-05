@@ -1,0 +1,5 @@
+# The whole runtime dependency list. Two entries, and a third needs justifying
+# in the changelog - HTTP, storage and templating come from the standard
+# library on purpose. Pinned: an unpinned build is not reproducible.
+PyYAML==6.0.2
+feedparser==6.0.11

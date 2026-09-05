@@ -33,33 +33,65 @@ OTA update
 @10
 => Firmware
 
+# `RTOS` is four characters and used to return nothing at all: HN Algolia's
+# typo tolerance matched 41,612 stories for it (ESP32 matches 1,308) and
+# search_by_date handed back the most recent of that noise. The fix is
+# `typoTolerance=false` on the template in config.yaml, not a longer term here -
+# with it, `RTOS` returns 18 of 20 where `FreeRTOS` returns 14, and Google News
+# prefers the short form too.
 RTOS
 FreeRTOS
 Zephyr
 @8
 => RTOS
 
-embedded linux
-buildroot
-yocto
-device tree
-@8
-=> Embedded Linux
-
 RISC-V
 @8
 => RISC-V
 
-Rust embedded
-embassy-rs
-@6
-=> Rust on MCU
+# "AI" as a plain term would be a disaster: matching is substring, not
+# word-boundary, so it would hit said, maintain, chain, fail, email, training
+# and Ukraine. Hence the long phrases below plus one regex - a /regex/ is run
+# against the ORIGINAL title, so a word boundary and the capitals do the work
+# no plain term can.
+#
+# The first plain term is also the search query. Quoted as a phrase,
+# "artificial intelligence" returned 6 relevant hits out of 6 on HN Algolia,
+# where a bare LLM returned 3 of 6.
+artificial intelligence
+tri tue nhan tao
+machine learning
+deep learning
+neural network
+large language model
+generative AI
+OpenAI
+Anthropic
+DeepSeek
+Hugging Face
+chatbot
+/(\bAI\b|\bA\.I\.|\bLLMs?\b|\bGPT\b|\bAGI\b|\bRAG\b)/
+!tuyen dung
+!hiring
+@10
+=> AI
 
-CVE
-/CVE-\d{4}-\d+/
-+embedded
-@6
-=> Security
+# Projects, not commentary. "open source AI" as a phrase query returned 6 of 6
+# actual open-source AI projects on HN Algolia, several of them Show HN posts -
+# which the regex catches directly, since Show HN is how a repo announces
+# itself. Hyphenated and unhyphenated are two different substrings after
+# folding, so both are listed.
+open source AI
+open-source AI
+open source LLM
+open-source LLM
+self-hosted LLM
+awesome-llm
+/^Show HN:.*(\bAI\b|\bLLMs?\b|\bGPT\b|\bRAG\b|\bagents?\b)/
+!tuyen dung
+!hiring
+@8
+=> AI Repos
 
 # Applied to every item from every source, before any group is considered.
 [GLOBAL_FILTER]

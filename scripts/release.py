@@ -24,6 +24,26 @@ import subprocess
 import sys
 from pathlib import Path
 
+def _utf8_stdout():
+    """Print UTF-8 whatever the console claims its encoding is.
+
+    `--dry-run` prints the changelog section it is about to publish, and this
+    project's changelog is this project's own prose: a `Điện tử` in a P2 entry
+    was enough to end the run with `UnicodeEncodeError` on a cp1252 Windows
+    console, after the preflight had already passed. A release tool that cannot
+    show the release is a release cut blind - and `release-flow.md` tells you to
+    run `--dry-run` first, so the documented procedure was the broken one.
+
+    Not a crash if it cannot be done: a stream that is already UTF-8, or one
+    that is not a reconfigurable TextIOWrapper, is left exactly as it is.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 ROOT = Path(__file__).resolve().parent.parent
 
 CHANGELOG = ROOT / "CHANGELOG.md"
@@ -261,6 +281,8 @@ def read_changelog():
 
 
 def main(argv=None):
+    # Before anything is printed, including the preflight lines.
+    _utf8_stdout()
     parser = argparse.ArgumentParser(
         prog="release.py",
         description="Cut a news-radar release: changelog, commit, merge chain, tag, push.",

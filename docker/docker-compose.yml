@@ -5,9 +5,14 @@
 # Secrets come from docker/.env, which Compose loads automatically because it
 # sits next to this file. scripts/setup.py creates it from .env.example.
 #
-# NOTE (P0): the crawl service builds from a Dockerfile that does not exist
-# yet - the application layer lands in P1..P5. Until then only `caddy` is
-# startable:  docker compose -f docker/docker-compose.yml up -d caddy
+# The `cloudflared` service is behind the `tunnel` profile, so the two lines
+# above start the crawl loop and the web server and nothing else. Publishing
+# news.dtbao.org is opt-in:
+#
+#   docker compose -f docker/docker-compose.yml --profile tunnel up -d
+#
+# scripts/setup.py adds that flag by itself once docker/tunnel-credentials.json
+# is in place.
 
 name: news-radar
 
@@ -24,11 +29,26 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       NEWS_RADAR_CONFIG: /app/config/config.yaml
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    # The crawl talks to a dozen hosts it does not control, so it does not
+    # borrow the host's resolver. On this homelab `www.reddit.com` failed to
+    # resolve through it - on the host as well as in the container - while
+    # `reddit.com` resolved and 301'd to the name that would not. One of the
+    # eight fixed feeds was dead every cycle because of it. Public resolvers
+    # answer it correctly; override these if your network requires its own.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     volumes:
       - ../config:/app/config:ro
       - ../output:/app/output
+      # Store backups, and deliberately NOT under output/. Caddy serves that
+      # directory to the public web; a dated copy of the whole archive sitting
+      # in it would be one Caddyfile line away from being downloadable. This
+      # mount is on the crawl service only - caddy never sees the path at all.
+      - ../backups:/app/backups
 
   # Serves ../output as static files. Reached from outside through the
   # existing homelab Cloudflare Tunnel, routed to http://caddy:8080.
@@ -44,9 +64,33 @@ services:
       - caddy_data:/data
     # Host port is for local debugging only - the Cloudflare Tunnel reaches
     # caddy:8080 over the docker network and does not need a published port.
-    # 8080 is already taken on this homelab (ntfy), hence the override.
+    # 8088 rather than 8080 by choice: a port of our own does not have to be
+    # renegotiated the next time something else on the host wants 8080.
     ports:
       - "${NEWS_RADAR_HTTP_PORT:-8088}:8080"
+
+  # Publishes caddy as https://news.dtbao.org through the `news` Cloudflare
+  # Tunnel. Outbound-only: nothing is port-forwarded and no inbound rule
+  # exists, which is the whole reason for a tunnel rather than a public port.
+  #
+  # Behind a profile because the credentials file is not in the repo: a fresh
+  # clone would otherwise get a container crash-looping on a missing mount.
+  # Start it with --profile tunnel, or let scripts/setup.py notice the file.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.8.3
+    container_name: news-radar-tunnel
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    # No `tunnel run <name>`: the name would be looked up over the API, and
+    # this connector should need nothing but the two files it is handed.
+    command: tunnel --config /etc/cloudflared/config.yml run
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      - ./tunnel-credentials.json:/etc/cloudflared/creds.json:ro
+    depends_on:
+      - caddy
 
 volumes:
   caddy_data:

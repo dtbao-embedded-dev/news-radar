@@ -33,7 +33,7 @@ operator to type afterwards.
 | `--dry-run` | **Writes nothing, prompts for nothing, starts nothing.** Prints the checks, the files it would create and the compose command it would run, then exits |
 | `--force` | Overwrite files that already exist. Without it, an existing file is reported and left alone |
 | `--non-interactive` | Never prompt; leave a missing secret blank and report it. For unattended provisioning |
-| `--check` | Verify only: toolchain present, required files exist. Creates nothing and starts nothing |
+| `--check` | Verify only: toolchain present, required files exist, **required secrets non-empty**. Creates nothing, starts nothing, exits non-zero on a gap |
 
 Steps, in order:
 
@@ -44,13 +44,21 @@ Steps, in order:
 5. For each notification channel enabled in the config, ensure its variables are
    present and non-empty in `docker/.env`; prompt unless `--non-interactive`.
 6. `docker compose -f docker/docker-compose.yml up -d`, with docker's own output
-   inherited rather than captured. While no `Dockerfile` is present in the
+   inherited rather than captured. `--profile tunnel` is inserted before `up`
+   when `docker/tunnel-credentials.json` exists, so the `cloudflared` service
+   starts on a machine that publishes `news.dtbao.org` and stays out of the way
+   on one that does not. While no `Dockerfile` is present in the
    checkout the crawl service cannot build, so only `caddy` is named; the
    narrowing lifts by itself once the file exists.
 7. Print the URL the page is served on, taking `NEWS_RADAR_HTTP_PORT` from
    `docker/.env` and falling back to `8088`.
 
 Steps 6 and 7 are skipped by `--dry-run` and by `--check`.
+
+`--dry-run` and `--check` differ at step 5. A dry run describes a checkout that
+does not exist yet, so it only lists the secrets it would ask for. `--check`
+inspects one that does, so a blank secret is a finding and exits `1` - otherwise
+it would call an install ready that cannot start.
 
 | Exit code | Meaning |
 |-----------|---------|

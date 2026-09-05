@@ -142,6 +142,43 @@ eq("...and still withholds the ping", HITS.get("/ping"), 1)
 
 server.shutdown()
 
+
+# --- Health: one message per transition, and nothing in between -----------
+
+# The failure this pins is not "did it alert" but "did it alert *again*". A
+# broken thing repeats every thirty minutes; an alert that repeats with it is
+# an alert you learn to swipe away.
+health = ops.Health()
+
+eq("a fresh radar that is fine says nothing", health.update([]), None)
+eq("one bad cycle says nothing either - a blip is not an outage",
+   health.update(["the site is down"]), None)
+
+first = health.update(["the site is down"])
+check("the second bad cycle in a row is the alert", first is not None)
+check("the alert carries the reason, not just the fact",
+      "the site is down" in (first or ""), repr(first))
+
+eq("a third bad cycle stays quiet", health.update(["the site is down"]), None)
+eq("and a fourth", health.update(["something else broke too"]), None)
+
+back = health.update([])
+check("the first clean cycle after an alert says so", back is not None)
+check("the recovery message reads as recovery",
+      "recover" in (back or "").lower(), repr(back))
+
+eq("and does not repeat either", health.update([]), None)
+
+# Flapping under the threshold must stay silent: alternating bad/clean is a
+# feed having a bad afternoon, not a radar that is down.
+flap = ops.Health()
+for _ in range(5):
+    eq("a flapping cycle never alerts", flap.update(["transient"]), None)
+    eq("...and its recovery is not announced either", flap.update([]), None)
+
+# The threshold is a constant, not a guess left in the code.
+eq("two consecutive failures is the documented threshold", ops.ALERT_AFTER, 2)
+
 # --------------------------------------------------------------------------
 
 if FAILURES:

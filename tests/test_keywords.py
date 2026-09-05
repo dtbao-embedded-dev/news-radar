@@ -136,18 +136,35 @@ check_raises("a file with no group at all is rejected",
 shipped = pathlib.Path(__file__).resolve().parent.parent / "config" / "frequency_words.txt"
 if shipped.is_file():
     sgroups, sfilter = mod.parse(shipped)
-    eq("config/frequency_words.txt parses into 7 groups", len(sgroups), 7)
+    eq("config/frequency_words.txt parses into 6 groups", len(sgroups), 6)
     eq("its primary terms are the ones the search templates will query",
        [g.primary for g in sgroups],
-       ["ESP32", "firmware", "RTOS", "embedded linux", "RISC-V",
-        "Rust embedded", "CVE"])
+       ["ESP32", "firmware", "RTOS", "RISC-V", "artificial intelligence",
+        "open source AI"])
     eq("its caps survive the parse",
-       [g.cap for g in sgroups], [10, 10, 8, 8, 8, 6, 6])
+       [g.cap for g in sgroups], [10, 10, 8, 8, 10, 8])
     eq("its global filter has four exclusions", len(sfilter), 4)
     check("every group has a non-empty label",
           all(g.label for g in sgroups))
-    check("the Security group keeps its required term",
-          sgroups[6].required == ["embedded"])
+
+    # The two AI groups are the only ones that cannot be written as plain
+    # terms. Matching is substring, so a bare `AI` would hit said, maintain,
+    # chain, fail, email and Ukraine; the word boundary lives in a regex, run
+    # against the original title. If that regex is ever lost the groups do not
+    # break loudly - they quietly match a great deal less - so it is pinned.
+    ai, repos = sgroups[4], sgroups[5]
+    eq("the AI group carries its word-boundary regex", len(ai.regexes), 1)
+    check("...which matches a bare AI token",
+          ai.regexes[0].search("Google races ahead in AI"))
+    check("...and A.I. written with periods",
+          ai.regexes[0].search("District Bans Most A.I. For Students"))
+    check("...but not the ai inside an ordinary word",
+          not ai.regexes[0].search("He said the chain of failures was detailed"))
+    eq("the AI Repos group carries its Show HN regex", len(repos.regexes), 1)
+    check("...which matches an AI project launch",
+          repos.regexes[0].search("Show HN: Argus, open-source AI agents"))
+    check("...but not a Show HN with nothing to do with AI",
+          not repos.regexes[0].search("Show HN: Md2pdf - Markdown to PDF"))
 else:
     FAILURES.append("config/frequency_words.txt is missing from the checkout")
 

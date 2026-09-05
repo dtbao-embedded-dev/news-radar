@@ -172,15 +172,25 @@ if SHIPPED.is_file():
     sgroups, sfilter = keywords.parse(SHIPPED)
     picked = mod.select([
         item("ESP32-C6 gets Zephyr support"),
-        item("CVE-2026-9999 in an embedded TLS library"),
+        item("Google races ahead in AI, technology chief says"),
+        item("Show HN: Argus, open-source AI agents for testing web apps"),
+        item("He said the chain of failures was detailed in an email"),
         item("Free giveaway: ten ESP32 boards"),
         item("Ranked: the best coffee in Hanoi"),
     ], sgroups, sfilter)
     titles = {i.title: labels for i, labels in picked}
     eq("the shipped file picks up the ESP32 story in two groups",
        titles.get("ESP32-C6 gets Zephyr support"), ["ESP32", "RTOS"])
-    check("the shipped Security group needs its +embedded term",
-          titles.get("CVE-2026-9999 in an embedded TLS library") == ["Security"])
+    eq("the shipped AI group catches a bare AI token",
+       titles.get("Google races ahead in AI, technology chief says"), ["AI"])
+    eq("an open-source AI project lands in both AI groups",
+       titles.get("Show HN: Argus, open-source AI agents for testing web apps"),
+       ["AI", "AI Repos"])
+    # The whole reason the AI group is a regex rather than a plain `AI` term:
+    # matching is substring, and this sentence contains said, chain, fail,
+    # detailed and email.
+    check("the substring 'ai' inside ordinary words matches nothing",
+          "He said the chain of failures was detailed in an email" not in titles)
     check("the shipped global filter drops the giveaway",
           "Free giveaway: ten ESP32 boards" not in titles)
     check("an unrelated story is dropped",

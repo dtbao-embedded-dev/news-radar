@@ -18,6 +18,12 @@ one makes the file and the tags disagree.
 
 ### Fixes
 
+- **notify**: the daily AI summary is sent **before** the story messages, not
+  after. A cycle can push dozens of story messages - eighteen of them on
+  2026-09-05, when a keyword change made 43 stories newly unsent - and a
+  summary behind that is a summary nobody scrolls back up to find. The two
+  sends stay independently guarded, so a refused summary still cannot cost the
+  stories their turn
 - **crawl**: the end-of-cycle line that begins `the page shows ...` was counting
   the store, not the page. The two agree until the keyword file is edited
   mid-day: the store still holds the morning's rows for a group that no longer

@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-05 - 13 durable doc(s)._
+_Generated 2026-09-05 - 14 durable doc(s)._
 
 ## State (transient)
 
@@ -834,10 +834,14 @@ python scripts/release.py <version> [--dry-run] [--yes] [--remote <name>]
 normalises both to `v0.1.0` for the tag and the commit subject. Anything that is
 not three dot-separated numbers is rejected before git is touched.
 
+It does **not** read the commit log. The changelog is hand-written into the
+`Unreleased` section as the work happens; this script only renames that section
+to the version being cut. See [[changelog]].
+
 | Flag | Guarantee |
 |------|-----------|
 | *(none)* | Runs the full release, printing the whole git chain and asking once for confirmation **before executing any of it** |
-| `--dry-run` | **Touches nothing.** Prints the exact git commands in execution order and exits `0` |
+| `--dry-run` | **Touches nothing.** Prints the `Unreleased` body it would promote and the exact git commands in execution order, then exits `0` |
 | `--yes` | Skip the confirmation prompt. For CI or a scripted release |
 | `--remote <name>` | Push target, default `origin` |
 
@@ -849,6 +853,9 @@ Preflight, all before any write:
 4. Tag `v<version>` does not already exist locally or on the push remote -
    the one `--remote` names, not always `origin`.
 5. Branches `developing` and `main` exist.
+6. `CHANGELOG.md` has an `## Unreleased` section **and it is not empty** - see
+   [[changelog]]. The two failures are distinguished: no section at all, versus a
+   section nobody wrote into.
 
 A failed preflight exits non-zero with nothing changed. Under `--dry-run` the
 same checks run but only report: a dry run must be readable from a branch that
@@ -858,7 +865,7 @@ chain it drives.
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Release completed, or `--dry-run` printed the plan |
-| `1` | Preflight failed - wrong branch, dirty tree, tag exists - or the confirmation was declined |
+| `1` | Preflight failed - wrong branch, dirty tree, tag exists, nothing under `Unreleased` - or the confirmation was declined |
 | `2` | Bad usage - missing or malformed `<version>` |
 | `3` | A git command failed mid-run; the message names the step and what to inspect |
 
@@ -1063,7 +1070,7 @@ costs an afternoon to rediscover.
 | **Clock skew on the host** | Freshness ranking inverts | `TZ` is pinned in the container; ages are computed in UTC |
 
 ### [rule] Release Flow
-*`rule/release-flow.md` - How a version is cut - the branch model, running release.py, what CI does with the tag, and what to do when it fails midway. - status: active - source: scripts/release.py, .github/workflows/release.yml, .github/workflows/test.yml, CHANGELOG.md - keywords: release, release.py, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release*
+*`rule/release-flow.md` - How a version is cut - the branch model, running release.py, what CI does with the tag, and what to do when it fails midway. - status: active - source: scripts/release.py, .github/workflows/release.yml, .github/workflows/test.yml, CHANGELOG.md - keywords: release, release.py, Unreleased, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release*
 
 # Release Flow
 
@@ -1113,10 +1120,10 @@ What the real run does, in order:
 1. **Preflight** - the version parses, the working tree is clean, the current
    branch is `release/*`, both `developing` and `main` exist, and the tag is not
    already taken locally or on the remote. A failure here changes nothing.
-2. **Changelog** - reads the conventional-commit subjects since the previous tag,
-   groups them (breaking changes first, then features, fixes, and the rest) and
-   inserts the section at the top of `CHANGELOG.md`. Previous release commits are
-   skipped: they describe the release, not what is in it.
+2. **Changelog** - renames the `## Unreleased` section of `CHANGELOG.md` to
+   `## v0.1.0 - <date>` and opens a fresh empty one above it. It reads no commit
+   subjects: the entries were written by hand as the work happened. An empty or
+   missing `Unreleased` section fails the preflight - see [[changelog]].
 3. **VERSION** - written to the bare number.
 4. **Commit** - `CHANGELOG.md` and `VERSION` only, as
    `chore(release): v0.1.0`, on the current `release/*` branch.
@@ -1140,13 +1147,14 @@ step because the checks are standard library only. It is what keeps a broken
 ## Rules
 
 1. **Never write a version heading in `CHANGELOG.md` by hand.** `release.py`
-   owns every `## v...` line. Fixing the wording inside an existing section is
-   fine; adding a heading makes the file and the tags disagree.
+   owns every `## v...` line. Writing into `## Unreleased` is the whole point;
+   adding a version heading makes the file and the tags disagree.
 2. **Never create the tag by hand**, and never push `main` or `developing`
    outside a release.
-3. **Write conventional-commit subjects.** They are the changelog. A commit whose
-   subject does not parse still appears, under "Other" - readable, but it reads
-   like an accident because it is one.
+3. **Record the change in `Unreleased` as you make it**, in the same commit.
+   The preflight refuses to cut a release with nothing recorded, so this is not a
+   step you can leave until release day. What belongs there - technical changes
+   only - is [[changelog]].
 4. **Re-releasing the same version is not supported.** The preflight refuses a
    tag that exists. Cut the next patch instead of deleting a published tag.
 
@@ -1337,6 +1345,106 @@ When consulting it changes a decision here, write the decision into this bank in
 news-radar's own terms - a `behavior/` or `data/` doc, or an ADR if it settles a
 question that could be re-litigated. Say in prose that the idea came from
 TrendRadar. Do not reproduce the upstream artifact to explain it.
+
+### [rule] What Goes in the Changelog
+*`rule/changelog.md` - What is recorded in CHANGELOG.md and what is not, when the entry is written, and how release.py turns the Unreleased section into a version. - status: active - source: CHANGELOG.md, scripts/release.py, tests/test_release.py - keywords: changelog, CHANGELOG.md, Unreleased, technical change, release notes, promote_unreleased, unreleased_body, entry, scope*
+
+# What Goes in the Changelog
+
+> `CHANGELOG.md` records **technical changes only**, written by hand into the
+> `Unreleased` section **in the same commit as the change itself**. It is not
+> generated from commit subjects, and it is not a log of everything that
+> happened in the repository.
+
+## Why it is written by hand
+
+Deriving the changelog from commit subjects was tried and dropped. The commit
+log is a record of *work*; the changelog is a record of *what changed in the
+software*. They are not the same set. At the point that decision was made, 16 of
+28 commits were `docs` — a generated changelog would have been 57% bookkeeping,
+and the reader would have had to find the three fixes inside it.
+
+Writing the entry by hand also puts it where the knowledge is: at the moment of
+the change, by the person making it, in words aimed at someone who has to decide
+whether to upgrade.
+
+## What is a technical change
+
+A change to **what the software does, or how it is built and shipped**.
+
+| Recorded | Not recorded |
+|----------|--------------|
+| `feat` — a new capability | `docs` — README, the memory bank, comments |
+| `fix` — a defect a user or operator could hit | `chore` — housekeeping, dependency bumps with no behaviour change |
+| `perf` — measurably faster or lighter | `style` — formatting only |
+| `refactor` — the code changed shape | `ci` — workflow plumbing, unless it changes what ships |
+| `build` — how it is packaged, imaged or run | `test` — tests added or reorganised |
+| **breaking** — see below | Anything reverted before it was released |
+
+The line is the reader: someone deciding whether to take a new version. A CI
+workflow does not affect that decision; the compose stack it produces does.
+
+**Breaking changes are never optional.** A change that invalidates an existing
+`config.yaml`, `frequency_words.txt`, or output contract goes in under its own
+`### Breaking Changes` heading, at the top of the section, even when the change
+itself is small.
+
+## Where and how
+
+`CHANGELOG.md` opens with an `## Unreleased` section. Add the entry there, in
+the same commit as the change:
+
+```markdown
+## Unreleased
+
+### Features
+
+- **setup**: bring the stack up directly instead of printing the command to run
+
+### Fixes
+
+- **release**: check the tag on the push remote rather than always `origin`
+```
+
+- Group under `### Breaking Changes`, `### Features`, `### Fixes`,
+  `### Performance`, `### Refactoring`, `### Build` — in that order, omitting
+  the empty ones.
+- One entry per line, starting `- `. Lead with `**scope**: ` when the change is
+  confined to one area; drop it when it is not.
+- Write what changed and why it matters, in the present tense, from the
+  reader's side. `check the tag on the push remote rather than always origin`
+  beats `fix tag_exists`.
+- One entry per change, not one per commit. Three commits fixing one defect are
+  one line.
+
+## What release.py does with it
+
+`python scripts/release.py <version>` does not read the commit log. It:
+
+1. **Refuses to release an empty section.** Preflight fails when `Unreleased` is
+   missing or has no body — a release with nothing recorded is a mistake, not an
+   empty release. `unreleased_body()` distinguishes the two: `None` for a missing
+   section, `""` for an empty one.
+2. **Promotes** `## Unreleased` to `## v<version> - <date>` and opens a fresh
+   empty `## Unreleased` above it (`promote_unreleased()`).
+3. Leaves everything below untouched, newest version first.
+
+CI then publishes that version's section as the GitHub Release notes, cut by
+`extract_changelog_section()` — the same function, so there is no second parser.
+See [[release-flow]] for the rest of the release procedure.
+
+## Rules
+
+1. **Never write a `## v...` heading by hand.** `release.py` owns every version
+   heading. Fixing wording inside an existing section is fine; adding a heading
+   makes the file and the tags disagree.
+2. **The entry ships with the change.** Not "before the release" — by then the
+   detail that made the entry worth writing is gone.
+3. **If it is not worth an entry, it is not a technical change.** That is the
+   test, and it is allowed to come out negative: most commits in this repository
+   never touch the changelog.
+4. **Never delete a released section** to correct history. Cut the next patch and
+   say what was wrong.
 
 ### [adr] ADR-0001: Clean-room reimplementation, TrendRadar as reference only
 *`adr/adr-0001-clean-room-from-trendradar.md` - Why news-radar is written from scratch instead of forking TrendRadar, and what that forbids. - status: active - source: conversation, https://github.com/sansan0/TrendRadar - keywords: ADR-0001, clean-room, TrendRadar, GPL-3.0, Apache-2.0, LICENSE, license, fork, copyleft, reference*

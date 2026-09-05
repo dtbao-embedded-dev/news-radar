@@ -68,10 +68,14 @@ python scripts/release.py <version> [--dry-run] [--yes] [--remote <name>]
 normalises both to `v0.1.0` for the tag and the commit subject. Anything that is
 not three dot-separated numbers is rejected before git is touched.
 
+It does **not** read the commit log. The changelog is hand-written into the
+`Unreleased` section as the work happens; this script only renames that section
+to the version being cut. See [[changelog]].
+
 | Flag | Guarantee |
 |------|-----------|
 | *(none)* | Runs the full release, printing the whole git chain and asking once for confirmation **before executing any of it** |
-| `--dry-run` | **Touches nothing.** Prints the exact git commands in execution order and exits `0` |
+| `--dry-run` | **Touches nothing.** Prints the `Unreleased` body it would promote and the exact git commands in execution order, then exits `0` |
 | `--yes` | Skip the confirmation prompt. For CI or a scripted release |
 | `--remote <name>` | Push target, default `origin` |
 
@@ -83,6 +87,9 @@ Preflight, all before any write:
 4. Tag `v<version>` does not already exist locally or on the push remote -
    the one `--remote` names, not always `origin`.
 5. Branches `developing` and `main` exist.
+6. `CHANGELOG.md` has an `## Unreleased` section **and it is not empty** - see
+   [[changelog]]. The two failures are distinguished: no section at all, versus a
+   section nobody wrote into.
 
 A failed preflight exits non-zero with nothing changed. Under `--dry-run` the
 same checks run but only report: a dry run must be readable from a branch that
@@ -92,7 +99,7 @@ chain it drives.
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Release completed, or `--dry-run` printed the plan |
-| `1` | Preflight failed - wrong branch, dirty tree, tag exists - or the confirmation was declined |
+| `1` | Preflight failed - wrong branch, dirty tree, tag exists, nothing under `Unreleased` - or the confirmation was declined |
 | `2` | Bad usage - missing or malformed `<version>` |
 | `3` | A git command failed mid-run; the message names the step and what to inspect |
 

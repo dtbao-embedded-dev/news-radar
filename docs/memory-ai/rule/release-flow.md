@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-05
 source: scripts/release.py, .github/workflows/release.yml, .github/workflows/test.yml, CHANGELOG.md
 confidence: confirmed
-keywords: release, release.py, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release
+keywords: release, release.py, Unreleased, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release
 order: 1
 ---
 
@@ -58,10 +58,10 @@ What the real run does, in order:
 1. **Preflight** - the version parses, the working tree is clean, the current
    branch is `release/*`, both `developing` and `main` exist, and the tag is not
    already taken locally or on the remote. A failure here changes nothing.
-2. **Changelog** - reads the conventional-commit subjects since the previous tag,
-   groups them (breaking changes first, then features, fixes, and the rest) and
-   inserts the section at the top of `CHANGELOG.md`. Previous release commits are
-   skipped: they describe the release, not what is in it.
+2. **Changelog** - renames the `## Unreleased` section of `CHANGELOG.md` to
+   `## v0.1.0 - <date>` and opens a fresh empty one above it. It reads no commit
+   subjects: the entries were written by hand as the work happened. An empty or
+   missing `Unreleased` section fails the preflight - see [[changelog]].
 3. **VERSION** - written to the bare number.
 4. **Commit** - `CHANGELOG.md` and `VERSION` only, as
    `chore(release): v0.1.0`, on the current `release/*` branch.
@@ -85,13 +85,14 @@ step because the checks are standard library only. It is what keeps a broken
 ## Rules
 
 1. **Never write a version heading in `CHANGELOG.md` by hand.** `release.py`
-   owns every `## v...` line. Fixing the wording inside an existing section is
-   fine; adding a heading makes the file and the tags disagree.
+   owns every `## v...` line. Writing into `## Unreleased` is the whole point;
+   adding a version heading makes the file and the tags disagree.
 2. **Never create the tag by hand**, and never push `main` or `developing`
    outside a release.
-3. **Write conventional-commit subjects.** They are the changelog. A commit whose
-   subject does not parse still appears, under "Other" - readable, but it reads
-   like an accident because it is one.
+3. **Record the change in `Unreleased` as you make it**, in the same commit.
+   The preflight refuses to cut a release with nothing recorded, so this is not a
+   step you can leave until release day. What belongs there - technical changes
+   only - is [[changelog]].
 4. **Re-releasing the same version is not supported.** The preflight refuses a
    tag that exists. Cut the next patch instead of deleting a published tag.
 

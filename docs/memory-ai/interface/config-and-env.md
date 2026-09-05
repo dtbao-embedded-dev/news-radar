@@ -1,0 +1,119 @@
+---
+title: Config Keys, Keyword File and Environment
+category: interface
+purpose: Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads.
+status: draft
+updated: 2026-09-04
+source: config/config.yaml.example, config/frequency_words.txt
+confidence: inferred
+keywords: config.yaml, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
+order: 1
+---
+
+# Config Keys, Keyword File and Environment
+
+> `config.yaml` holds behaviour and is safe to commit as a template.
+> `frequency_words.txt` holds what to hunt for. The environment holds every
+> secret, and nothing else.
+
+## config.yaml
+
+Loaded from `NEWS_RADAR_CONFIG`, default `config/config.yaml`. Any key omitted
+falls back to the default below.
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `app.timezone` | str | `Asia/Ho_Chi_Minh` | Timezone used when rendering timestamps; storage stays UTC |
+| `schedule.interval_minutes` | int | `30` | Sleep between crawls in the in-process loop |
+| `schedule.run_on_start` | bool | `true` | Crawl immediately on container start instead of waiting one interval |
+| `feeds[]` | list | 8 entries | Fixed feeds - see [[news-sources]] |
+| `feeds[].id` | str | - | Stable id; used in `sources`, in the report, and as the `reported` key |
+| `feeds[].name` | str | - | Display name on the page |
+| `feeds[].url` | str | - | Feed URL |
+| `feeds[].enabled` | bool | `true` | Skip without deleting the entry |
+| `feeds[].rank_weight` | float | `1.0` | Per-source multiplier in the source term of the score |
+| `search_templates[]` | list | 3 entries | Keyword-driven searches - see [[news-sources]] |
+| `search_templates[].id` | str | - | Stable id |
+| `search_templates[].url` | str | - | Must contain `{kw}`; the only substitution performed |
+| `search_templates[].format` | str | `rss` | `rss`, `atom`, or `hn_algolia_json` |
+| `search_templates[].enabled` | bool | varies | `reddit_search` ships disabled - it duplicates the fixed Reddit feed heavily |
+| `search_templates[].rank_weight` | float | `0.8` | Search hits rank below front-page hits by default |
+| `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file |
+| `report.mode` | str | `incremental` | `incremental` (only new), `current` (this run's matches), `daily` (whole day) |
+| `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
+| `report.rank_threshold` | int | `5` | The first N of each group are highlighted on the page |
+| `rank.weight_source` | float | `0.5` | Weight of the source term |
+| `rank.weight_frequency` | float | `0.3` | Weight of the cross-source frequency term |
+| `rank.weight_freshness` | float | `0.2` | Weight of the freshness term |
+| `rank.freshness_half_life_hours` | float | `12` | Age at which the freshness term halves |
+| `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
+| `storage.retention_days` | int | `0` | `0` = keep everything; otherwise prune rows and day files past the window |
+| `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
+| `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
+| `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |
+| `advanced.request_interval_ms` | int | `2000` | Minimum gap between two requests **to the same host** |
+| `advanced.request_timeout_s` | int | `15` | Per-request timeout; nothing outside the process will kill a hung run |
+| `advanced.max_retries` | int | `2` | Retries per request, exponential backoff |
+| `advanced.user_agent` | str | `news-radar/{version} (+https://news.dtbao.org)` | `{version}` is substituted from `VERSION`; an anonymous UA gets 403 from Reddit |
+| `advanced.debug` | bool | `false` | Verbose per-source logging |
+
+**No secret ever appears in this file.** A leaked `config.yaml` must be harmless.
+
+## frequency_words.txt
+
+Plain text, UTF-8. **A blank line separates one group from the next**, and each
+group is counted, capped and displayed independently.
+
+| Line form | Meaning |
+|-----------|---------|
+| `word` | Match if the title contains this term (case- and diacritic-insensitive) |
+| `+word` | **Required**: the title must contain this as well, on top of matching the group |
+| `!word` | **Excluded**: a title containing this never matches the group |
+| `@n` | Cap this group at `n` items after ranking |
+| `/pattern/` | Match by regular expression instead of substring |
+| `=> Label` | Display name for the group on the page and in messages |
+| `# comment` | Ignored |
+
+The **first plain term** of a group is the group's *primary term*: it is what gets
+substituted into the search templates. Later plain terms widen the local match but
+generate no extra requests.
+
+A group named `[GLOBAL_FILTER]` is special: its `!` lines are applied to every
+item from every source before grouping, and it produces no output section.
+
+Worked shape:
+
+```
+# hunt embedded firmware stories, at most 10 per run
+ESP32
+ESP-IDF
++firmware
+!tuyen dung
+@10
+=> Embedded
+
+[GLOBAL_FILTER]
+!coupon
+!giveaway
+```
+
+Here `ESP32` is the primary term - the search templates are queried with it - while
+`ESP-IDF` only widens local matching. `+firmware` narrows both.
+
+## Environment variables
+
+The only place secrets live. In the container they come from `docker/.env`;
+outside it, from the real environment.
+
+| Variable | Required | Default | Read by |
+|----------|----------|---------|---------|
+| `TELEGRAM_BOT_TOKEN` | when Telegram is enabled | - | `notify/telegram.py` |
+| `TELEGRAM_CHAT_ID` | when Telegram is enabled | - | `notify/telegram.py` |
+| `DISCORD_WEBHOOK_URL` | when Discord is enabled | - | `notify/discord.py` |
+| `NEWS_RADAR_CONFIG` | no | `config/config.yaml` | `config.py` |
+| `TZ` | no | `Asia/Ho_Chi_Minh` | container clock; `app.timezone` still wins for rendering |
+
+Startup validation: a channel that is `enabled: true` with its variable missing is
+a **fatal config error**, not a warning. Silently not sending is the failure mode
+this project most wants to avoid. `scripts/setup.py` checks the same rule before
+the container is ever started - see [[cli-scripts]].

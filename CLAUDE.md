@@ -1,3 +1,11 @@
+## Reference Repo
+
+When a specific problem here is hard - a feed returning junk, dedup collapsing
+the wrong stories, a message failing to format - **TrendRadar is the repo to go
+read**: `docs/memory-ai/rule/reference-trendradar.md` says where to look by
+problem, and what may never be copied back. It is GPL-3.0 and news-radar is a
+clean-room reimplementation: carry the approach, never the code.
+
 ## Project Memory (docs/memory-ai/)
 
 This project keeps a **memory bank** in `docs/memory-ai/` — a plain-text

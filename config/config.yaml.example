@@ -1,0 +1,111 @@
+# news-radar configuration.
+# Copy to config/config.yaml (scripts/setup.py does this for you) and edit.
+# Secrets never live here - they live in docker/.env. See
+# docs/memory-ai/interface/config-and-env.md for every key and its default.
+
+app:
+  timezone: Asia/Ho_Chi_Minh
+
+schedule:
+  interval_minutes: 30
+  run_on_start: true
+
+# Fixed feeds: fetched whole every run, then matched locally.
+feeds:
+  - id: hn
+    name: Hacker News
+    url: https://hnrss.org/frontpage
+    enabled: true
+    rank_weight: 1.0
+  - id: lobsters
+    name: Lobsters
+    url: https://lobste.rs/rss
+    enabled: true
+    rank_weight: 1.0
+  - id: hackaday
+    name: Hackaday
+    url: https://hackaday.com/blog/feed/
+    enabled: true
+    rank_weight: 0.9
+  - id: lwn
+    name: LWN
+    url: https://lwn.net/headlines/rss
+    enabled: true
+    rank_weight: 0.9
+  - id: r_embedded
+    name: r/embedded
+    url: https://www.reddit.com/r/embedded/.rss
+    enabled: true
+    rank_weight: 0.8
+  - id: vnexpress_sohoa
+    name: VnExpress So hoa
+    url: https://vnexpress.net/rss/so-hoa.rss
+    enabled: true
+    rank_weight: 0.7
+  - id: genk
+    name: GenK
+    url: https://genk.vn/rss/home.rss
+    enabled: true
+    rank_weight: 0.6
+  - id: tinhte
+    name: Tinh te
+    url: https://tinhte.vn/rss
+    enabled: true
+    rank_weight: 0.6
+
+# Search feeds: {kw} is replaced by each keyword group's primary term.
+# Cost per run is len(groups) x len(enabled templates) - keep that in mind
+# before enabling all three.
+search_templates:
+  - id: google_news
+    name: Google News (vi)
+    url: "https://news.google.com/rss/search?q={kw}&hl=vi&gl=VN&ceid=VN:vi"
+    format: rss
+    enabled: true
+    rank_weight: 0.8
+  - id: hn_algolia
+    name: Hacker News search
+    url: "https://hn.algolia.com/api/v1/search?query={kw}"
+    format: hn_algolia_json
+    enabled: true
+    rank_weight: 0.8
+  # Disabled by default: it duplicates the fixed r/embedded feed heavily.
+  - id: reddit_search
+    name: Reddit search
+    url: "https://www.reddit.com/search.rss?q={kw}&sort=new"
+    format: atom
+    enabled: false
+    rank_weight: 0.6
+
+keywords:
+  file: config/frequency_words.txt
+
+report:
+  mode: incremental      # incremental | current | daily
+  max_per_group: 0       # 0 = unlimited; a group's own @n wins over this
+  rank_threshold: 5
+
+rank:
+  weight_source: 0.5
+  weight_frequency: 0.3
+  weight_freshness: 0.2
+  freshness_half_life_hours: 12
+
+storage:
+  data_dir: output
+  retention_days: 0      # 0 = keep everything
+
+notification:
+  enabled: true
+  channels:
+    telegram:
+      enabled: true      # needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
+    discord:
+      enabled: true      # needs DISCORD_WEBHOOK_URL
+
+advanced:
+  request_interval_ms: 2000    # minimum gap between two requests to one host
+  request_timeout_s: 15        # the only bound on a hung run - never unset it
+  max_retries: 2
+  user_agent: "news-radar/{version} (+https://news.dtbao.org)"
+  debug: false

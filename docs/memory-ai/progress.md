@@ -9,9 +9,37 @@ updated: 2026-09-05
 
 ## What works
 
-**P0 Foundation is released as v0.1.0 and P1 Fetch is complete** (2026-09-05).
+**P0 Foundation is released as v0.1.0; P1 Fetch and P2 Filter and rank are
+complete** (2026-09-05).
 See `architecture/delivery-phases.md` for the phase map and the finished-product
 definition all of it serves.
+
+### P2 - Filter and rank
+
+- **`python -m news_radar --once` prints a shortlist, not a pile.** Measured in
+  the container on 2026-09-05: **597 raw items -> 209 matched -> 205 stories
+  after dedup -> 50 kept across 7 groups, exit 0**, in 37 s. That is P2's
+  definition of done.
+- **The global filter runs before any group sees the item.** `filter.blocked()`
+  is called first by `select()`, so a story carrying `giveaway` cannot sneak in
+  through a group that happens to match it.
+- **Folding works on real Vietnamese titles.** A keyword typed `dien tu` finds
+  `Điện tử`; `ESP32-S3` keeps its hyphen through folding, so the part number
+  still matches. A `/regex/` runs against the **original** title - proven by a
+  check that the lowercased form of a `CVE-2026-1234` title does not match
+  `/CVE-\d{4}-\d+/`.
+- **Every group is reported, empty ones included.** `Security - 0 item(s)` is a
+  line in the run, not a missing section: a keyword that has gone quiet is
+  exactly what a total would hide.
+- **Layer 3 imports no config and reads no clock.** The weights, the
+  `{source_id: rank_weight}` map and `now` are arguments; `__main__` builds
+  them. That is why `test_filter.py` and `test_rank.py` run on a bare Python
+  with neither PyYAML nor feedparser installed - seven of the nine test files
+  now run on the host.
+- **Two timestamp rules are pinned by tests, not by hope.** No `published_at`
+  gives a freshness term of exactly `0`; a *future* timestamp scores no higher
+  than one published now, because `0.5 ** negative` is greater than 1 and one
+  bad `pubDate` would otherwise top every group.
 
 ### P1 - Fetch
 
@@ -117,13 +145,11 @@ definition all of it serves.
 
 ## What's left
 
-Selection onwards. `src/news_radar/` now holds the entrypoint, the config
-loader, the item shape, the keyword parser and the whole fetch layer; from
-`filter.py` on, every stage module is still **specified but not written**.
+Persistence onwards. `src/news_radar/` now holds the entrypoint, the config
+loader, the item shape, the keyword parser, the whole fetch layer and the whole
+selection layer; from `store.py` on, every stage module is still **specified but
+not written**.
 
-- **P2 Filter and rank** - the match engine with diacritic folding, the global
-  filter, dedup, and the weighted ranking. P2-1 (the keyword parser) is already
-  done, and `item.fold()` and `item.dedup_key()` are waiting to be used.
 - **P3 Store and render** - SQLite store, the seen-set, and `output/index.html`.
 - **P4 Notify** - Telegram and Discord senders, the new-only diff, and backoff.
 - **P5 Deploy** - the Cloudflare Tunnel route for `news.dtbao.org` and the first
@@ -131,6 +157,14 @@ loader, the item shape, the keyword parser and the whole fetch layer; from
 - **P6 Ops** - retention, heartbeat, failure alerting.
 
 ## Known issues
+
+- **The search templates answer relevance-first, not date-first.** Measured
+  2026-09-05: Google News returned `ESP32` hits aged 1704-5783 hours, HN Algolia
+  the same shape. At the default 12 h half-life the freshness term is `0` for
+  nearly every search hit, so the shortlist ranks on source weight alone and the
+  order inside a group is close to arbitrary. `published_at` itself is fine -
+  the fixed feeds came back at 1.5 h and 18 h. The fix is narrowing both queries
+  to a recent window in `config.yaml`, not code.
 
 - **The pre-rewrite root commit is still reachable on GitHub.** History was
   rewritten on 2026-09-05 to drop a `Co-Authored-By` trailer, but a force push

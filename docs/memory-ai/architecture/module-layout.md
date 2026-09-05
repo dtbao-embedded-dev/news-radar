@@ -44,8 +44,8 @@ news-radar/
 │   │   ├── http.py             # UA, timeout, retry, per-host throttle
 │   │   ├── feeds.py            # rss/atom/json -> items, fixed feeds, isolation
 │   │   └── search.py           # keyword -> search URL -> items
-│   ├── filter.py               # P2 - match items against keyword groups
-│   ├── rank.py                 # P2 - dedup + weighted ranking
+│   ├── filter.py               # DONE - global filter + match against groups
+│   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
 │   ├── store.py                # P3 - SQLite persistence + seen-set
 │   ├── render.py               # P3 - output/index.html
 │   └── notify/                 # P4
@@ -58,6 +58,8 @@ news-radar/
 │   ├── test_http.py            # plain asserts, stdlib only, local http.server
 │   ├── test_feeds.py           # plain asserts, needs feedparser + PyYAML
 │   ├── test_search.py          # plain asserts, needs feedparser + PyYAML
+│   ├── test_filter.py          # plain asserts, stdlib only
+│   ├── test_rank.py            # plain asserts, stdlib only
 │   ├── test_release.py         # plain asserts, stdlib only
 │   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
@@ -88,6 +90,11 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 the schedule loop. `config.py`, `item.py` and `keywords.py` are leaves — they
 import nothing from the package, which is why each has a test that needs neither
 PyYAML nor feedparser to run.
+
+Layer 3 taking no `config` import is not a style preference either: the weights
+and the `source_id -> rank_weight` map are plain dicts `__main__.py` builds and
+hands down, which is why `test_filter.py` and `test_rank.py` run on a bare
+Python with no dependency installed. See [[selection-layer]].
 
 `scripts/` is outside the package entirely and imports nothing from it: both
 scripts must run on a machine where the package's dependencies are not installed

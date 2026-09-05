@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-05 - 16 durable doc(s)._
+_Generated 2026-09-05 - 17 durable doc(s)._
 
 ## State (transient)
 
@@ -19,9 +19,37 @@ _Generated 2026-09-05 - 16 durable doc(s)._
 
 ## What works
 
-**P0 Foundation is released as v0.1.0 and P1 Fetch is complete** (2026-09-05).
+**P0 Foundation is released as v0.1.0; P1 Fetch and P2 Filter and rank are
+complete** (2026-09-05).
 See `architecture/delivery-phases.md` for the phase map and the finished-product
 definition all of it serves.
+
+### P2 - Filter and rank
+
+- **`python -m news_radar --once` prints a shortlist, not a pile.** Measured in
+  the container on 2026-09-05: **597 raw items -> 209 matched -> 205 stories
+  after dedup -> 50 kept across 7 groups, exit 0**, in 37 s. That is P2's
+  definition of done.
+- **The global filter runs before any group sees the item.** `filter.blocked()`
+  is called first by `select()`, so a story carrying `giveaway` cannot sneak in
+  through a group that happens to match it.
+- **Folding works on real Vietnamese titles.** A keyword typed `dien tu` finds
+  `Điện tử`; `ESP32-S3` keeps its hyphen through folding, so the part number
+  still matches. A `/regex/` runs against the **original** title - proven by a
+  check that the lowercased form of a `CVE-2026-1234` title does not match
+  `/CVE-\d{4}-\d+/`.
+- **Every group is reported, empty ones included.** `Security - 0 item(s)` is a
+  line in the run, not a missing section: a keyword that has gone quiet is
+  exactly what a total would hide.
+- **Layer 3 imports no config and reads no clock.** The weights, the
+  `{source_id: rank_weight}` map and `now` are arguments; `__main__` builds
+  them. That is why `test_filter.py` and `test_rank.py` run on a bare Python
+  with neither PyYAML nor feedparser installed - seven of the nine test files
+  now run on the host.
+- **Two timestamp rules are pinned by tests, not by hope.** No `published_at`
+  gives a freshness term of exactly `0`; a *future* timestamp scores no higher
+  than one published now, because `0.5 ** negative` is greater than 1 and one
+  bad `pubDate` would otherwise top every group.
 
 ### P1 - Fetch
 
@@ -127,13 +155,11 @@ definition all of it serves.
 
 ## What's left
 
-Selection onwards. `src/news_radar/` now holds the entrypoint, the config
-loader, the item shape, the keyword parser and the whole fetch layer; from
-`filter.py` on, every stage module is still **specified but not written**.
+Persistence onwards. `src/news_radar/` now holds the entrypoint, the config
+loader, the item shape, the keyword parser, the whole fetch layer and the whole
+selection layer; from `store.py` on, every stage module is still **specified but
+not written**.
 
-- **P2 Filter and rank** - the match engine with diacritic folding, the global
-  filter, dedup, and the weighted ranking. P2-1 (the keyword parser) is already
-  done, and `item.fold()` and `item.dedup_key()` are waiting to be used.
 - **P3 Store and render** - SQLite store, the seen-set, and `output/index.html`.
 - **P4 Notify** - Telegram and Discord senders, the new-only diff, and backoff.
 - **P5 Deploy** - the Cloudflare Tunnel route for `news.dtbao.org` and the first
@@ -141,6 +167,14 @@ loader, the item shape, the keyword parser and the whole fetch layer; from
 - **P6 Ops** - retention, heartbeat, failure alerting.
 
 ## Known issues
+
+- **The search templates answer relevance-first, not date-first.** Measured
+  2026-09-05: Google News returned `ESP32` hits aged 1704-5783 hours, HN Algolia
+  the same shape. At the default 12 h half-life the freshness term is `0` for
+  nearly every search hit, so the shortlist ranks on source weight alone and the
+  order inside a group is close to arbitrary. `published_at` itself is fine -
+  the fixed feeds came back at 1.5 h and 18 h. The fix is narrowing both queries
+  to a recent window in `config.yaml`, not code.
 
 - **The pre-rewrite root commit is still reachable on GitHub.** History was
   rewritten on 2026-09-05 to drop a `Co-Authored-By` trailer, but a force push
@@ -177,67 +211,67 @@ loader, the item shape, the keyword parser and the whole fetch layer; from
 
 ## Current focus
 
-**P1 Fetch is done** (2026-09-05). `python -m news_radar --once` pulls **597 raw
-items** out of the eight fixed feeds and the fourteen keyword-built searches, in
-one container run, exit 0.
+**P2 Filter and rank is done** (2026-09-05). `python -m news_radar --once` turns
+**597 raw items into 209 matches, 205 stories after dedup, and 50 kept across 7
+keyword groups**, printed group by group with a score and the sources that
+carried each story. That is the phase's definition of done.
 
-The next piece of work is **P2 Filter and rank**: turning those 597 raw items
-into the grouped, deduped, ranked shortlist a human would actually read. P2-1
-(the keyword-file parser) is already done - it landed in P1 because the search
-generator needed each group's primary term.
+The next piece of work is **P3 Store and render**: putting that shortlist in
+SQLite, keeping a seen-set so P4 can diff it, and writing `output/index.html`.
+`crawl()` already returns the ranked mapping P3 needs.
 
 ## Recent changes
 
-- **P1 landed in seven commits on `release/v0.1`** (2026-09-05):
-  `item.py` (the NewsItem shape, URL canonicalisation, dedup key, diacritic
-  folding), `keywords.py` (the whole group syntax), `fetch/http.py` (User-Agent,
-  timeout, retry, per-host throttle), `fetch/feeds.py` (RSS/Atom/Algolia JSON
-  into items, the fixed-feed reader, the single failure guard),
-  `fetch/search.py` (primary term x template into queries), and the `crawl()`
-  wiring that counts what came back.
-- **Five new test files, all offline.** `test_item`, `test_keywords` and
-  `test_http` are stdlib-only; `test_feeds` and `test_search` read
-  `tests/fixtures/`, one body per edge case the design predicted. Nothing in the
-  suite touches the network, so CI stays green without egress.
-- **`item.py` is a module the bank's tree did not have.** `NewsItem` is produced
-  by `fetch/` and read by every later stage, and `data/news-item.md` makes
-  `canonical_url` a required field - so canonicalisation and the dedup key are
-  P1 work, not P2. `architecture/module-layout.md` now shows it.
-- Bank restamped: `module-layout`, `delivery-phases`, `crawl-cli`,
-  `news-item`, `news-sources` and `news-search` are `confirmed` against real
-  code, and `interface/fetch-layer.md` is new.
+- **P2 landed in five commits on `release/v0.1`** (2026-09-05): `filter.py`
+  (`blocked`, `group_matches`, `select`), `rank.py` (`Story`, `collapse`,
+  `score`, `rank_groups`), and the `crawl()` wiring that builds the two plain
+  dicts layer 3 needs and prints the shortlist.
+- **Two new test files, both stdlib-only.** `test_filter.py` and `test_rank.py`
+  need neither PyYAML nor feedparser, because `filter.py` and `rank.py` import
+  no config and read no clock. Seven of the nine test files now run on a bare
+  Windows checkout.
+- **The scoring formula grew one rule the design did not have**: an item dated
+  in the future is clamped to age `0`. `0.5 ** negative` is greater than 1, so
+  a single bad `pubDate` would have topped every group it appeared in.
+- **`interface/selection-layer.md` is new**, and `behavior/news-search.md`,
+  `architecture/module-layout.md`, `architecture/delivery-phases.md` are
+  restamped against the real modules.
 
-Before this session, in P0: the release tooling, the docker stack, the config
-loader and the design bank - see `progress.md`.
+Before this session: P1 landed the whole fetch layer; P0 the release tooling,
+the docker stack, the config loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **P2-2 match engine** - decide which groups an item belongs to, using
-   `item.fold()` so `Điện tử` matches a keyword typed `dien tu`. `/regex/` runs
-   against the **original** title, not the folded one.
-2. **P2-3 global filter** applied before grouping - one `!` hit from
-   `[GLOBAL_FILTER]` drops the item entirely and no group sees it.
-3. **P2-4 dedup** - `item.dedup_key()` already exists; P2 collapses on it,
-   keeping the earliest `published_at` and the union of `source_id`s.
-4. **P2-5 and P2-6** - the weighted score from `rank.*` in config, then the
-   group's `@n` cap.
-5. **Verify with `python -m news_radar --once`** - P2 is done when the same
-   command prints grouped, deduped, ranked matches instead of 597 raw items.
+1. **P3-1 SQLite store** - items, sources and a per-run log, schema migrated on
+   open. The shape is in `data/news-item.md`, whose last two sections are still
+   marked 🟡 for exactly this.
+2. **P3-2 seen-set** - what has already been reported, keyed the way P4's diff
+   will read it.
+3. **P3-3 renderer** - one self-contained `output/index.html` grouped by keyword
+   group, then P3-4's dark mode, search box and per-day history.
+4. **Narrow the search queries to a recent window** - a `config.yaml` change,
+   not code. Google News and HN Algolia answer relevance-first, so most search
+   hits are months old and score `0` for freshness. Worth doing before the page
+   exists, or the first published report will look stale.
 
 ## Active decisions
 
+- **Layer 3 imports no config and reads no clock.** The weights, the
+  `{source_id: rank_weight}` map and `now` are arguments `__main__.py` builds.
+  It is why the selection tests run with nothing installed, and a `cfg` import
+  inside `filter.py` or `rank.py` is a bug, not a shortcut.
 - **Clean-room from TrendRadar.** It is a reference to consult when stuck, never
   a source to copy from - it is GPL-3.0. `rule/reference-trendradar.md` says
   where to look by problem and what may not cross back.
 - **Two runtime dependencies, total**: `pyyaml` and `feedparser`. HTTP, storage
   and templating come from the standard library. A third needs justifying in the
-  changelog. P1 held the line - the transport is `urllib.request`.
+  changelog. P1 and P2 both held the line - selection is pure stdlib.
 - **One guard, not one per caller.** `feeds.read_source()` is the only place a
   source failure is caught; `search.py` calls it rather than repeating the
   try/except. A second guard anywhere is a bug.
 - **The changelog records technical changes only**, written by hand into
   `## Unreleased` in the same commit as the change. One entry per change, not
-  per commit: all of P1 is one `**crawl**` line.
+  per commit: all of P2 is one `**crawl**` line.
 - **Both scripts stay stdlib-only** so they run on a bare checkout, before
   anything is installed.
 - **Self-hosted, not GitHub Pages.** The crawl and the site both run on the
@@ -315,7 +349,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 | P0-7 | CI: check workflow on push/PR + tag-triggered release workflow, `CHANGELOG.md`, `VERSION` |
 | P0-8 | Design bank: `rule/` — release procedure, setup procedure, how to consult TrendRadar |
 
-### P1 — Fetch *(done — this repo's current phase is P2)*
+### P1 — Fetch *(done)*
 
 | # | Task |
 |---|------|
@@ -329,16 +363,22 @@ Each phase is shippable on its own: it ends in something a human can run and see
 **P2-1 landed here too.** `keywords.py` parses the whole file already, because
 finding a group's primary term means skipping every other prefix anyway.
 
-### P2 — Filter and rank
+### P2 — Filter and rank *(done — this repo's current phase is P3)*
 
 | # | Task |
 |---|------|
 | P2-1 | ~~Parse `frequency_words.txt`: groups, `+` required, `!` excluded, `@` cap, `/regex/`, display label~~ — **done in P1**, `keywords.py` |
-| P2-2 | Match engine: decide which groups an item belongs to, case- and diacritic-insensitive |
-| P2-3 | Global filter section applied before grouping |
-| P2-4 | Dedup: collapse the same story arriving from several sources onto one dedup key |
-| P2-5 | Rank: weighted sum of source rank, cross-source frequency, and freshness; weights live in config |
-| P2-6 | Per-group cap `@n` applied after ranking |
+| P2-2 | ~~Match engine: decide which groups an item belongs to, case- and diacritic-insensitive~~ — `filter.group_matches()` |
+| P2-3 | ~~Global filter section applied before grouping~~ — `filter.blocked()`, called first by `select()` |
+| P2-4 | ~~Dedup: collapse the same story arriving from several sources onto one dedup key~~ — `rank.collapse()` |
+| P2-5 | ~~Rank: weighted sum of source rank, cross-source frequency, and freshness; weights live in config~~ — `rank.score()` |
+| P2-6 | ~~Per-group cap `@n` applied after ranking~~ — `rank.rank_groups()` |
+
+**The search templates are the weak link P2 exposed.** Google News and HN
+Algolia answer a query relevance-first, not date-first, so their hits are often
+months old and the freshness term is `0` for nearly all of them - the shortlist
+currently ranks on source weight alone. Narrowing both queries to a recent
+window is a `config.yaml` change, not a code one.
 
 ### P3 — Store and render
 
@@ -421,8 +461,8 @@ news-radar/
 │   │   ├── http.py             # UA, timeout, retry, per-host throttle
 │   │   ├── feeds.py            # rss/atom/json -> items, fixed feeds, isolation
 │   │   └── search.py           # keyword -> search URL -> items
-│   ├── filter.py               # P2 - match items against keyword groups
-│   ├── rank.py                 # P2 - dedup + weighted ranking
+│   ├── filter.py               # DONE - global filter + match against groups
+│   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
 │   ├── store.py                # P3 - SQLite persistence + seen-set
 │   ├── render.py               # P3 - output/index.html
 │   └── notify/                 # P4
@@ -435,6 +475,8 @@ news-radar/
 │   ├── test_http.py            # plain asserts, stdlib only, local http.server
 │   ├── test_feeds.py           # plain asserts, needs feedparser + PyYAML
 │   ├── test_search.py          # plain asserts, needs feedparser + PyYAML
+│   ├── test_filter.py          # plain asserts, stdlib only
+│   ├── test_rank.py            # plain asserts, stdlib only
 │   ├── test_release.py         # plain asserts, stdlib only
 │   └── fixtures/               # one feed body per edge case, no network
 ├── output/                     # gitignored: index.html, news.db, per-day files
@@ -465,6 +507,11 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 the schedule loop. `config.py`, `item.py` and `keywords.py` are leaves — they
 import nothing from the package, which is why each has a test that needs neither
 PyYAML nor feedparser to run.
+
+Layer 3 taking no `config` import is not a style preference either: the weights
+and the `source_id -> rank_weight` map are plain dicts `__main__.py` builds and
+hands down, which is why `test_filter.py` and `test_rank.py` run on a bare
+Python with no dependency installed. See [[selection-layer]].
 
 `scripts/` is outside the package entirely and imports nothing from it: both
 scripts must run on a machine where the package's dependencies are not installed
@@ -1292,8 +1339,77 @@ read_search_feeds(fetcher, cfg, groups, fetched_at=None) -> (items, errors)
 - Errors are recorded per `(template, group)`: one throttled query must not
   cost the other groups their results.
 
+### [interface] Selection Layer Contracts
+*`interface/selection-layer.md` - Every public signature of the filter and rank modules - what each returns, what it never reads, and the plain dicts the caller has to build for it. - status: active - source: src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: blocked, group_matches, select, Story, collapse, score, rank_groups, source_weights, weights, default_cap, SATURATION_SPAN, DEFAULT_SOURCE_WEIGHT, global filter, cap*
+
+# Selection Layer Contracts
+
+> Two modules, layer 3. `filter.py` decides what gets through and which groups
+> it belongs to; `rank.py` collapses duplicates and orders each group. Neither
+> imports `config` and neither reads a clock: the weights, the per-source
+> weights and `now` all arrive as arguments, which is what lets one stage be
+> tested without the other five.
+
+## `filter.py` - what gets through
+
+| Signature | Returns |
+|-----------|---------|
+| `blocked(item, global_terms)` | `True` when a `[GLOBAL_FILTER]` exclusion matches the folded title. An empty `global_terms` blocks nothing |
+| `group_matches(item, group)` | `True` when the item belongs to this `KeywordGroup`: any-of, then required, then excluded |
+| `select(items, groups, global_terms)` | `[(NewsItem, [label, ...])]` - input order preserved. Items that are blocked, or that match no group, are **dropped** rather than carried with an empty label list |
+
+Plain terms and `+`/`!` terms are compared on `fold(item.title)`; a `/regex/` is
+run with `re.search` against the **original** title. Labels come back in the
+keyword file's own group order, which is the order the report renders sections
+in.
+
+## `rank.py` - collapse, score, cap
+
+| Signature | Returns |
+|-----------|---------|
+| `Story` | Mutable dataclass: `item`, `source_ids` (tuple), `labels` (tuple), `published_at`, `score=0.0` |
+| `collapse(pairs)` | `[Story]`, one per `dedup_key()`, in first-seen order |
+| `score(story, weights, source_weights, now)` | The weighted sum as a float. Does not mutate the story |
+| `rank_groups(stories, groups, weights, source_weights, now, default_cap=0)` | `{label: [Story, ...]}` - sorted best first, then capped. **Writes `story.score` back** onto every story it is given |
+
+`Story.item` is the first copy seen and the one displayed; `Story.published_at`
+is the *earliest* of every copy and is not necessarily `item.published_at`. The
+two differ on purpose - the link people click comes from one source, the
+timestamp is the best fact any source had.
+
+Every group in `groups` gets a key in the returned mapping, **including one that
+matched nothing**. An empty section is how a keyword that has gone quiet becomes
+visible; dropping it would hide exactly the thing worth noticing.
+
+### The two dicts the caller builds
+
+| Argument | Shape | Built from |
+|----------|-------|------------|
+| `weights` | `{"weight_source", "weight_frequency", "weight_freshness", "freshness_half_life_hours"}` | `cfg.get("rank")` |
+| `source_weights` | `{source_id: rank_weight}` | `feeds[]` + `search_templates[]`, **enabled or not** |
+| `default_cap` | int, `0` = unlimited | `report.max_per_group` |
+
+`__main__._source_weights(cfg)` builds the second one. It lives there rather
+than in `rank.py` because the layering table in [[module-layout]] gives layer 3
+`keywords`, `item` and plain data types and nothing else - reading `cfg` inside
+`rank.py` would be the back edge that makes the pipeline untestable a stage at a
+time. Disabled entries are included on purpose: an item is scored by where it
+came from, and a source switched off mid-cycle still carries the weight the
+operator gave it. An id absent from the map scores `DEFAULT_SOURCE_WEIGHT`
+(`1.0`) - a config gap is not a reason to bury a story.
+
+### Constants
+
+| Name | Value | Meaning |
+|------|-------|---------|
+| `SATURATION_SPAN` | `3.0` | The frequency term is `min(1.0, (n_sources - 1) / 3)`, so it saturates at four sources |
+| `DEFAULT_SOURCE_WEIGHT` | `1.0` | What a source with no `rank_weight` in config is worth |
+
+The scoring formula itself, and the two timestamp rules it enforces (unknown
+scores `0`, future is clamped to age `0`), are in [[news-search]] stage 6.
+
 ### [behavior] How News Is Searched, Matched and Ranked
-*`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*
+*`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*
 
 # How News Is Searched, Matched and Ranked
 
@@ -1350,7 +1466,10 @@ marks removed, whitespace collapsed. So `Điện tử` matches `dien tu`, and `E
 matches `esp32`. `/regex/` lines are applied to the **original** title, not the
 folded one, because a regex author is entitled to write their own case rules.
 
-An item may belong to several groups. It is counted once per group it matches.
+An item may belong to several groups. It is counted once per group it matches,
+and `select()` returns its labels in the keyword file's own group order.
+
+Signatures are in [[selection-layer]].
 
 A search-feed item carries the group whose term produced its query, but it is
 **still matched normally** - the search engine's idea of relevance does not get a
@@ -1359,7 +1478,9 @@ free pass into the report.
 ## Stage 5 - collapse
 
 Items are grouped by `dedup_key` ([[news-item]]). The survivor keeps the earliest
-`published_at` and the union of `source_id`s. The size of that union is the
+`published_at`, the union of `source_id`s and the union of the labels stage 4
+gave each copy - it is displayed with the first copy's title and link, but dated
+by the earliest fact any source had. The size of that union is the
 cross-source frequency signal - a story that showed up on Hacker News *and*
 Lobsters *and* a Google News query is, empirically, the story of the day.
 
@@ -1377,6 +1498,9 @@ Weights are `rank.weight_source`, `rank.weight_frequency`, `rank.weight_freshnes
 (default 0.5 / 0.3 / 0.2) and `rank.freshness_half_life_hours` (default 12).
 
 - An item with `published_at = None` gets a freshness term of `0`, never a guess.
+- An item dated in the **future** is clamped to age `0` rather than trusted:
+  `0.5 ** negative` is greater than 1, so one bad `pubDate` would outrank every
+  real story.
 - `source_count` saturates at four sources: past that, more copies say nothing new.
 - After sorting, the group's `@n` cap applies, falling back to
   `report.max_per_group`.
@@ -1402,6 +1526,9 @@ costs an afternoon to rediscover.
 | **An Algolia hit with an empty title** | `new_item()` raises and the hit is dropped | Counted at DEBUG per source, so a feed that suddenly ships titleless entries is visible instead of silently shrinking |
 | **A source hangs** | The whole run hangs; nothing outside the process kills it | `request_timeout_s` is the only bound that exists - it must always be set |
 | **Clock skew on the host** | Freshness ranking inverts | `TZ` is pinned in the container; ages are computed in UTC |
+| **A feed dates an item in the future** | `0.5 ** (negative / half_life)` exceeds 1 and that one item tops every group it is in | `score()` clamps the age at `0`, so a future timestamp is worth exactly as much as "published now" and no more |
+| **The search templates answer relevance-first, not date-first** | Measured 2026-09-05: Google News returned hits aged 1704-5783 h for `ESP32`, HN Algolia the same shape. At a 12 h half-life the freshness term is `0` for nearly every search hit, so the shortlist ranks on source weight alone and ties are broken by fetch order | Not a code defect - the fix is narrowing both queries to a recent window in `config.yaml`. Until then, expect the search half of the report to be relevance-ordered, not fresh |
+| **`rank.py` cannot read the config** | The per-source `rank_weight` is in `config.yaml`, which layer 3 may not import | `__main__._source_weights(cfg)` builds `{source_id: rank_weight}` and passes it in; an unknown id scores the neutral `1.0` |
 
 ### [rule] Release Flow
 *`rule/release-flow.md` - How a version is cut - the branch model, running release.py, what CI does with the tag, and what to do when it fails midway. - status: active - source: scripts/release.py, .github/workflows/release.yml, .github/workflows/test.yml, CHANGELOG.md - keywords: release, release.py, Unreleased, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release*

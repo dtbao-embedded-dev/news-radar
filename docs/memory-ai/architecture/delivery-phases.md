@@ -74,7 +74,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 | P0-7 | CI: check workflow on push/PR + tag-triggered release workflow, `CHANGELOG.md`, `VERSION` |
 | P0-8 | Design bank: `rule/` — release procedure, setup procedure, how to consult TrendRadar |
 
-### P1 — Fetch *(done — this repo's current phase is P2)*
+### P1 — Fetch *(done)*
 
 | # | Task |
 |---|------|
@@ -88,16 +88,22 @@ Each phase is shippable on its own: it ends in something a human can run and see
 **P2-1 landed here too.** `keywords.py` parses the whole file already, because
 finding a group's primary term means skipping every other prefix anyway.
 
-### P2 — Filter and rank
+### P2 — Filter and rank *(done — this repo's current phase is P3)*
 
 | # | Task |
 |---|------|
 | P2-1 | ~~Parse `frequency_words.txt`: groups, `+` required, `!` excluded, `@` cap, `/regex/`, display label~~ — **done in P1**, `keywords.py` |
-| P2-2 | Match engine: decide which groups an item belongs to, case- and diacritic-insensitive |
-| P2-3 | Global filter section applied before grouping |
-| P2-4 | Dedup: collapse the same story arriving from several sources onto one dedup key |
-| P2-5 | Rank: weighted sum of source rank, cross-source frequency, and freshness; weights live in config |
-| P2-6 | Per-group cap `@n` applied after ranking |
+| P2-2 | ~~Match engine: decide which groups an item belongs to, case- and diacritic-insensitive~~ — `filter.group_matches()` |
+| P2-3 | ~~Global filter section applied before grouping~~ — `filter.blocked()`, called first by `select()` |
+| P2-4 | ~~Dedup: collapse the same story arriving from several sources onto one dedup key~~ — `rank.collapse()` |
+| P2-5 | ~~Rank: weighted sum of source rank, cross-source frequency, and freshness; weights live in config~~ — `rank.score()` |
+| P2-6 | ~~Per-group cap `@n` applied after ranking~~ — `rank.rank_groups()` |
+
+**The search templates are the weak link P2 exposed.** Google News and HN
+Algolia answer a query relevance-first, not date-first, so their hits are often
+months old and the freshness term is `0` for nearly all of them - the shortlist
+currently ranks on source weight alone. Narrowing both queries to a recent
+window is a `config.yaml` change, not a code one.
 
 ### P3 — Store and render
 

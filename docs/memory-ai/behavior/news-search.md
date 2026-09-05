@@ -4,7 +4,7 @@ category: behavior
 purpose: The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered.
 status: active
 updated: 2026-09-05
-source: src/news_radar/fetch/, src/news_radar/__main__.py
+source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py
 confidence: confirmed
 keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases
 order: 1
@@ -65,7 +65,10 @@ marks removed, whitespace collapsed. So `Điện tử` matches `dien tu`, and `E
 matches `esp32`. `/regex/` lines are applied to the **original** title, not the
 folded one, because a regex author is entitled to write their own case rules.
 
-An item may belong to several groups. It is counted once per group it matches.
+An item may belong to several groups. It is counted once per group it matches,
+and `select()` returns its labels in the keyword file's own group order.
+
+Signatures are in [[selection-layer]].
 
 A search-feed item carries the group whose term produced its query, but it is
 **still matched normally** - the search engine's idea of relevance does not get a
@@ -74,7 +77,9 @@ free pass into the report.
 ## Stage 5 - collapse
 
 Items are grouped by `dedup_key` ([[news-item]]). The survivor keeps the earliest
-`published_at` and the union of `source_id`s. The size of that union is the
+`published_at`, the union of `source_id`s and the union of the labels stage 4
+gave each copy - it is displayed with the first copy's title and link, but dated
+by the earliest fact any source had. The size of that union is the
 cross-source frequency signal - a story that showed up on Hacker News *and*
 Lobsters *and* a Google News query is, empirically, the story of the day.
 
@@ -92,6 +97,9 @@ Weights are `rank.weight_source`, `rank.weight_frequency`, `rank.weight_freshnes
 (default 0.5 / 0.3 / 0.2) and `rank.freshness_half_life_hours` (default 12).
 
 - An item with `published_at = None` gets a freshness term of `0`, never a guess.
+- An item dated in the **future** is clamped to age `0` rather than trusted:
+  `0.5 ** negative` is greater than 1, so one bad `pubDate` would outrank every
+  real story.
 - `source_count` saturates at four sources: past that, more copies say nothing new.
 - After sorting, the group's `@n` cap applies, falling back to
   `report.max_per_group`.
@@ -117,3 +125,6 @@ costs an afternoon to rediscover.
 | **An Algolia hit with an empty title** | `new_item()` raises and the hit is dropped | Counted at DEBUG per source, so a feed that suddenly ships titleless entries is visible instead of silently shrinking |
 | **A source hangs** | The whole run hangs; nothing outside the process kills it | `request_timeout_s` is the only bound that exists - it must always be set |
 | **Clock skew on the host** | Freshness ranking inverts | `TZ` is pinned in the container; ages are computed in UTC |
+| **A feed dates an item in the future** | `0.5 ** (negative / half_life)` exceeds 1 and that one item tops every group it is in | `score()` clamps the age at `0`, so a future timestamp is worth exactly as much as "published now" and no more |
+| **The search templates answer relevance-first, not date-first** | Measured 2026-09-05: Google News returned hits aged 1704-5783 h for `ESP32`, HN Algolia the same shape. At a 12 h half-life the freshness term is `0` for nearly every search hit, so the shortlist ranks on source weight alone and ties are broken by fetch order | Not a code defect - the fix is narrowing both queries to a recent window in `config.yaml`. Until then, expect the search half of the report to be relevance-ordered, not fresh |
+| **`rank.py` cannot read the config** | The per-source `rank_weight` is in `config.yaml`, which layer 3 may not import | `__main__._source_weights(cfg)` builds `{source_id: rank_weight}` and passes it in; an unknown id scores the neutral `1.0` |

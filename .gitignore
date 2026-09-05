@@ -13,3 +13,6 @@ output/
 __pycache__/
 *.py[cod]
 .venv/
+
+# Local tooling logs
+.eaaw/

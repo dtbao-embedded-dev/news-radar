@@ -16,6 +16,16 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Fixes
+
+- **store**: `open_db()` refuses a store whose `user_version` sits between `0`
+  and `SCHEMA_VERSION` instead of returning a connection to it. That case fell
+  through all three branches, so a build with a newer schema would have read an
+  older file as if it matched - a query silently reading a column that means
+  something else now. Unreachable today (`SCHEMA_VERSION` is `1`), and the point
+  is that the day someone bumps it is a loud one: the error names both versions
+  and says to write the migration first.
+
 ### Features
 
 - **setup**: `scripts/setup.py` names every key that `config.yaml.example` has

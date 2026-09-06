@@ -56,6 +56,24 @@ on `release/v0.2`:
   against a copy with that key removed. The two implementations stay separate on
   purpose - `setup.py` may not `import yaml`, the image can.
 
+**Then every "what could break" line was checked, and four of six were wrong**
+(2026-09-06, immediately after). The claims written when this shipped were taken
+back to the code and to a real docker daemon rather than left as prose:
+
+| Claim as written | Verdict |
+|------------------|---------|
+| `up -d` before `pull` fails on the absent Dockerfile | **true** - and compose does not fall back to pulling; it goes straight to the build and says `failed to read dockerfile` |
+| `git checkout` deletes `config/frequency_words.txt` | **true, but framed backwards** - untouched it is deleted, edited the checkout aborts |
+| A wrong `NEWS_RADAR_HOME` "comes up clean, publishes no history" | **false** - it crash-loops on the missing config, and leaves root-owned directories |
+| A bad release is reported by P6 within two cycles | **false for the shape that matters** - a container that will not start never builds `ops.Health` |
+| Pinning `NEWS_RADAR_VERSION` alone loses to the next poll | **false** - watchtower follows the tag the container runs, and a version tag does not move |
+| *(not previously claimed)* the GHCR package is public | **false** - private by default, even from a public repo |
+
+Nine statements across `.gitignore`, `docker/.env.example`,
+`docker/docker-compose.yml`, `CHANGELOG.md` and five bank docs were corrected as
+a result. The general shape worth keeping: **a "what could break" list written
+from reasoning is a set of hypotheses, and this one was 33% accurate.**
+
 **Measured on the homelab rather than reasoned about (R8).** A throwaway compose
 project with the same three mounts, a `config/config.yaml` and a 4 KB
 `output/news.db`: `up -d`, then `up -d --force-recreate`. The container id really
@@ -93,12 +111,17 @@ Four things came out of it, all on `release/v0.2`:
   first.
 - **The keyword file is a local file now, like `config.yaml`.**
   `config/frequency_words.txt.example` ships; the working copy is gitignored and
-  created by `setup.py`. It holds no secret - the reason is that `git checkout
-  <tag>` overwrites a tracked file, so a deployment's tuned groups were one
-  deploy away from being silently reverted. Measured on a throwaway clone rather
-  than asserted: checking out the new commit over `v0.2.2` **deletes**
-  `config/frequency_words.txt`, and `setup.py --check` then names it and exits
-  `1`.
+  created by `setup.py`. It holds no secret - the reason is that a tracked file a
+  deployment edits cannot survive `git checkout <tag>`. **The original wording
+  here was wrong and a later measurement corrected it** (2026-09-06): it said
+  tuned groups were one deploy away from being *silently reverted*, and the two
+  real outcomes are opposite. Checking the new commit out over `v0.2.2` with the
+  file untouched **deletes** it, and `setup.py --check` then names it and exits
+  `1`; with the file **edited**, git refuses the checkout altogether (`error:
+  Your local changes to the following files would be overwritten by checkout ...
+  Aborting`) and the upgrade stops with nothing changed. So the untuned case
+  loses the file and the tuned case blocks the deploy - until somebody reaches
+  for `git checkout -f` and loses it anyway. Untracking removes both.
 - **`## Updating` describes the production that exists.** It said `git pull` on a
   machine running a detached tag, where `git pull` cannot work. It now carries
   the four real commands, why `--build` is not optional (`Dockerfile` copies
@@ -511,6 +534,28 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **Auto-update has no safety net, and this is the one to weigh before turning
+  it on.** A release whose *cycles* fail is reported - `ops.Health` sends one
+  message on the second consecutive failure. A release that **will not start**
+  is reported by nothing: `main()` returns `1` from the `ConfigError` branch
+  (`__main__.py:611`) before `run()` builds `health = ops.Health()` (`:563`), and
+  `restart: unless-stopped` gives every restart a fresh counter that never
+  reaches two. Measured against a container with an empty config directory: **9
+  restarts in 45 seconds, zero `starting` lines, zero health lines** - loud in
+  `docker logs`, silent on every channel. The shape that covers it is the
+  dead-man's switch, and `ops.heartbeat_url` still ships empty. Arm a monitor
+  before `--profile autoupdate`, or accept that a bad release goes unnoticed
+  until somebody opens the page.
+- **A new GHCR package is private, even from a public repo.** A package
+  published by a workflow inherits the repository's access permissions but
+  **not** its visibility, so the first `docker compose pull` on the homelab will
+  answer `denied` until the package is switched to Public by hand. One-time, and
+  a step the migration cannot skip.
+- **A wrong `NEWS_RADAR_HOME` leaves root-owned directories behind.** Docker
+  creates a bind-mount path that does not exist, as `root`. The container then
+  crash-loops on the missing config - which is the loud, easy half - but the
+  three empty directories on the host cannot be removed without `sudo`. Found
+  while verifying, when the cleanup step of the test itself failed on it.
 - **Nothing published to GHCR yet, so nothing can be pulled.** The workflow
   exists and is tested as far as a workflow can be tested without running; the
   first real evidence is the `Publish image` run going green after the next

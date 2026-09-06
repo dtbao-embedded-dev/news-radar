@@ -66,6 +66,24 @@ on `release/v0.2`:
   against a copy with that key removed. The two implementations stay separate on
   purpose - `setup.py` may not `import yaml`, the image can.
 
+**Then every "what could break" line was checked, and four of six were wrong**
+(2026-09-06, immediately after). The claims written when this shipped were taken
+back to the code and to a real docker daemon rather than left as prose:
+
+| Claim as written | Verdict |
+|------------------|---------|
+| `up -d` before `pull` fails on the absent Dockerfile | **true** - and compose does not fall back to pulling; it goes straight to the build and says `failed to read dockerfile` |
+| `git checkout` deletes `config/frequency_words.txt` | **true, but framed backwards** - untouched it is deleted, edited the checkout aborts |
+| A wrong `NEWS_RADAR_HOME` "comes up clean, publishes no history" | **false** - it crash-loops on the missing config, and leaves root-owned directories |
+| A bad release is reported by P6 within two cycles | **false for the shape that matters** - a container that will not start never builds `ops.Health` |
+| Pinning `NEWS_RADAR_VERSION` alone loses to the next poll | **false** - watchtower follows the tag the container runs, and a version tag does not move |
+| *(not previously claimed)* the GHCR package is public | **false** - private by default, even from a public repo |
+
+Nine statements across `.gitignore`, `docker/.env.example`,
+`docker/docker-compose.yml`, `CHANGELOG.md` and five bank docs were corrected as
+a result. The general shape worth keeping: **a "what could break" list written
+from reasoning is a set of hypotheses, and this one was 33% accurate.**
+
 **Measured on the homelab rather than reasoned about (R8).** A throwaway compose
 project with the same three mounts, a `config/config.yaml` and a 4 KB
 `output/news.db`: `up -d`, then `up -d --force-recreate`. The container id really
@@ -103,12 +121,17 @@ Four things came out of it, all on `release/v0.2`:
   first.
 - **The keyword file is a local file now, like `config.yaml`.**
   `config/frequency_words.txt.example` ships; the working copy is gitignored and
-  created by `setup.py`. It holds no secret - the reason is that `git checkout
-  <tag>` overwrites a tracked file, so a deployment's tuned groups were one
-  deploy away from being silently reverted. Measured on a throwaway clone rather
-  than asserted: checking out the new commit over `v0.2.2` **deletes**
-  `config/frequency_words.txt`, and `setup.py --check` then names it and exits
-  `1`.
+  created by `setup.py`. It holds no secret - the reason is that a tracked file a
+  deployment edits cannot survive `git checkout <tag>`. **The original wording
+  here was wrong and a later measurement corrected it** (2026-09-06): it said
+  tuned groups were one deploy away from being *silently reverted*, and the two
+  real outcomes are opposite. Checking the new commit out over `v0.2.2` with the
+  file untouched **deletes** it, and `setup.py --check` then names it and exits
+  `1`; with the file **edited**, git refuses the checkout altogether (`error:
+  Your local changes to the following files would be overwritten by checkout ...
+  Aborting`) and the upgrade stops with nothing changed. So the untuned case
+  loses the file and the tuned case blocks the deploy - until somebody reaches
+  for `git checkout -f` and loses it anyway. Untracking removes both.
 - **`## Updating` describes the production that exists.** It said `git pull` on a
   machine running a detached tag, where `git pull` cannot work. It now carries
   the four real commands, why `--build` is not optional (`Dockerfile` copies
@@ -521,6 +544,28 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **Auto-update has no safety net, and this is the one to weigh before turning
+  it on.** A release whose *cycles* fail is reported - `ops.Health` sends one
+  message on the second consecutive failure. A release that **will not start**
+  is reported by nothing: `main()` returns `1` from the `ConfigError` branch
+  (`__main__.py:611`) before `run()` builds `health = ops.Health()` (`:563`), and
+  `restart: unless-stopped` gives every restart a fresh counter that never
+  reaches two. Measured against a container with an empty config directory: **9
+  restarts in 45 seconds, zero `starting` lines, zero health lines** - loud in
+  `docker logs`, silent on every channel. The shape that covers it is the
+  dead-man's switch, and `ops.heartbeat_url` still ships empty. Arm a monitor
+  before `--profile autoupdate`, or accept that a bad release goes unnoticed
+  until somebody opens the page.
+- **A new GHCR package is private, even from a public repo.** A package
+  published by a workflow inherits the repository's access permissions but
+  **not** its visibility, so the first `docker compose pull` on the homelab will
+  answer `denied` until the package is switched to Public by hand. One-time, and
+  a step the migration cannot skip.
+- **A wrong `NEWS_RADAR_HOME` leaves root-owned directories behind.** Docker
+  creates a bind-mount path that does not exist, as `root`. The container then
+  crash-loops on the missing config - which is the loud, easy half - but the
+  three empty directories on the host cannot be removed without `sudo`. Found
+  while verifying, when the cleanup step of the test itself failed on it.
 - **Nothing published to GHCR yet, so nothing can be pulled.** The workflow
   exists and is tested as far as a workflow can be tested without running; the
   first real evidence is the `Publish image` run going green after the next
@@ -650,9 +695,10 @@ destination file), `store.open_db()` refuses a store between `0` and
 `SCHEMA_VERSION` instead of returning it, `config/frequency_words.txt` became a
 local file created from a committed `.example`, and `## Updating` in
 [[setup-homelab]] was rewritten for the detached-tag production that actually
-runs. **The next deploy is the awkward one**: it is the checkout that deletes
-`config/frequency_words.txt`, and the `--check` that warns about it only exists
-on the far side of that same checkout.
+runs. **That awkward next deploy no longer has to happen**: the migration above
+removes `.git` and pulls an image instead of checking a tag out, so the
+`config/frequency_words.txt` trap is stepped around rather than walked into.
+Typing `git checkout v0.2.3` on the homelab out of habit still springs it.
 
 **Three defects reported off the live site were fixed on `release/v0.2`
 (2026-09-06)**, all three landing after v0.2.1 and none of them yet on
@@ -687,6 +733,33 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **Every "what could break" line was then checked, and four of six were wrong**
+  (2026-09-06). Corrections landed in two commits across `.gitignore`,
+  `docker/.env.example`, `docker/docker-compose.yml`, `CHANGELOG.md`,
+  `deployment-homelab.md`, `config-and-env.md`, `setup-homelab.md`,
+  `crawl-cli.md`, `progress.md` and this file. What survived: `up -d` before
+  `pull` really does fail on the absent Dockerfile. What did not: the wrong
+  `NEWS_RADAR_HOME` story, the "P6 alerts within two cycles" story, and the
+  "pinning alone loses to the next poll" story.
+- **A "what could break" list written from reasoning is a set of hypotheses.**
+  This one was 33% accurate, written by someone who had just read all the code.
+  Worth remembering the next time such a list is offered as a closing summary:
+  it is the beginning of a verification pass, not the end of one.
+- **`ops.Health` covers a failing cycle, not a failing process.** It is built
+  inside `run()`, so a config the loader refuses exits at `__main__.py:611`
+  before it exists, and `restart: unless-stopped` hands every restart a fresh
+  counter. Measured: 9 restarts in 45 s, zero health lines, zero messages. This
+  is the argument for arming `ops.heartbeat_url` *before* enabling auto-update,
+  and it is now step 1 in Next steps rather than step 3.
+- **Watchtower follows the tag the container was created from.** Not `:latest`
+  in general - so pinning `NEWS_RADAR_VERSION` freezes a deployment on its own,
+  and six places had been written saying the opposite.
+- **Docker creates a missing bind-mount path, as root.** A typo in
+  `NEWS_RADAR_HOME` therefore leaves three root-owned directories the operator
+  cannot `rm`. Found because the verification script's own cleanup failed on it.
+- **A GHCR package inherits the repo's access permissions but not its
+  visibility**, so it is private even from a public repo. One manual step, and
+  the migration cannot start without it.
 - **The image and data-layout work landed in seven commits on `release/v0.2`**
   (2026-09-06): `docker/docker-compose.yml` (the four data mounts, the `image:`
   line, the watchtower service and the label), `docker/.env.example`
@@ -879,46 +952,48 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **Cut the version first, and watch the image get published.**
+1. **Arm `ops.heartbeat_url` *before* anything else here.** It is one line in
+   `~/news-radar/config/config.yaml` and it is now the precondition for
+   `--profile autoupdate`, not a nice-to-have: a release that fails to start is
+   reported by nothing at all (see progress.md, Known issues). Auto-update
+   without it means a bad release goes unnoticed until somebody opens the page.
+2. **Cut the version, watch the image publish, then make the package public.**
    `python scripts/release.py 0.2.3`. Two workflows fire on that tag now: the
-   existing `Release`, and `Publish image`. Nothing can be migrated until the
-   second one is green and
-   `docker pull ghcr.io/dtbao-embedded-dev/news-radar:0.2.3` works from the
-   homelab. **First run of a workflow that has never run** - expect to check
-   that the package was created public, or the pull needs a login.
-2. **Migrate the homelab, phase 1 only.** `## Migrating an existing checkout` in
+   existing `Release`, and `Publish image`. **The package will be private** -
+   confirmed, a workflow-published package inherits the repo's access
+   permissions but not its visibility. Switch it to Public under the
+   repository's Packages, then prove it from the homelab:
+   `docker pull ghcr.io/dtbao-embedded-dev/news-radar:0.2.3`. Nothing can be
+   migrated until that command works.
+3. **Migrate the homelab, phase 1 only.** `## Migrating an existing checkout` in
    [[setup-homelab]]: `rm -rf .git .github`, re-fetch the compose file, `pull`,
    then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays
    unset** - the compose file is still in `docker/`, so the default `..` is
    already `~/news-radar`. Do **not** `git checkout v0.2.3` out of habit: that
    is the command that deletes `config/frequency_words.txt`.
-3. **Edit `report.mode` on the homelab by hand, in the same visit.**
+4. **Edit `report.mode` on the homelab by hand, in the same visit.**
    `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
    no release can reach it, which is what
    `docker compose run --rm news-radar --check` will tell you. Set
    `mode: daily`. Expect a small burst on the first cycle after it - every story
    of the current day the channel has not already been told about goes out at
    once.
-4. **Then watch one auto-update happen on its own.** Cut a trivial version after
+5. **Then watch one auto-update happen on its own.** Cut a trivial version after
    the migration and leave it: within `WATCHTOWER_POLL_INTERVAL` the crawl
    container should be recreated and `docker compose logs news-radar | head`
    should say the new version. Until that has been seen once, auto-update is
    built and not proven.
-3. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
-   of P6-1 that survives the container being killed is built but not armed. A
-   healthchecks.io ping url or an Uptime Kuma push url in `config/config.yaml`
-   (gitignored) is the whole change - no code, no restart of anything else.
-4. **Let it run seven days.** That is P6's definition of done and the only thing
+6. **Let it run seven days.** That is P6's definition of done and the only thing
    still open. On day seven: the crawl container still `Up` with no restart,
    `backups/` holding one file per day and no more, the day list capped at 90,
    and however many alerts arrived being ones you would have wanted.
-5. **Watch whether `ALERT_AFTER = 2` is the right chattiness.** Every alert so
+7. **Watch whether `ALERT_AFTER = 2` is the right chattiness.** Every alert so
    far came from a `site_url` pointed at a 404 on purpose; real feed flakiness
    has not been through it yet.
-6. **Retention will actually delete something for the first time** once the
+8. **Retention will actually delete something for the first time** once the
    store holds anything older than 90 days. A backup is written immediately
    before each prune, so the first one has a copy standing in front of it.
-7. **Still worth eyeballing from P4**: whether 5 Discord messages per cycle is
+9. **Still worth eyeballing from P4**: whether 5 Discord messages per cycle is
    pleasant or noisy, and whether any real headline trips an escaping case the
    fixtures missed.
 
@@ -972,6 +1047,17 @@ loader and the design bank - see `progress.md`.
   timestamp spelling - a phone showing the same story differently is a second
   report, and the reader has to reconcile two things that were meant to be one.
   When the page's story row changes, `notify/` changes in the same commit.
+- **No auto-update without a dead-man's switch.** `--profile autoupdate` may not
+  be turned on while `ops.heartbeat_url` is empty. Auto-update removes the human
+  who would have noticed the deploy, and the failure it most plausibly
+  introduces - a release that will not start - is the one shape `ops.Health`
+  structurally cannot report. Measured, not assumed.
+- **A claim about behaviour is a test that has not been run.** The bank already
+  said "a doc sentence that describes behaviour is a test that has not been
+  written"; the verification pass extended it. Six such sentences were checked
+  and four were wrong, so the rule is now: a "what could break" list is written
+  as hypotheses and either measured or labelled unmeasured. Never presented as
+  findings.
 - **The package is the image, and it is not an app.** The stack is three
   processes - crawl, caddy, cloudflared - so a PyInstaller or Tauri binary would
   package one of them and leave you installing the other two. Docker already
@@ -1616,8 +1702,10 @@ Python in this project. See [[config-and-env]] for the full key list.
 | Disk fills with snapshots | Writes fail | Retention window (P3-5, P6) |
 | Crawl crashes on a bad item | Container exits | `restart: unless-stopped` plus a heartbeat so a crash loop is visible (P6-1) |
 | Clock skew | Freshness ranking goes wrong | `TZ` pinned in the container, not inherited from the host |
-| Auto-update lands a bad release | The crawl fails or crash-loops without anyone having typed a command | P6-1's health alerting reports it within two cycles and the heartbeat ping stops. Rolling back is `NEWS_RADAR_VERSION=<previous>` in `.env` **plus** starting without `--profile autoupdate` - pinning alone loses to the next poll |
+| Auto-update lands a release whose **cycles** fail | Every cycle reports problems, the process stays up | `ops.Health` reaches `ALERT_AFTER` and one message goes out on the second cycle, one more on recovery |
+| Auto-update lands a release that **will not start** | Container exits `1` and `restart: unless-stopped` loops it | **Nothing is sent.** `main()` returns before `run()` builds `ops.Health` (`__main__.py:611` vs `:563`), and each restart is a fresh process, so the counter never reaches two. Measured: 9 restarts in 45 s, zero `starting` lines, zero health lines. Only the dead-man's switch covers this - and `ops.heartbeat_url` ships empty, so today it is covered by nothing. Roll back with `NEWS_RADAR_VERSION=<previous>` in `.env` plus `up -d` |
 | GHCR unreachable at poll time | Nothing updates | Watchtower logs it and retries at the next interval; the running container is untouched, so an unreachable registry costs nothing |
+| `NEWS_RADAR_HOME` set to a path that does not exist | Docker **creates** it, as `root`, and the container gets empty directories | Loud, not silent: `config file not found: /app/config/config.yaml`, exit `1`, restart loop. But it also leaves root-owned directories on the host that the operator cannot `rm` without `sudo` - measured |
 
 ### [data] News Sources and Search Paths
 *`data/news-sources.md` - Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns. - status: active - source: config/config.yaml.example, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py - keywords: sources, feeds, RSS, Atom, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent*
@@ -1950,11 +2038,22 @@ someone chose it.
 **A local file, like `config.yaml`.** `config/frequency_words.txt.example` is
 what ships; `setup.py` copies it to `config/frequency_words.txt` on a fresh
 checkout and never overwrites it afterwards, and `.gitignore` covers the copy.
-The reason is the upgrade, not secrecy: a tracked file is overwritten by the
-`git checkout <tag>` every deploy runs, and a deployment's tuned keyword groups
-are not something a deploy may quietly revert. Changing the groups **for
-everyone** means editing the `.example` and cutting a version - that is still a
-technical change and still belongs in the changelog.
+The reason is the upgrade, not secrecy. A tracked file a deployment edits cannot
+survive the `git checkout <tag>` a deploy used to run, and **the two ways it
+fails are opposite** - both measured on a throwaway clone rather than reasoned
+about:
+
+| The local file is | `git checkout <new tag>` does |
+|-------------------|-------------------------------|
+| untouched, as the release shipped it | **deletes it.** The radar then matches nothing and every search feed is skipped |
+| edited - a deployment's tuned groups | **refuses.** `error: Your local changes to the following files would be overwritten by checkout ... Aborting`, and the upgrade stops with nothing changed |
+
+So tuning is not silently reverted, as this file used to claim; it is the
+*untuned* case that loses a file, and the tuned one that blocks the deploy until
+somebody reaches for `git checkout -f` and loses it anyway. Untracking removes
+both. Changing the groups **for everyone** means editing the `.example` and
+cutting a version - that is still a technical change and still belongs in the
+changelog.
 
 Plain text, UTF-8. **A blank line separates one group from the next**, and each
 group is counted, capped and displayed independently.
@@ -2019,14 +2118,27 @@ than a config error the code could report.
 | Variable | Default | What it decides |
 |----------|---------|-----------------|
 | `NEWS_RADAR_HOME` | `..` | The directory holding `config/`, `output/` and `backups/`, resolved relative to the compose file. Unset is the repository root, which is a checkout's own layout; a deployment sets `.` and keeps its data beside the compose file with no git checkout on the machine |
-| `NEWS_RADAR_VERSION` | `latest` | Which published image the crawl service runs. Pin it to freeze a deployment or roll one back - **and** start without `--profile autoupdate`, because pinning alone loses to the next watchtower poll |
+| `NEWS_RADAR_VERSION` | `latest` | Which published image the crawl service runs. Pinning it freezes a deployment or rolls one back, **on its own**: watchtower polls the tag the running container was created from, and a version tag does not move. Republishing that same tag is the one thing that gets past it |
 | `NEWS_RADAR_HTTP_PORT` | `8088` | Caddy's published host port, for local debugging only |
 | `WATCHTOWER_POLL_INTERVAL` | `86400` | Seconds between GHCR polls, when the `autoupdate` profile is on |
 
-`NEWS_RADAR_HOME` is the one that matters most and the one with no runtime
-symptom: set it wrong and the container mounts an empty directory, comes up
-clean, and publishes a report with no history in it. [[setup-homelab]] carries
-the value each layout wants.
+**`NEWS_RADAR_HOME` set wrong fails loudly, and leaves a mess.** Measured rather
+than assumed, because the first guess written here was that it would come up
+clean and publish a report with no history - it does not. Docker **creates** a
+bind-mount path that does not exist, as `root`, so the container gets three
+empty directories; `load()` then cannot find `config.yaml`, `main()` returns `1`,
+and `restart: unless-stopped` loops it - 9 restarts in 45 seconds when measured.
+Two consequences worth knowing before the typo happens:
+
+- the failure is in `docker logs` and **nowhere else**. It exits before
+  `ops.Health` exists, so no channel is told - see [[crawl-cli]];
+- the root-owned directories it left behind cannot be removed without `sudo`,
+  which is its own small surprise on a homelab.
+
+The silent version of this failure is a different mistake: copying `config/`
+across during a migration but not `output/news.db`. Then the config loads, the
+run succeeds, and the page is published with no history. [[setup-homelab]]
+carries the value each layout wants and moves nothing.
 
 Startup validation: a channel that is `enabled: true` with its variable missing is
 a **fatal config error**, not a warning.
@@ -2488,6 +2600,28 @@ The list then drives two things, in this order: an empty list licenses the
 heartbeat ping, and `ops.Health` turns two non-empty ones in a row into one
 alert. See [[notify-channels]] for the alert itself and [[config-and-env]] for
 `ops.*`.
+
+**A cycle that fails and a process that will not start are reported completely
+differently, and only one of them is reported at all.** `health = ops.Health()`
+is built inside `run()`, so it exists once per process and its counter dies with
+that process. A config the loader refuses never gets there: `main()` returns `1`
+from the `ConfigError` branch, before `run()` is called. With
+`restart: unless-stopped` in front of it, every restart is a fresh process with
+a fresh counter, so **two consecutive failures never accumulate and nothing is
+ever sent**.
+
+| Failure | `ops.Health` | What reaches a phone |
+|---------|--------------|----------------------|
+| A cycle raises or reports problems | counts up, alerts at `ALERT_AFTER` | one message on the second cycle, one on recovery |
+| The config cannot load at all | never constructed | **nothing** |
+
+Measured against a container whose config directory was empty: 9 restarts in 45
+seconds, `news-radar <version> starting` logged **zero** times, `consecutive
+failed cycle(s)` logged **zero** times. Loud in `docker logs`, silent everywhere
+else. The dead-man's switch is what is meant to cover this shape - `heartbeat()`
+is not reached either, so the ping simply stops - which is why
+`ops.heartbeat_url` being empty matters more once auto-update is on. See
+[[deployment-homelab]].
 
 **Logging goes to stdout, unbuffered.** The image sets `PYTHONUNBUFFERED=1`; a
 service that logs once every 30 minutes would otherwise sit in a block buffer and
@@ -3418,10 +3552,13 @@ Recovery is ordinary git. Find out which step failed from the output, then:
 | Update | `docker compose pull && up -d`, or watchtower | `git pull`, rebuild |
 | Git | **none** | yes |
 
-**The absence of git on a deployment is the design, not a shortcut.** This
-project has already lost a file to `git checkout <tag>` deleting a path the new
-commit does not carry (`config/frequency_words.txt`, v0.2.2). A machine with no
-checkout has no command that can do that to `config/`, `output/` or `backups/`.
+**The absence of git on a deployment is the design, not a shortcut.** A tracked
+file a deployment edits cannot survive `git checkout <tag>`, and it fails in
+whichever of two ways is worse for you: untouched it is **deleted**, edited the
+checkout **aborts** and the upgrade stops. This project has already been on the
+wrong side of that once (`config/frequency_words.txt`, v0.2.2). A machine with no
+checkout has no command that can do either to `config/`, `output/` or
+`backups/`.
 
 ## Prerequisites
 
@@ -3478,10 +3615,24 @@ docker compose --profile tunnel --profile autoupdate up -d
 docker compose run --rm news-radar --check
 ```
 
-**`pull` first, always.** The compose file carries `image:` and `build:` both.
-An `up -d` before the pull finds no image locally, tries to build, and dies on
-the `Dockerfile` a deployment does not have. Pulling puts the image there and
-nothing builds again.
+**The GHCR package is private until somebody makes it public.** A package
+published by a workflow inherits the repository's *access permissions* but
+**not** its visibility, so a new one is private even from a public repo and the
+`pull` above answers `denied`. Fix it once, on the package's page under the
+repository's **Packages** - Package settings - Change visibility - Public. The
+alternative is `docker login ghcr.io` on the homelab with a read:packages token,
+which is a credential on the deployment for no benefit.
+
+**`pull` first, always.** The compose file carries `image:` and `build:` both,
+and `up` **does not fall back to pulling** - measured, it goes straight to the
+build and fails:
+
+```
+failed to solve: failed to read dockerfile: open Dockerfile: no such file or directory
+```
+
+That error on a deployment means the pull was skipped, not that anything is
+broken. Pull, then `up -d`, and nothing builds again.
 
 ## Installing a checkout
 
@@ -3505,14 +3656,8 @@ starts the stack itself.
 
 An existing file is never overwritten; it is reported as `[skip]`. `--force`
 replaces one deliberately. Leave `NEWS_RADAR_HOME` empty here - the compose
-default `..` is already the repo root.
-
-| Flag | Use it when |
-|------|-------------|
-| `--dry-run` | You want to see what it would do. Writes nothing, asks nothing |
-| `--check` | Verifying a checkout - the same checks plus the secrets, a missing destination file, and any key the template has that your `config.yaml` does not |
-| `--force` | Regenerating a config from the template on purpose |
-| `--non-interactive` | Unattended provisioning; a blank secret is reported, not prompted for |
+default `..` is already the repo root. Its four flags and what each guarantees
+are in [[cli-scripts]], which is where that contract lives.
 
 ## Getting the secrets
 
@@ -3583,10 +3728,23 @@ GHCR every `WATCHTOWER_POLL_INTERVAL` seconds (86400 by default), pulls a newer
 the only service carrying `com.centurylinklabs.watchtower.enable`, because caddy
 and cloudflared are version-pinned and should not upgrade themselves unreviewed.
 
-**Freezing a version takes two changes, not one.** Set
-`NEWS_RADAR_VERSION=<version>` in `.env` **and** start without
-`--profile autoupdate`. Pinning alone loses to the next poll. The same pair is
-how a rollback works.
+**Freezing a version is one change.** Set `NEWS_RADAR_VERSION=<version>` in
+`.env` and `up -d`. Watchtower polls the tag the running container was created
+from, so a pinned deployment stays put even with the profile on - a version tag
+does not move. The same one change is how a rollback works. Turning the profile
+off as well only matters if that exact version tag gets republished, which a
+re-run of the publish workflow would do.
+
+**Auto-update has no safety net yet, and this is the thing to weigh before
+turning it on.** A release whose *cycles* fail is reported: `ops.Health` sends
+one message on the second consecutive failure. A release that **will not start**
+is not reported at all - the process exits before `ops.Health` is built, and
+every restart is a fresh process, so the counter never reaches two. Measured: 9
+restarts in 45 seconds, zero messages. The only thing that catches that shape is
+the dead-man's switch, and `ops.heartbeat_url` ships empty. **Put a
+healthchecks.io or Uptime Kuma push url in `config/config.yaml` before starting
+with `--profile autoupdate`**, or accept that a bad release goes unnoticed until
+someone opens the page.
 
 **`--check` is what reads the upgrade.** `docker compose run --rm news-radar
 --check` exits `1` naming every key that the release's `config.yaml.example` has
@@ -3616,7 +3774,14 @@ For the homelab as it stands today: a detached checkout at `~/news-radar` with
 
 Cut and publish a version first - the image has to exist before anything can
 pull it. `python scripts/release.py <version>` from a development checkout, then
-watch the `Publish image` workflow go green.
+watch the `Publish image` workflow go green, **then make the package public**
+(see above) and confirm from the homelab:
+
+```
+docker pull ghcr.io/dtbao-embedded-dev/news-radar:<version>
+```
+
+Nothing below works until that command does.
 
 **Phase 1 - stop being a checkout.** This is the whole of the fix; everything
 after it is tidying.

@@ -27,10 +27,13 @@ order: 2
 | Update | `docker compose pull && up -d`, or watchtower | `git pull`, rebuild |
 | Git | **none** | yes |
 
-**The absence of git on a deployment is the design, not a shortcut.** This
-project has already lost a file to `git checkout <tag>` deleting a path the new
-commit does not carry (`config/frequency_words.txt`, v0.2.2). A machine with no
-checkout has no command that can do that to `config/`, `output/` or `backups/`.
+**The absence of git on a deployment is the design, not a shortcut.** A tracked
+file a deployment edits cannot survive `git checkout <tag>`, and it fails in
+whichever of two ways is worse for you: untouched it is **deleted**, edited the
+checkout **aborts** and the upgrade stops. This project has already been on the
+wrong side of that once (`config/frequency_words.txt`, v0.2.2). A machine with no
+checkout has no command that can do either to `config/`, `output/` or
+`backups/`.
 
 ## Prerequisites
 
@@ -87,10 +90,24 @@ docker compose --profile tunnel --profile autoupdate up -d
 docker compose run --rm news-radar --check
 ```
 
-**`pull` first, always.** The compose file carries `image:` and `build:` both.
-An `up -d` before the pull finds no image locally, tries to build, and dies on
-the `Dockerfile` a deployment does not have. Pulling puts the image there and
-nothing builds again.
+**The GHCR package is private until somebody makes it public.** A package
+published by a workflow inherits the repository's *access permissions* but
+**not** its visibility, so a new one is private even from a public repo and the
+`pull` above answers `denied`. Fix it once, on the package's page under the
+repository's **Packages** - Package settings - Change visibility - Public. The
+alternative is `docker login ghcr.io` on the homelab with a read:packages token,
+which is a credential on the deployment for no benefit.
+
+**`pull` first, always.** The compose file carries `image:` and `build:` both,
+and `up` **does not fall back to pulling** - measured, it goes straight to the
+build and fails:
+
+```
+failed to solve: failed to read dockerfile: open Dockerfile: no such file or directory
+```
+
+That error on a deployment means the pull was skipped, not that anything is
+broken. Pull, then `up -d`, and nothing builds again.
 
 ## Installing a checkout
 
@@ -114,14 +131,8 @@ starts the stack itself.
 
 An existing file is never overwritten; it is reported as `[skip]`. `--force`
 replaces one deliberately. Leave `NEWS_RADAR_HOME` empty here - the compose
-default `..` is already the repo root.
-
-| Flag | Use it when |
-|------|-------------|
-| `--dry-run` | You want to see what it would do. Writes nothing, asks nothing |
-| `--check` | Verifying a checkout - the same checks plus the secrets, a missing destination file, and any key the template has that your `config.yaml` does not |
-| `--force` | Regenerating a config from the template on purpose |
-| `--non-interactive` | Unattended provisioning; a blank secret is reported, not prompted for |
+default `..` is already the repo root. Its four flags and what each guarantees
+are in [[cli-scripts]], which is where that contract lives.
 
 ## Getting the secrets
 
@@ -192,10 +203,23 @@ GHCR every `WATCHTOWER_POLL_INTERVAL` seconds (86400 by default), pulls a newer
 the only service carrying `com.centurylinklabs.watchtower.enable`, because caddy
 and cloudflared are version-pinned and should not upgrade themselves unreviewed.
 
-**Freezing a version takes two changes, not one.** Set
-`NEWS_RADAR_VERSION=<version>` in `.env` **and** start without
-`--profile autoupdate`. Pinning alone loses to the next poll. The same pair is
-how a rollback works.
+**Freezing a version is one change.** Set `NEWS_RADAR_VERSION=<version>` in
+`.env` and `up -d`. Watchtower polls the tag the running container was created
+from, so a pinned deployment stays put even with the profile on - a version tag
+does not move. The same one change is how a rollback works. Turning the profile
+off as well only matters if that exact version tag gets republished, which a
+re-run of the publish workflow would do.
+
+**Auto-update has no safety net yet, and this is the thing to weigh before
+turning it on.** A release whose *cycles* fail is reported: `ops.Health` sends
+one message on the second consecutive failure. A release that **will not start**
+is not reported at all - the process exits before `ops.Health` is built, and
+every restart is a fresh process, so the counter never reaches two. Measured: 9
+restarts in 45 seconds, zero messages. The only thing that catches that shape is
+the dead-man's switch, and `ops.heartbeat_url` ships empty. **Put a
+healthchecks.io or Uptime Kuma push url in `config/config.yaml` before starting
+with `--profile autoupdate`**, or accept that a bad release goes unnoticed until
+someone opens the page.
 
 **`--check` is what reads the upgrade.** `docker compose run --rm news-radar
 --check` exits `1` naming every key that the release's `config.yaml.example` has
@@ -225,7 +249,14 @@ For the homelab as it stands today: a detached checkout at `~/news-radar` with
 
 Cut and publish a version first - the image has to exist before anything can
 pull it. `python scripts/release.py <version>` from a development checkout, then
-watch the `Publish image` workflow go green.
+watch the `Publish image` workflow go green, **then make the package public**
+(see above) and confirm from the homelab:
+
+```
+docker pull ghcr.io/dtbao-embedded-dev/news-radar:<version>
+```
+
+Nothing below works until that command does.
 
 **Phase 1 - stop being a checkout.** This is the whole of the fix; everything
 after it is tidying.

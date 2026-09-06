@@ -88,6 +88,28 @@ heartbeat ping, and `ops.Health` turns two non-empty ones in a row into one
 alert. See [[notify-channels]] for the alert itself and [[config-and-env]] for
 `ops.*`.
 
+**A cycle that fails and a process that will not start are reported completely
+differently, and only one of them is reported at all.** `health = ops.Health()`
+is built inside `run()`, so it exists once per process and its counter dies with
+that process. A config the loader refuses never gets there: `main()` returns `1`
+from the `ConfigError` branch, before `run()` is called. With
+`restart: unless-stopped` in front of it, every restart is a fresh process with
+a fresh counter, so **two consecutive failures never accumulate and nothing is
+ever sent**.
+
+| Failure | `ops.Health` | What reaches a phone |
+|---------|--------------|----------------------|
+| A cycle raises or reports problems | counts up, alerts at `ALERT_AFTER` | one message on the second cycle, one on recovery |
+| The config cannot load at all | never constructed | **nothing** |
+
+Measured against a container whose config directory was empty: 9 restarts in 45
+seconds, `news-radar <version> starting` logged **zero** times, `consecutive
+failed cycle(s)` logged **zero** times. Loud in `docker logs`, silent everywhere
+else. The dead-man's switch is what is meant to cover this shape - `heartbeat()`
+is not reached either, so the ping simply stops - which is why
+`ops.heartbeat_url` being empty matters more once auto-update is on. See
+[[deployment-homelab]].
+
 **Logging goes to stdout, unbuffered.** The image sets `PYTHONUNBUFFERED=1`; a
 service that logs once every 30 minutes would otherwise sit in a block buffer and
 look hung under `docker logs`.

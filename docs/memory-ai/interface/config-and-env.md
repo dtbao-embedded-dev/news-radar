@@ -82,11 +82,22 @@ someone chose it.
 **A local file, like `config.yaml`.** `config/frequency_words.txt.example` is
 what ships; `setup.py` copies it to `config/frequency_words.txt` on a fresh
 checkout and never overwrites it afterwards, and `.gitignore` covers the copy.
-The reason is the upgrade, not secrecy: a tracked file is overwritten by the
-`git checkout <tag>` every deploy runs, and a deployment's tuned keyword groups
-are not something a deploy may quietly revert. Changing the groups **for
-everyone** means editing the `.example` and cutting a version - that is still a
-technical change and still belongs in the changelog.
+The reason is the upgrade, not secrecy. A tracked file a deployment edits cannot
+survive the `git checkout <tag>` a deploy used to run, and **the two ways it
+fails are opposite** - both measured on a throwaway clone rather than reasoned
+about:
+
+| The local file is | `git checkout <new tag>` does |
+|-------------------|-------------------------------|
+| untouched, as the release shipped it | **deletes it.** The radar then matches nothing and every search feed is skipped |
+| edited - a deployment's tuned groups | **refuses.** `error: Your local changes to the following files would be overwritten by checkout ... Aborting`, and the upgrade stops with nothing changed |
+
+So tuning is not silently reverted, as this file used to claim; it is the
+*untuned* case that loses a file, and the tuned one that blocks the deploy until
+somebody reaches for `git checkout -f` and loses it anyway. Untracking removes
+both. Changing the groups **for everyone** means editing the `.example` and
+cutting a version - that is still a technical change and still belongs in the
+changelog.
 
 Plain text, UTF-8. **A blank line separates one group from the next**, and each
 group is counted, capped and displayed independently.
@@ -151,14 +162,27 @@ than a config error the code could report.
 | Variable | Default | What it decides |
 |----------|---------|-----------------|
 | `NEWS_RADAR_HOME` | `..` | The directory holding `config/`, `output/` and `backups/`, resolved relative to the compose file. Unset is the repository root, which is a checkout's own layout; a deployment sets `.` and keeps its data beside the compose file with no git checkout on the machine |
-| `NEWS_RADAR_VERSION` | `latest` | Which published image the crawl service runs. Pin it to freeze a deployment or roll one back - **and** start without `--profile autoupdate`, because pinning alone loses to the next watchtower poll |
+| `NEWS_RADAR_VERSION` | `latest` | Which published image the crawl service runs. Pinning it freezes a deployment or rolls one back, **on its own**: watchtower polls the tag the running container was created from, and a version tag does not move. Republishing that same tag is the one thing that gets past it |
 | `NEWS_RADAR_HTTP_PORT` | `8088` | Caddy's published host port, for local debugging only |
 | `WATCHTOWER_POLL_INTERVAL` | `86400` | Seconds between GHCR polls, when the `autoupdate` profile is on |
 
-`NEWS_RADAR_HOME` is the one that matters most and the one with no runtime
-symptom: set it wrong and the container mounts an empty directory, comes up
-clean, and publishes a report with no history in it. [[setup-homelab]] carries
-the value each layout wants.
+**`NEWS_RADAR_HOME` set wrong fails loudly, and leaves a mess.** Measured rather
+than assumed, because the first guess written here was that it would come up
+clean and publish a report with no history - it does not. Docker **creates** a
+bind-mount path that does not exist, as `root`, so the container gets three
+empty directories; `load()` then cannot find `config.yaml`, `main()` returns `1`,
+and `restart: unless-stopped` loops it - 9 restarts in 45 seconds when measured.
+Two consequences worth knowing before the typo happens:
+
+- the failure is in `docker logs` and **nowhere else**. It exits before
+  `ops.Health` exists, so no channel is told - see [[crawl-cli]];
+- the root-owned directories it left behind cannot be removed without `sudo`,
+  which is its own small surprise on a homelab.
+
+The silent version of this failure is a different mistake: copying `config/`
+across during a migration but not `output/news.db`. Then the config loads, the
+run succeeds, and the page is published with no history. [[setup-homelab]]
+carries the value each layout wants and moves nothing.
 
 Startup validation: a channel that is `enabled: true` with its variable missing is
 a **fatal config error**, not a warning.

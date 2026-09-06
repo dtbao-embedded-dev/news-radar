@@ -55,6 +55,12 @@ one makes the file and the tags disagree.
   keeping `build:` beside it so a checkout still builds what it is editing.
   `caddy`'s `/srv` mount moved with the others: leaving it behind would have the
   crawl publish to one directory and the web server serve another.
+- **deploy**: pushing a `v*` tag now publishes that image. `.github/workflows/
+  image.yml` builds `linux/amd64` and pushes `<version>` and `latest` to GHCR,
+  refusing a tag the `VERSION` file disagrees with - `VERSION` is baked into the
+  image, so a mismatch would have the running container report a version that
+  was never published. The image name is spelled out in both the workflow and
+  the compose file, and `tests/test_deploy.py` pins that the two agree.
 - **setup**: `scripts/setup.py` names every key that `config.yaml.example` has
   and the local `config.yaml` does not, and `--check` exits `1` when there is
   one. The documented contract already claimed this and no code had ever done

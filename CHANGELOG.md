@@ -24,6 +24,13 @@ one makes the file and the tags disagree.
   `/days/2026-09-06.html` asked for `/days/days/<date>.html` and got a 404. The
   day list is now written for the depth of the page carrying it, which is the
   only block in which the two files differ.
+- **notify**: a story on Telegram or Discord is spelled the way the page spells
+  it - the title and the local publication time, `--` when the source gave none.
+  The source ids left the page in v0.2.1 and now leave the message with it, so a
+  reader comparing the two is comparing one report with itself. `notify.stamp()`
+  is the shared formatter and the display zone is threaded from `app.timezone`
+  down to both channels, so a message cannot read an hour off the page it
+  mirrors.
 - **render**: a story opens in a new tab instead of replacing the report.
   `rel="noopener noreferrer"` was already on every story link; `target="_blank"`
   is the half it was missing. The group and day navs move around this same

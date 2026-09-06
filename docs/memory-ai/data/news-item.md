@@ -152,7 +152,14 @@ the optional AI summary, then one `<section class="group">` per label in order.
 | `#theme` | the light/dark toggle, remembered in `localStorage` under `news-radar-theme` |
 | `nav.jump` | one link per group to `#g-<slug>`, with its count; an empty group is dimmed, never dropped |
 | `nav.days` | one link per snapshot on disk, newest first, today's included |
-| `li.story` | **the title, and the timestamp only** - two grid cells on one baseline |
+| `li.story` | **the title, and the timestamp only** - two grid cells on one baseline; the title is `target="_blank"` + `rel="noopener noreferrer"` |
+
+**Story links open in a new tab, internal links do not.** A story leads off this
+site and the report is what the reader came back to, so `li.story a` carries
+`target="_blank"`; `rel="noopener noreferrer"` is the half of that pair that
+stops the opened page reaching back through `window.opener`, and neither is
+useful alone. `nav.jump` and `nav.days` move around this same report and stay in
+the tab - `tests/test_render.py` asserts both halves of that split.
 
 **The score and the source ids are deliberately not on the page.** Both are still
 in the store - `matches.score` is what ordered the list, `item_sources` still

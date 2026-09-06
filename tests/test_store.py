@@ -338,6 +338,42 @@ except sqlite3.Error as exc:
           "raised sqlite3.Error instead: {}".format(exc))
 
 
+# -- a store from an older schema is refused too, until someone migrates it --
+
+# `SCHEMA_VERSION` is 1, so `0 < version < SCHEMA_VERSION` is the empty set and
+# this branch cannot be reached with the real constant. Raising it here is the
+# only way to exercise the case the day it becomes reachable - which is the day
+# somebody bumps the constant and expects `open_db` to do something about it.
+root = data_dir()
+mod.open_db(root).close()          # a real store at the current version
+real = mod.SCHEMA_VERSION
+try:
+    mod.SCHEMA_VERSION = real + 1  # as if this build had moved on
+    try:
+        mod.open_db(root).close()
+        check("a store from an older schema is refused, not silently used",
+              False, "open_db returned a connection at version {}".format(real))
+    except mod.StoreError as exc:
+        check("a store from an older schema is refused, not silently used", True)
+        text = str(exc)
+        check("...and the message names both versions",
+              str(real) in text and str(real + 1) in text, text)
+finally:
+    mod.SCHEMA_VERSION = real
+
+# The two paths that must stay open: a fresh file, and one already at the
+# current version.
+fresh = data_dir()
+conn = mod.open_db(fresh)
+eq("a fresh store is still created at the current version",
+   conn.execute("PRAGMA user_version").fetchone()[0], mod.SCHEMA_VERSION)
+conn.close()
+conn = mod.open_db(fresh)
+eq("reopening a current store still works",
+   conn.execute("PRAGMA user_version").fetchone()[0], mod.SCHEMA_VERSION)
+conn.close()
+
+
 # --------------------------------------------------------------------------
 
 if FAILURES:

@@ -1,6 +1,6 @@
 ---
 title: Active Context
-updated: 2026-09-05
+updated: 2026-09-06
 ---
 
 # Active Context
@@ -8,6 +8,16 @@ updated: 2026-09-05
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**The page was redesigned on 2026-09-06**, after v0.2.0 and against a real day
+pulled out of the store rather than a mockup. Five candidate layouts were built
+and thrown away except one: a sticky rail beside a single column of stories, in
+a container 80% of the viewport wide. The story row lost its score and its
+source ids - the operator asked what `0.74` was, which is the answer to whether
+it earned its place. `render.py` and `tests/test_render.py` are the only source
+files that changed; the fetch, selection, store and notify layers are untouched.
+
+**Still open from P6** (unchanged by the redesign):
 
 **P6 Ops is built, P6-4 included** (2026-09-05). A cycle that fails now says
 so - twice per outage, on Telegram and Discord - and a cycle that stops
@@ -22,6 +32,23 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The page redesign touched two files** (2026-09-06): `src/news_radar/render.py`
+  (`STYLE` rewritten, `_slug()` and `_jump_nav()` new, `_story()`, `_group()` and
+  `_page()` rebuilt) and `tests/test_render.py`. `write()` keeps its signature,
+  so `__main__.py` did not change.
+- **An author `display` beats the browser's `[hidden]`.** The single most
+  expensive thing learned here: `li.story { display: grid }` silently disables
+  `[hidden] { display: none }`, and the search box would have filtered nothing
+  on a page that looked perfect in a screenshot. Anything that gives a filtered
+  element a `display` needs `[hidden] { display: none !important; }` with it.
+- **A screenshot is not a check.** The theme toggle looked wrong in one capture
+  and right in another; measuring `getComputedStyle(body)` before and after the
+  click settled it in one command. Headless Chrome also reports a different
+  `prefers-color-scheme` between `--screenshot` and `--dump-dom` runs, so the
+  colour in a capture is not evidence of which branch fired.
+- **Removing something from the page is a test change, not a deletion.**
+  `test_render.py` pinned "the score is on the page"; it now pins that the score
+  is *not*, so the decision is defended rather than merely applied.
 - **P6 landed in twenty-one commits on `release/v0.1`** (2026-09-05):
   `src/news_radar/ops.py` (new - `heartbeat()`, `Health`, `ALERT_AFTER`),
   `store.py` (`backup()`), `notify/telegram.py` and `notify/discord.py`

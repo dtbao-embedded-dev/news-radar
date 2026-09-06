@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-05 - 19 durable doc(s)._
+_Generated 2026-09-06 - 19 durable doc(s)._
 
 ## State (transient)
 
@@ -23,6 +23,31 @@ _Generated 2026-09-05 - 19 durable doc(s)._
 and render, P4 Notify and P5 Deploy are complete, and P6 Ops is built**
 (2026-09-05). See `architecture/delivery-phases.md` for the phase map and the
 finished-product definition all of it serves.
+
+### Page redesign (2026-09-06)
+
+- **The report is a rail beside a column now, at 80% of the viewport.** What
+  used to be a header and a footer wrapped around 62rem of cards is a sticky
+  `aside` - the run's numbers, the filter, every group with its count, the day
+  list - beside one column of stories. Below 900px the container widens to 92%
+  and the rail stops sticking. Verified at 1920 and at 500: `scrollWidth ==
+  clientWidth`, so nothing overflows sideways at either size.
+- **A story is its title and its timestamp, nothing else.** The score and the
+  source ids were dropped from the page after the operator asked what `0.74`
+  meant. Both survive in the store, and the score still orders the list - see
+  [[news-item]] for the contract and the two consequences.
+- **The one bug this could have shipped, caught before it did.** `li.story` is a
+  grid, and an author `display` beats the browser's own `[hidden] { display:
+  none }` - so the search box would have hidden nothing at all. Fixed with
+  `[hidden] { display: none !important; }`, proven by driving the real filter in
+  a headless browser, and pinned by `tests/test_render.py`.
+- **Both theme directions measured, not assumed.** `getComputedStyle(body)`
+  before and after clicking the toggle, in both starting states: background and
+  text swap and `data-theme` is set. All three palette declaration sites
+  (`:root`, the media query, `[data-theme]`) were exercised.
+- **Two assertions in `test_render.py` were inverted, not deleted.** The suite
+  used to pin "the score is on the page" and "the sources are on the page";
+  it now pins that neither is, so the removal cannot drift back by accident.
 
 ### P6 - Ops
 
@@ -436,6 +461,16 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Current focus
 
+**The page was redesigned on 2026-09-06**, after v0.2.0 and against a real day
+pulled out of the store rather than a mockup. Five candidate layouts were built
+and thrown away except one: a sticky rail beside a single column of stories, in
+a container 80% of the viewport wide. The story row lost its score and its
+source ids - the operator asked what `0.74` was, which is the answer to whether
+it earned its place. `render.py` and `tests/test_render.py` are the only source
+files that changed; the fetch, selection, store and notify layers are untouched.
+
+**Still open from P6** (unchanged by the redesign):
+
 **P6 Ops is built, P6-4 included** (2026-09-05). A cycle that fails now says
 so - twice per outage, on Telegram and Discord - and a cycle that stops
 happening at all trips a dead-man's switch that lives outside this stack. The
@@ -449,6 +484,23 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The page redesign touched two files** (2026-09-06): `src/news_radar/render.py`
+  (`STYLE` rewritten, `_slug()` and `_jump_nav()` new, `_story()`, `_group()` and
+  `_page()` rebuilt) and `tests/test_render.py`. `write()` keeps its signature,
+  so `__main__.py` did not change.
+- **An author `display` beats the browser's `[hidden]`.** The single most
+  expensive thing learned here: `li.story { display: grid }` silently disables
+  `[hidden] { display: none }`, and the search box would have filtered nothing
+  on a page that looked perfect in a screenshot. Anything that gives a filtered
+  element a `display` needs `[hidden] { display: none !important; }` with it.
+- **A screenshot is not a check.** The theme toggle looked wrong in one capture
+  and right in another; measuring `getComputedStyle(body)` before and after the
+  click settled it in one command. Headless Chrome also reports a different
+  `prefers-color-scheme` between `--screenshot` and `--dump-dom` runs, so the
+  colour in a capture is not evidence of which branch fired.
+- **Removing something from the page is a test change, not a deletion.**
+  `test_render.py` pinned "the score is on the page"; it now pins that the score
+  is *not*, so the decision is defended rather than merely applied.
 - **P6 landed in twenty-one commits on `release/v0.1`** (2026-09-05):
   `src/news_radar/ops.py` (new - `heartbeat()`, `Health`, `ALERT_AFTER`),
   `store.py` (`backup()`), `notify/telegram.py` and `notify/discord.py`
@@ -1259,7 +1311,7 @@ id - `hn` and `hn_algolia` are different hosts, the two Reddit entries are not.
 3. Record it in the table above and restamp `updated`.
 
 ### [data] News Item, Dedup Key and Output Layout
-*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py - keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot*
+*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py - keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle*
 
 # News Item, Dedup Key and Output Layout
 
@@ -1381,6 +1433,37 @@ output/
 
 Everything under `output/` is gitignored. It is derived data: deleting the whole
 directory costs the archive, not the configuration.
+
+### What the page shows
+
+The page is a sticky left rail beside one column of stories, inside a container
+that is 80% of the viewport (92% below 900px). The rail carries the run's own
+numbers, the filter, every group with its count, and the day list; `main` carries
+the optional AI summary, then one `<section class="group">` per label in order.
+
+| Element | Carries |
+|---------|---------|
+| `aside .stat` | `kept today`, `matched`, `fetched`, `sources`, `failed` - `failed` turns red only when it is non-zero |
+| `#q` | the filter; matches on the diacritic-folded text of each `li.story` |
+| `#theme` | the light/dark toggle, remembered in `localStorage` under `news-radar-theme` |
+| `nav.jump` | one link per group to `#g-<slug>`, with its count; an empty group is dimmed, never dropped |
+| `nav.days` | one link per snapshot on disk, newest first, today's included |
+| `li.story` | **the title, and the timestamp only** - two grid cells on one baseline |
+
+**The score and the source ids are deliberately not on the page.** Both are still
+in the store - `matches.score` is what ordered the list, `item_sources` still
+records who carried each story - but a reader cannot act on `0.74`, and asked
+what it meant. The first `report.rank_threshold` of each group keep the
+`story hot` class; all it does now is set the title in a heavier weight.
+
+Two consequences worth knowing before changing this:
+
+- **The filter now matches titles only.** The source ids used to be in the DOM,
+  so typing `lobsters` filtered by source. That is gone with them.
+- **`[hidden] { display: none !important; }` is load-bearing.** `li.story` is a
+  grid, and an author `display` beats the browser's own `[hidden]` rule - without
+  the `!important` the filter hides nothing at all. `tests/test_render.py`
+  asserts the rule is on the page.
 
 ### [interface] Config Keys, Keyword File and Environment
 *`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*

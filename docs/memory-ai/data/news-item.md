@@ -3,10 +3,10 @@ title: News Item, Dedup Key and Output Layout
 category: data
 purpose: The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/.
 status: active
-updated: 2026-09-05
+updated: 2026-09-06
 source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py
 confidence: confirmed
-keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot
+keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle
 order: 2
 ---
 
@@ -130,3 +130,34 @@ output/
 
 Everything under `output/` is gitignored. It is derived data: deleting the whole
 directory costs the archive, not the configuration.
+
+### What the page shows
+
+The page is a sticky left rail beside one column of stories, inside a container
+that is 80% of the viewport (92% below 900px). The rail carries the run's own
+numbers, the filter, every group with its count, and the day list; `main` carries
+the optional AI summary, then one `<section class="group">` per label in order.
+
+| Element | Carries |
+|---------|---------|
+| `aside .stat` | `kept today`, `matched`, `fetched`, `sources`, `failed` - `failed` turns red only when it is non-zero |
+| `#q` | the filter; matches on the diacritic-folded text of each `li.story` |
+| `#theme` | the light/dark toggle, remembered in `localStorage` under `news-radar-theme` |
+| `nav.jump` | one link per group to `#g-<slug>`, with its count; an empty group is dimmed, never dropped |
+| `nav.days` | one link per snapshot on disk, newest first, today's included |
+| `li.story` | **the title, and the timestamp only** - two grid cells on one baseline |
+
+**The score and the source ids are deliberately not on the page.** Both are still
+in the store - `matches.score` is what ordered the list, `item_sources` still
+records who carried each story - but a reader cannot act on `0.74`, and asked
+what it meant. The first `report.rank_threshold` of each group keep the
+`story hot` class; all it does now is set the title in a heavier weight.
+
+Two consequences worth knowing before changing this:
+
+- **The filter now matches titles only.** The source ids used to be in the DOM,
+  so typing `lobsters` filtered by source. That is gone with them.
+- **`[hidden] { display: none !important; }` is load-bearing.** `li.story` is a
+  grid, and an author `display` beats the browser's own `[hidden]` rule - without
+  the `!important` the filter hides nothing at all. `tests/test_render.py`
+  asserts the rule is on the page.

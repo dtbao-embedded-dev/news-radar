@@ -125,12 +125,28 @@ check("an ampersand in a url is escaped too", "x=1&amp;y=2" in html)
 eq("exactly min(threshold, len(group)) stories are highlighted",
    html.count("story hot"), 2 + 1)
 
-check("the score is on the page", "0.91" in html)
-check("the sources that carried a story are on the page",
-      "hn" in html and "lobsters" in html)
+# Both were dropped from the page deliberately, and are pinned here so they do
+# not drift back: a reader asked what `0.74` meant, and the source ids went the
+# same way. Neither is lost - `matches.score` and `item_sources` still hold
+# them, and the score is still what ordered this list.
+check("the score is not rendered", "0.91" not in html, html[:200])
+check("source ids are not rendered", "lobsters" not in html)
+check("the timestamp is what the meta line carries", "<time datetime=" in html)
 check("a story with no timestamp renders anyway", "ESP32 undated" in html)
-check("the run's own numbers are in the footer",
+check("the run's own numbers are on the page",
       "597" in html and "209" in html)
+
+# The rail: every group reachable by name, empty ones dimmed rather than gone.
+eq("every group has an id the rail can jump to",
+   html.count('<section class="group" id="g-'), len(LABELS))
+check("the rail carries the group list", '<nav class="jump">' in html)
+check("an empty group is dimmed in the rail, not dropped",
+      '<span class="n zero">0</span>' in html)
+
+# li.story is a grid, and an author `display` beats the browser's own
+# `[hidden] { display: none }`. Without this rule the search box hides nothing.
+check("[hidden] is forced, so the filter can actually hide a story",
+      "[hidden] { display: none !important; }" in html)
 
 # Self-contained: nothing to fetch. Story links are external by nature; an
 # asset is not.

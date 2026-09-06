@@ -29,9 +29,17 @@ ROOT = Path(__file__).resolve().parent.parent
 
 MIN_PYTHON = (3, 11)
 
-# (template, destination) - both relative to the repo root.
+# (template, destination) - both relative to the repo root. The first pair is
+# the config, and `missing_config_keys()` reads it by index.
+#
+# The keyword file is a pair for a different reason than the other two: it holds
+# no secret, but it is what a deployment tunes, and a tracked file is overwritten
+# by the `git checkout <tag>` that every upgrade runs. A deploy may not quietly
+# revert somebody's keyword groups.
 TEMPLATES = [
     (Path("config/config.yaml.example"), Path("config/config.yaml")),
+    (Path("config/frequency_words.txt.example"),
+     Path("config/frequency_words.txt")),
     (Path("docker/.env.example"), Path("docker/.env")),
 ]
 

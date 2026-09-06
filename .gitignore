@@ -2,8 +2,13 @@
 .claude/gitconfig.yml
 .claude/commit-backup.json
 
-# Real config and secrets - templates are committed, these are not
+# Real config and secrets - templates are committed, these are not.
+# frequency_words.txt is here for a different reason than the two below it: not
+# because it holds a secret, but because `git checkout <tag>` overwrites a
+# tracked file, and a deployment's tuned keyword groups are not something a
+# deploy may quietly revert.
 config/config.yaml
+config/frequency_words.txt
 docker/.env
 docker/tunnel-credentials.json
 

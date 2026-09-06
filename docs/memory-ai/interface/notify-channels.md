@@ -3,10 +3,10 @@ title: Notification Channels - Telegram and Discord
 category: interface
 purpose: Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send.
 status: active
-updated: 2026-09-05
+updated: 2026-09-06
 source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py
 confidence: confirmed
-keywords: alert, Health, ALERT_AFTER, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set
+keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set
 order: 3
 ---
 
@@ -25,8 +25,8 @@ does, and honouring a 429's `Retry-After` is a transport concern rather than a
 per-channel one. The alternative was a second HTTP client inside `notify/`.
 
 Neither channel reads the environment, the config or the clock. The secrets, the
-row set and the group order all arrive as arguments, which is why
-`tests/test_notify.py` exercises both channels against a local `http.server`
+row set, the group order and the display timezone all arrive as arguments, which
+is why `tests/test_notify.py` exercises both channels against a local `http.server`
 with nothing installed and nothing configured.
 
 ## `notify/__init__.py` - what both channels share
@@ -36,6 +36,7 @@ with nothing installed and nothing configured.
 | `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order + the seen-set diff. Empty groups dropped |
 | `chunk(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. Every text under `limit` |
 | `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
+| `stamp(moment, tz)` | `str` | `published_at` as `TIME_FMT` (`%H:%M %d/%m`), or `NO_TIME` (`--`) |
 | `SendResult(sent, failed, keys)` | dataclass | `.stories` is `len(keys)` |
 
 `TITLE_MAX` is `240`: long enough that no real headline is touched, short enough
@@ -63,7 +64,23 @@ buzz to say nothing happened.
 
 The same row `store.day_matches()` and `store.run_matches()` return - see
 [[storage-layer]]. A channel reads `dedup_key`, `title`, `url`,
-`canonical_url` and `sources`, and ignores the rest.
+`canonical_url` and `published_at`, and ignores the rest - `sources` included,
+since v0.2.2.
+
+**A message line is the page's line.** The page shows a title and a local time
+and nothing else ([[news-item]]); a message that shows the same story with a
+source id and no time is a second report, not the same one. `notify.stamp(moment,
+tz)` renders `published_at` as `%H:%M %d/%m`, or `--` when the source gave no
+timestamp - the page's own honest dash. The format is duplicated from
+`render._when()` rather than imported: `render` and `notify` are the two halves
+of layer 5 and neither owns the other. `tests/test_notify.py` asserts the two
+spellings agree, so the duplication cannot drift quietly.
+
+**The zone is an argument, never the host's.** `__main__._notify()` resolves
+`app.timezone` once and hands the same `tz` to `_rows_to_send()` and to every
+channel, so a message cannot read an hour off the page it mirrors. `build()` and
+`send()` default it to UTC, which is what keeps them callable with no config at
+all.
 
 ## Telegram
 
@@ -78,17 +95,17 @@ The same row `store.day_matches()` and `store.run_matches()` return - see
 
 | Signature | Returns |
 |-----------|---------|
-| `build(groups, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
-| `send(fetcher, groups, token, chat_id)` | `SendResult` |
+| `build(groups, tz=UTC, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
+| `send(fetcher, groups, token, chat_id, tz=UTC)` | `SendResult` |
 | `alert(fetcher, text, token, chat_id)` | `bool` - one operational message, **no `parse_mode`** |
 
 Formatting: `<b>label</b>` per group, then
-`• <a href="url">title</a> <i>sources</i>` per story.
+`• <a href="url">title</a> <i>HH:MM dd/mm</i>` per story.
 
 - **HTML, not Markdown.** Telegram's Markdown refuses a message over any
   unbalanced `*` or `_` in a headline and the whole message is lost; HTML has one
   escaping rule.
-- Every title, link and source id goes through `html.escape(..., quote=True)`
+- Every title, link and timestamp goes through `html.escape(..., quote=True)`
   **before** being wrapped in a tag. An unescaped `&` makes the message fail with
   `Bad Request: can't parse entities` and every story in it disappears.
 - Link preview is off: one preview per message would bury the list under a single
@@ -112,11 +129,11 @@ Formatting: `<b>label</b>` per group, then
 
 | Signature | Returns |
 |-----------|---------|
-| `build(groups, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
-| `send(fetcher, groups, webhook_url)` | `SendResult` |
+| `build(groups, tz=UTC, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
+| `send(fetcher, groups, webhook_url, tz=UTC)` | `SendResult` |
 | `alert(fetcher, text, webhook_url)` | `bool` - one operational message, Markdown-escaped |
 
-Formatting: `**label**` per group, then ``• [title](url) `sources` `` per story.
+Formatting: `**label**` per group, then ``• [title](url) `HH:MM dd/mm` `` per story.
 
 - **Plain `content`, no embeds.** The 6000-character total across embeds is
   easier to overrun than any per-embed limit, and it buys nothing here.
@@ -128,8 +145,10 @@ Formatting: `**label**` per group, then ``• [title](url) `sources` `` per stor
 - A **masked** link rather than a bare url, on two counts: the raw address would
   widen every line past a phone's width, and Discord does not auto-embed a masked
   link, so ten stories stay ten lines instead of ten preview cards.
-- Sources sit in a code span because a source id may carry an underscore
-  (`hn_algolia`, `r_embedded`) that italics would eat.
+- The timestamp sits in a code span, where the source ids used to be: it is
+  monospaced, so a column of them lines up the way the page's tabular figures do.
+  Nothing inside a code span is Markdown-escaped - a backslash there would be
+  printed rather than obeyed.
 - 1900 is a quarter of Telegram's budget: **the same run makes more Discord
   messages than Telegram messages**, which is expected rather than a bug.
   Measured on 2026-09-05, 43 stories were 2 Telegram messages and 5 Discord ones.

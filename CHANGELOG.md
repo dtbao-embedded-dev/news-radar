@@ -16,6 +16,18 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Features
+
+- **setup**: `scripts/setup.py` names every key that `config.yaml.example` has
+  and the local `config.yaml` does not, and `--check` exits `1` when there is
+  one. The documented contract already claimed this and no code had ever done
+  it, which is how a deployment ran a whole release on `report.mode:
+  incremental` after the template had moved on. Missing keys only, never
+  differing values: `ops.site_url` and the `ai.*` endpoint are meant to differ
+  on a real deployment, and a check that fires every upgrade is one nobody
+  reads. Reported in every mode, fatal only under `--check` - an absent key
+  still falls back to the code default, so the stack starts either way.
+
 ## v0.2.2 - 2026-09-06
 
 ### Fixes

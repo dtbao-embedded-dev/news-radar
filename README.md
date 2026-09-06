@@ -71,7 +71,7 @@ service cannot build, so only the web half is started and the script says so.
 | File | Holds |
 |---|---|
 | `config/config.yaml` | feeds, search templates, schedule, ranking weights |
-| `config/frequency_words.txt` | the keyword groups |
+| `config/frequency_words.txt` | the keyword groups — created from `frequency_words.txt.example`, gitignored so an upgrade never reverts your tuning |
 | `docker/.env` | secrets and the published port — never committed |
 
 Keyword file syntax: a blank line separates groups; `+` requires a word, `!`

@@ -16,6 +16,21 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Breaking Changes
+
+- **keywords**: `config/frequency_words.txt` is now a local file created from
+  `config/frequency_words.txt.example`, exactly like `config.yaml`, and is
+  gitignored. It holds no secret; the reason is the upgrade. A tracked file is
+  overwritten by the `git checkout <tag>` every deploy runs, so a deployment's
+  tuned keyword groups were one deploy away from being silently reverted.
+  **Upgrading deletes the file**, because it was tracked in the old commit and
+  is not in the new one - the radar would then match nothing and every search
+  feed would be skipped. After checking out this version, run
+  `python scripts/setup.py` (or copy the `.example` by hand) **before** starting
+  the stack; `setup.py --check` now fails while the file is absent rather than
+  calling the checkout ready. Changing the groups for everyone still means
+  editing the `.example` and cutting a version.
+
 ### Fixes
 
 - **store**: `open_db()` refuses a store whose `user_version` sits between `0`
@@ -37,6 +52,9 @@ one makes the file and the tags disagree.
   on a real deployment, and a check that fires every upgrade is one nobody
   reads. Reported in every mode, fatal only under `--check` - an absent key
   still falls back to the code default, so the stack starts either way.
+- **setup**: `--check` also fails when a file `setup.py` is meant to create is
+  missing, instead of printing what it would create and exiting `0`. Same
+  documented promise ("required files exist"), same gap between it and the code.
 
 ## v0.2.2 - 2026-09-06
 

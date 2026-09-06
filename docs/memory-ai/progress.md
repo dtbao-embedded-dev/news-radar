@@ -1,6 +1,6 @@
 ---
 title: Progress
-updated: 2026-09-05
+updated: 2026-09-06
 ---
 
 # Progress
@@ -13,6 +13,31 @@ updated: 2026-09-05
 and render, P4 Notify and P5 Deploy are complete, and P6 Ops is built**
 (2026-09-05). See `architecture/delivery-phases.md` for the phase map and the
 finished-product definition all of it serves.
+
+### Page redesign (2026-09-06)
+
+- **The report is a rail beside a column now, at 80% of the viewport.** What
+  used to be a header and a footer wrapped around 62rem of cards is a sticky
+  `aside` - the run's numbers, the filter, every group with its count, the day
+  list - beside one column of stories. Below 900px the container widens to 92%
+  and the rail stops sticking. Verified at 1920 and at 500: `scrollWidth ==
+  clientWidth`, so nothing overflows sideways at either size.
+- **A story is its title and its timestamp, nothing else.** The score and the
+  source ids were dropped from the page after the operator asked what `0.74`
+  meant. Both survive in the store, and the score still orders the list - see
+  [[news-item]] for the contract and the two consequences.
+- **The one bug this could have shipped, caught before it did.** `li.story` is a
+  grid, and an author `display` beats the browser's own `[hidden] { display:
+  none }` - so the search box would have hidden nothing at all. Fixed with
+  `[hidden] { display: none !important; }`, proven by driving the real filter in
+  a headless browser, and pinned by `tests/test_render.py`.
+- **Both theme directions measured, not assumed.** `getComputedStyle(body)`
+  before and after clicking the toggle, in both starting states: background and
+  text swap and `data-theme` is set. All three palette declaration sites
+  (`:root`, the media query, `[data-theme]`) were exercised.
+- **Two assertions in `test_render.py` were inverted, not deleted.** The suite
+  used to pin "the score is on the page" and "the sources are on the page";
+  it now pins that neither is, so the removal cannot drift back by accident.
 
 ### P6 - Ops
 

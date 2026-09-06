@@ -3,7 +3,7 @@ title: Homelab Deployment
 category: architecture
 purpose: How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world.
 status: active
-updated: 2026-09-05
+updated: 2026-09-06
 source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, scripts/setup.py
 confidence: confirmed
 keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, schedule, volumes, restart policy
@@ -114,7 +114,7 @@ Nothing outside the LAN reaches it.
 
 | Host path | Container path | Mode | Holds |
 |-----------|----------------|------|-------|
-| `./config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` |
+| `./config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` - both gitignored, both created by `setup.py` from their `.example`. The whole directory is mounted, so a `git checkout` in the host checkout changes what the container reads at its next restart |
 | `./output` | `/app/output` | read-write (crawl) / read-only (caddy, as `/srv`) | `index.html`, `news.db`, per-day snapshots |
 | `./docker/cloudflared.yml` | `/etc/cloudflared/config.yml` | read-only | the tunnel's ingress |
 | `./docker/tunnel-credentials.json` | `/etc/cloudflared/creds.json` | read-only | the connector's credentials |

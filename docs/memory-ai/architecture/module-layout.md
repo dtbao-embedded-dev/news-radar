@@ -3,7 +3,7 @@ title: Module Layout and Stack
 category: architecture
 purpose: The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take.
 status: active
-updated: 2026-09-05
+updated: 2026-09-06
 source: src/news_radar/, Dockerfile, requirements.txt
 confidence: confirmed
 keywords: tree, layout, layering, ops.py, summarize.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
@@ -23,7 +23,8 @@ news-radar/
 ├── config/
 │   ├── config.yaml.example     # template, committed
 │   ├── config.yaml             # real, gitignored, created by setup.py
-│   └── frequency_words.txt     # keyword groups, committed
+│   ├── frequency_words.txt.example  # keyword groups, committed
+│   └── frequency_words.txt     # real, gitignored, created by setup.py
 ├── docker/
 │   ├── docker-compose.yml      # crawl service + caddy
 │   ├── Caddyfile               # serves output/ on :8080

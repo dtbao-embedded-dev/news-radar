@@ -46,7 +46,7 @@ someone chose it.
 | `search_templates[].format` | str | `rss` | `rss`, `atom`, or `hn_algolia_json` |
 | `search_templates[].enabled` | bool | `true` | `reddit_search` ships **disabled** in the template - it duplicates the fixed Reddit feed heavily |
 | `search_templates[].rank_weight` | float | `1.0` *(template ships `0.8`)* | Search hits rank below front-page hits in the shipped template |
-| `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file |
+| `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file. Gitignored and created by `setup.py` from `frequency_words.txt.example`, so `git checkout <tag>` cannot revert a deployment's tuning |
 | `report.mode` | str | `incremental` **(template ships `daily`)** | `incremental` (this run's new matches), `current` (this run's whole shortlist, every cycle), `daily` (the whole local day minus what the channel already got). The template ships `daily` because it reads the same window the page renders, so a phone and the page agree on which stories exist - and a story missed by one refused cycle is offered again instead of lost |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
 | `report.rank_threshold` | int | `5` | The first N of each group are highlighted on the page |
@@ -78,6 +78,15 @@ someone chose it.
 **No secret ever appears in this file.** A leaked `config.yaml` must be harmless.
 
 ## frequency_words.txt
+
+**A local file, like `config.yaml`.** `config/frequency_words.txt.example` is
+what ships; `setup.py` copies it to `config/frequency_words.txt` on a fresh
+checkout and never overwrites it afterwards, and `.gitignore` covers the copy.
+The reason is the upgrade, not secrecy: a tracked file is overwritten by the
+`git checkout <tag>` every deploy runs, and a deployment's tuned keyword groups
+are not something a deploy may quietly revert. Changing the groups **for
+everyone** means editing the `.example` and cutting a version - that is still a
+technical change and still belongs in the changelog.
 
 Plain text, UTF-8. **A blank line separates one group from the next**, and each
 group is counted, capped and displayed independently.

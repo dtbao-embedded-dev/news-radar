@@ -24,6 +24,13 @@ one makes the file and the tags disagree.
   `/days/2026-09-06.html` asked for `/days/days/<date>.html` and got a 404. The
   day list is now written for the depth of the page carrying it, which is the
   only block in which the two files differ.
+- **config**: the shipped template moves to `report.mode: daily`, so a message
+  covers the same window the page does - the whole local day, minus what that
+  channel has already been told. Under `incremental` a story missed by one
+  refused cycle was never offered again, because the next cycle only reads its
+  own run. The **default** for an absent key stays `incremental`: an upgrade
+  that never mentioned the key must not change what a phone receives. An
+  existing deployment has to set it by hand.
 - **notify**: a story on Telegram or Discord is spelled the way the page spells
   it - the title and the local publication time, `--` when the source gave none.
   The source ids left the page in v0.2.1 and now leave the message with it, so a

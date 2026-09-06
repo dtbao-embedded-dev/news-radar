@@ -37,76 +37,115 @@ INDEX_NAME = "index.html"
 _WARNED = set()
 
 STYLE = """
+*, *::before, *::after { box-sizing: border-box; }
+/* Not cosmetic: `li.story` is a grid, and an author `display` beats the
+   browser's own `[hidden] { display: none }`. Without this line the search box
+   filters nothing. */
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body { margin: 0; }
+.wrap { width: 80%; margin: 0 auto; }
+@media (max-width: 900px) { .wrap { width: 92%; } }
+a:focus-visible, button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; scroll-behavior: auto !important; }
+}
 :root {
   color-scheme: light;
-  --bg: #f6f7f9; --card: #ffffff; --ink: #16191d; --dim: #6b7280;
-  --line: #e3e6ea; --hot: #b45309; --hot-bg: #fff7ed; --link: #1d4ed8;
+  --bg:#ffffff; --panel:#f7f8fa; --ink:#101418; --ink2:#39414a; --dim:#6e7883;
+  --line:#e6e9ed; --hot:#b91c1c; --accent:#0f766e;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0f1115; --card: #171a20; --ink: #e6e8ec; --dim: #98a1ad;
-    --line: #262b33; --hot: #fbbf24; --hot-bg: #221a08; --link: #7aa2f7;
+    --bg:#101418; --panel:#161b21; --ink:#eef2f6; --ink2:#c2cad3; --dim:#828d99;
+    --line:#232a32; --hot:#f87171; --accent:#5eead4;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0f1115; --card: #171a20; --ink: #e6e8ec; --dim: #98a1ad;
-  --line: #262b33; --hot: #fbbf24; --hot-bg: #221a08; --link: #7aa2f7;
+  --bg:#101418; --panel:#161b21; --ink:#eef2f6; --ink2:#c2cad3; --dim:#828d99;
+  --line:#232a32; --hot:#f87171; --accent:#5eead4;
 }
-* { box-sizing: border-box; }
-body {
-  margin: 0; background: var(--bg); color: var(--ink);
-  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-header, main, footer { max-width: 62rem; margin: 0 auto; padding: 0 1rem; }
-header { padding-top: 1.5rem; }
-h1 { margin: 0 0 .25rem; font-size: 1.4rem; letter-spacing: -.01em; }
-h1 .day { color: var(--dim); font-weight: 400; }
-.bar { display: flex; gap: .5rem; margin: 1rem 0 .75rem; }
-#q {
-  flex: 1; padding: .55rem .75rem; border: 1px solid var(--line);
-  border-radius: .5rem; background: var(--card); color: inherit; font: inherit;
-}
-#theme {
-  padding: .55rem .8rem; border: 1px solid var(--line); border-radius: .5rem;
-  background: var(--card); color: inherit; font: inherit; cursor: pointer;
-}
-nav.days { display: flex; flex-wrap: wrap; gap: .4rem; font-size: .85rem; }
-nav.days a {
-  padding: .2rem .5rem; border: 1px solid var(--line); border-radius: .4rem;
-  color: var(--dim); text-decoration: none;
-}
-nav.days a[aria-current="page"] { color: var(--ink); border-color: var(--dim); }
-section.group {
-  background: var(--card); border: 1px solid var(--line);
-  border-radius: .6rem; margin: 1rem 0; padding: .25rem 1rem 1rem;
-}
-section.group h2 {
-  font-size: 1rem; margin: .9rem 0 .5rem; display: flex; gap: .5rem;
-  align-items: baseline;
-}
-section.group h2 .n { color: var(--dim); font-weight: 400; font-size: .85rem; }
-ol.stories { list-style: none; margin: 0; padding: 0; }
-li.story { padding: .45rem 0; border-top: 1px solid var(--line); }
-li.story:first-child { border-top: 0; }
-li.story.hot { border-left: 3px solid var(--hot); padding-left: .6rem;
-               background: var(--hot-bg); }
-li.story a { color: var(--link); text-decoration: none; }
-li.story a:hover { text-decoration: underline; }
-li.story .meta {
-  display: block; color: var(--dim); font-size: .8rem; margin-top: .15rem;
-}
-li.story.hot .score { color: var(--hot); font-weight: 600; }
-p.empty { color: var(--dim); font-style: italic; margin: .4rem 0 .6rem; }
-section.summary {
-  background: var(--card); border: 1px solid var(--line);
-  border-left: 3px solid var(--dim);
-  border-radius: .6rem; margin: 1rem 0; padding: .75rem 1rem;
-}
-section.summary p { margin: .35rem 0; }
-section.summary strong { color: var(--hot); }
-footer { color: var(--dim); font-size: .8rem; padding: 1rem; text-align: center; }
+body { background:var(--bg); color:var(--ink);
+  font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased; }
+.shell { display:grid; grid-template-columns:16rem minmax(0,1fr); gap:2.5rem;
+         padding:1.6rem 0 2.5rem; align-items:start; }
+@media (max-width:900px) { .shell { grid-template-columns:1fr; gap:1.2rem; } }
+aside { position:sticky; top:1.2rem; }
+@media (max-width:900px) { aside { position:static; } }
+h1 { margin:0 0 .2rem; font-size:1.2rem; font-weight:650;
+     letter-spacing:-.015em; }
+h1::before { content:""; display:inline-block; width:.5rem; height:.5rem;
+             border-radius:50%; background:var(--accent); margin-right:.45rem;
+             vertical-align:.08em; }
+.day { color:var(--dim); font-size:.8rem; }
+.stat { margin:.9rem 0 0; padding:.65rem .75rem; background:var(--panel);
+        border:1px solid var(--line); border-radius:.5rem; color:var(--dim);
+        font-size:.76rem; line-height:1.9; font-variant-numeric:tabular-nums; }
+.stat span { display:flex; }
+.stat b { margin-left:auto; color:var(--ink2); font-weight:600; }
+.stat b.bad { color:var(--hot); }
+.rail-bar { display:flex; gap:.4rem; margin:.9rem 0 .8rem; }
+#q { flex:1; min-width:0; padding:.45rem .65rem; border:1px solid var(--line);
+     border-radius:.45rem; background:var(--panel); color:inherit;
+     font:inherit; font-size:.88rem; }
+#q::placeholder { color:var(--dim); }
+#theme { padding:.45rem .6rem; border:1px solid var(--line);
+         border-radius:.45rem; background:var(--panel); color:var(--ink2);
+         font:inherit; font-size:.82rem; cursor:pointer; }
+nav.jump { display:flex; flex-direction:column; gap:.05rem; }
+nav.jump a { display:flex; align-items:center; gap:.5rem; padding:.3rem .55rem;
+             border-radius:.4rem; color:var(--ink2); text-decoration:none;
+             font-size:.85rem; }
+nav.jump a:hover { background:var(--panel); color:var(--ink); }
+nav.jump a .n { margin-left:auto; color:var(--dim); font-size:.75rem;
+                font-variant-numeric:tabular-nums; }
+nav.jump a .n.zero { opacity:.45; }
+nav.days { display:flex; flex-wrap:wrap; gap:.3rem; margin-top:1rem;
+           padding-top:.8rem; border-top:1px solid var(--line);
+           font-size:.75rem; }
+nav.days a { padding:.1rem .4rem; border-radius:.3rem; color:var(--dim);
+             text-decoration:none; }
+nav.days a:hover { background:var(--panel); color:var(--ink); }
+nav.days a[aria-current="page"] { color:var(--accent); font-weight:600; }
+section.summary { margin:0 0 1.8rem; padding:.9rem 1.1rem;
+                  background:var(--panel); border:1px solid var(--line);
+                  border-left:3px solid var(--accent); border-radius:.55rem; }
+section.summary p { margin:.4rem 0; color:var(--ink2); font-size:.93rem; }
+section.summary strong { color:var(--ink); font-weight:650; }
+section.group { margin:0 0 2.2rem; scroll-margin-top:1.5rem; }
+section.group h2 { display:flex; align-items:baseline; gap:.55rem;
+                   margin:0 0 .6rem; padding:0 .6rem .45rem;
+                   border-bottom:1px solid var(--line);
+                   font-size:.78rem; font-weight:650; letter-spacing:.08em;
+                   text-transform:uppercase; color:var(--ink2); }
+section.group h2 .n { color:var(--dim); font-weight:400;
+                      font-size:.75rem; font-variant-numeric:tabular-nums; }
+ol.stories { list-style:none; margin:0; padding:0; }
+/* Two cells on one baseline: the title takes what it needs, the time is
+   pinned to the right edge of the column. `auto` rather than a fixed width
+   because "--" is what an undated story renders. */
+li.story { display:grid; grid-template-columns:minmax(0,1fr) auto;
+           column-gap:1.5rem; align-items:baseline;
+           padding:.45rem .6rem; border-radius:.4rem; }
+li.story:hover { background:var(--panel); }
+li.story a { color:var(--ink); text-decoration:none; font-weight:500;
+             line-height:1.4; }
+/* All that is left of the top-of-group mark: no rule, no colour, no number.
+   The order of the list is the ranking now. */
+li.story.hot a { font-weight:650; }
+li.story a:hover { color:var(--accent); text-decoration:underline;
+                   text-underline-offset:2px; }
+li.story .meta { color:var(--dim); font-size:.75rem; white-space:nowrap;
+                 font-variant-numeric:tabular-nums; }
+p.empty { color:var(--dim); font-style:italic; margin:0; padding:.2rem .6rem;
+          font-size:.88rem; }
+footer { color:var(--dim); font-size:.76rem; padding:1rem 0 2.5rem;
+         border-top:1px solid var(--line); }
 """
 
 SCRIPT = """
@@ -198,16 +237,30 @@ def _when(moment, tz):
         _e(moment.isoformat()), _e(local.strftime("%H:%M %d/%m")))
 
 
+def _slug(label):
+    """A fragment id for a group, so the rail can link to its section.
+
+    Non-ASCII survives: a Vietnamese label makes a Vietnamese id, which is a
+    valid HTML id and a fragment the browser percent-encodes on its own.
+    """
+    return "g-" + "".join(c if c.isalnum() else "-" for c in label.lower())
+
+
 def _story(row, hot, tz):
+    """Title on the left, timestamp on the right, and nothing else.
+
+    Neither the score nor the source ids reach the page. Both are still in the
+    store - `matches.score` is what put this row above the next one, and
+    `item_sources` still records who carried it - but a reader asked what
+    `0.74` meant, and a number nobody can act on is chrome. `hot` survives as
+    a heavier title: the order of the list is the ranking.
+    """
     return (
         '<li class="{cls}"><a href="{url}" rel="noopener noreferrer">{title}</a>'
-        '<span class="meta"><span class="score">{score:.2f}</span> &middot; '
-        '{sources} &middot; {when}</span></li>').format(
+        '<span class="meta">{when}</span></li>').format(
             cls="story hot" if hot else "story",
             url=_e(row.get("url") or row.get("canonical_url") or "#"),
             title=_e(row.get("title")),
-            score=row.get("score") or 0.0,
-            sources=_e(", ".join(row.get("sources") or ())) or "-",
             when=_when(row.get("published_at"), tz))
 
 
@@ -217,8 +270,25 @@ def _group(label, rows, threshold, tz):
     else:
         body = '<ol class="stories">{}</ol>'.format("".join(
             _story(row, index < threshold, tz) for index, row in enumerate(rows)))
-    return ('<section class="group"><h2>{label} <span class="n">{n}</span></h2>'
-            '{body}</section>').format(label=_e(label), n=len(rows), body=body)
+    return ('<section class="group" id="{id}">'
+            '<h2>{label} <span class="n">{n}</span></h2>'
+            '{body}</section>').format(id=_e(_slug(label)), label=_e(label),
+                                       n=len(rows), body=body)
+
+
+def _jump_nav(labels, day_rows):
+    """The rail's group list: every label, its count, in page order.
+
+    A group with nothing in it is dimmed rather than dropped, for the same
+    reason its section stays on the page - a keyword that has gone quiet looks
+    identical to a keyword nobody wrote about, and only one of those is worth
+    knowing.
+    """
+    return '<nav class="jump">{}</nav>'.format("".join(
+        '<a href="#{id}">{label}<span class="n{zero}">{n}</span></a>'.format(
+            id=_e(_slug(label)), label=_e(label), n=count,
+            zero=" zero" if not count else "")
+        for label, count in ((l, len(day_rows.get(l) or [])) for l in labels)))
 
 
 def _summary(text):
@@ -271,28 +341,45 @@ def _day_nav(data_dir, today):
 
 
 def _page(labels, day_rows, meta, tz, threshold, today, nav, summary=None):
+    """The whole document: a sticky rail of context, a column of stories.
+
+    The rail carries what used to be spread across a header and a footer - the
+    run's own numbers, the filter, the group list, the day list - so it stays
+    on screen while the stories scroll. Below 900px it stops sticking and
+    becomes the top of the page.
+    """
     generated = meta.get("generated_at")
     generated_local = generated.astimezone(tz).strftime("%H:%M %d/%m/%Y") \
         if generated else "-"
+    errors = meta.get("errors", 0)
     return (
         "<!doctype html>\n"
         '<html lang="vi" data-theme="">\n<head>\n'
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        "<title>news-radar &middot; {today}</title>\n"
+        "<title>News Radar &middot; {today}</title>\n"
         "<style>{style}</style>\n</head>\n<body>\n"
-        '<header><h1>news-radar <span class="day">{today}</span></h1>\n'
-        '<div class="bar">'
+        '<div class="shell wrap">\n'
+        '<aside>\n<h1>News Radar</h1>'
+        '<div class="day">{today}</div>\n'
+        '<div class="stat">'
+        "<span>kept today <b>{kept}</b></span>"
+        "<span>matched <b>{matched}</b></span>"
+        "<span>fetched <b>{fetched}</b></span>"
+        "<span>sources <b>{sources}</b></span>"
+        "<span>failed <b{bad}>{errors}</b></span></div>\n"
+        '<div class="rail-bar">'
         '<input id="q" type="search" placeholder="Filter today\'s stories"'
         ' autocomplete="off" spellcheck="false">'
-        '<button id="theme" type="button">Theme</button></div>\n'
-        "{nav}</header>\n<main>\n{summary}{groups}\n</main>\n"
-        "<footer>{fetched} fetched &middot; {matched} matched &middot; "
-        "{kept} kept today &middot; {sources} source(s), {errors} failed "
-        "&middot; run {run} at {generated}</footer>\n"
+        '<button id="theme" type="button" title="Toggle theme"'
+        ' aria-label="Toggle theme">&#9680;</button></div>\n'
+        "{jump}\n{nav}\n</aside>\n"
+        "<main>\n{summary}{groups}\n"
+        "<footer>run {run} at {generated}</footer>\n</main>\n</div>\n"
         "<script>{script}</script>\n</body>\n</html>\n").format(
             today=_e(today),
             style=STYLE,
+            jump=_jump_nav(labels, day_rows),
             nav=nav,
             summary=_summary(summary),
             groups="\n".join(
@@ -302,7 +389,9 @@ def _page(labels, day_rows, meta, tz, threshold, today, nav, summary=None):
             matched=_e(meta.get("matched", 0)),
             kept=sum(len(day_rows.get(label) or []) for label in labels),
             sources=_e(meta.get("sources", 0)),
-            errors=_e(meta.get("errors", 0)),
+            # Red is for a failure that happened, not for the word "failed".
+            bad=' class="bad"' if errors else "",
+            errors=_e(errors),
             run=_e(meta.get("run_id", "-")),
             generated=_e(generated_local),
             script=SCRIPT)

@@ -16,6 +16,19 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.1 - 2026-09-06
+
+- **render**: the page is redesigned around a sticky left rail - the run's
+  numbers, the filter, a per-group jump list with counts and the day list stay
+  on screen while the stories scroll - in a container 80% of the viewport wide
+  (92% below 900px, where the rail stops sticking). A story is now its title and
+  its timestamp on one line, nothing else: the relevance score and the source
+  ids are no longer rendered, though both remain in the store. The top
+  `report.rank_threshold` of each group are marked by a heavier title instead of
+  a coloured rule and background. `[hidden] { display: none !important; }` is now
+  required and asserted, because `li.story` is a grid and an author `display`
+  otherwise beats the browser's `[hidden]` rule and the filter hides nothing.
+
 ## v0.2.0 - 2026-09-05
 
 ### Fixes

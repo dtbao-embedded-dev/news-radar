@@ -108,7 +108,11 @@ keywords:
   file: config/frequency_words.txt
 
 report:
-  mode: incremental      # incremental | current | daily
+  # daily reads the whole local day - the same window the page renders - and
+  # subtracts what this channel has already been told, so the phone and the page
+  # agree on which stories exist. incremental reads only this run, which means a
+  # story missed by one refused cycle is never offered again.
+  mode: daily            # incremental | current | daily
   max_per_group: 0       # 0 = unlimited; a group's own @n wins over this
   rank_threshold: 5
 

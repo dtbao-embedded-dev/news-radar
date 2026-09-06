@@ -9,6 +9,42 @@ updated: 2026-09-06
 
 ## What works
 
+### Three post-redesign defects, closed (2026-09-06)
+
+All three were reported off the live site, not off a test, and all three were
+verified against the real thing rather than a screenshot.
+
+- **A day page's day list reached `/days/days/<date>.html` and got a 404.**
+  `index.html` and `days/<today>.html` were byte-identical, and a relative href
+  resolves against the file carrying it - so the one nav that was right at the
+  root was wrong one directory down. `_day_nav()` now takes the prefix and
+  `write()` renders the page once per destination; the two files differ in that
+  block and nowhere else, which `tests/test_render.py` pins by inverting the
+  assertion that used to demand they be identical. Confirmed on the live page
+  before the fix: `<a href="days/2026-09-06.html" aria-current="page">`.
+- **A story replaced the report instead of opening beside it.**
+  `rel="noopener noreferrer"` had been on every story link since P3 - it is the
+  half of the pair that closes `window.opener`, and it had been sitting there
+  without the `target="_blank"` that makes it mean anything. Only story links
+  get it; `nav.jump` and `nav.days` move around this same report and stay in the
+  tab, which the test pins separately.
+- **Telegram and Discord disagreed with the page in both directions.** Each
+  line still carried the source ids the page dropped in v0.2.1 and carried no
+  time where the page shows one, and `report.mode: incremental` only ever read
+  the run it was called for. Both halves are fixed: `notify.stamp()` renders
+  `published_at` exactly as `render._when()` does (`--` and all), the display
+  zone is threaded from `app.timezone` through `_notify()` into both channels,
+  and the shipped template moves to `report.mode: daily` - the same local-day
+  window the page renders. Measured through the real `_notify()` chain against
+  a local stub: `• <a href="...">ESP32-S3 ra ban 5.5</a> <i>09:30 06/09</i>` on
+  Telegram and ``• [ESP32-S3 ra ban 5.5](...) `09:30 06/09` `` on Discord, from
+  a row stored at 02:30 UTC with `hn_algolia` in `item_sources` and no source id
+  in either message.
+- **`incremental` had a hole `daily` closes.** A story matched by one cycle and
+  refused by the channel was never offered again: the next cycle reads its own
+  run, and the story is not in it. This was the argument for the template
+  change, over and above matching the page.
+
 **P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, P3 Store
 and render, P4 Notify and P5 Deploy are complete, and P6 Ops is built**
 (2026-09-05). See `architecture/delivery-phases.md` for the phase map and the
@@ -379,6 +415,16 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **The three fixes above are in the branch, not on the site.** Production runs
+  a detached checkout of a release tag (`v0.2.1`), so nothing reaches
+  `news.dtbao.org` until `scripts/release.py 0.2.2` cuts the next one and the
+  homelab is redeployed. The `report.mode` half needs one more step that no
+  release carries: `~/news-radar/config/config.yaml` is gitignored and still
+  says `incremental`, and changing the shipped template cannot change it.
+- **A day page written before the fix stays broken.** Only today's snapshot is
+  rewritten each cycle; a past day keeps whatever nav it was written with. On
+  2026-09-06 the homelab held exactly one day file, so this costs nothing now -
+  but a page written today and read next month is the shape to remember.
 - **The archive is public now.** Every `output/days/*.html` ever written is
   readable by anyone with the URL - that is finished-product statement 3, not a
   defect, but it is worth stating plainly: only `news.db*` and directory

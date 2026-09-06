@@ -5,6 +5,16 @@
 # Secrets come from docker/.env, which Compose loads automatically because it
 # sits next to this file. scripts/setup.py creates it from .env.example.
 #
+# One file, two layouts, switched by NEWS_RADAR_HOME - the directory holding
+# config/, output/ and backups/, resolved relative to this file:
+#
+#   unset (-> `..`)  a dev checkout: the repository root, exactly as before
+#   `.`              a deployment directory: compose file, .env, Caddyfile and
+#                    the data side by side, with no git anywhere near them
+#
+# That is the whole of "user data an update cannot reach": production keeps no
+# checkout, so there is no `git checkout` on that machine to delete anything.
+#
 # The `cloudflared` service is behind the `tunnel` profile, so the two lines
 # above start the crawl loop and the web server and nothing else. Publishing
 # news.dtbao.org is opt-in:
@@ -20,6 +30,12 @@ services:
   # Fetch -> filter -> rank -> store -> render -> notify, on an internal loop.
   # Exposes no port: it talks out, nothing talks in.
   news-radar:
+    # Production runs this image; it never builds. `build:` is kept beside it so
+    # a dev checkout still compiles what it is editing - compose only builds
+    # when the image is absent locally, and on production `pull` has already put
+    # it there. The one footgun: `up -d` before `pull` on a deployment directory
+    # tries to build and dies on the missing Dockerfile. Pull first.
+    image: ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}
     build:
       context: ..
       dockerfile: Dockerfile
@@ -42,13 +58,13 @@ services:
       - 1.1.1.1
       - 8.8.8.8
     volumes:
-      - ../config:/app/config:ro
-      - ../output:/app/output
+      - "${NEWS_RADAR_HOME:-..}/config:/app/config:ro"
+      - "${NEWS_RADAR_HOME:-..}/output:/app/output"
       # Store backups, and deliberately NOT under output/. Caddy serves that
       # directory to the public web; a dated copy of the whole archive sitting
       # in it would be one Caddyfile line away from being downloadable. This
       # mount is on the crawl service only - caddy never sees the path at all.
-      - ../backups:/app/backups
+      - "${NEWS_RADAR_HOME:-..}/backups:/app/backups"
 
   # Serves ../output as static files. Reached from outside through the
   # existing homelab Cloudflare Tunnel, routed to http://caddy:8080.
@@ -59,8 +75,13 @@ services:
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
     volumes:
+      # ./Caddyfile ships beside this compose file and is the same file in both
+      # layouts; output/ belongs to the deployment and follows NEWS_RADAR_HOME.
+      # Leaving this one behind is how the crawl publishes to one directory and
+      # the web server serves another - the site 404s while every log line in
+      # the crawl says success.
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../output:/srv:ro
+      - "${NEWS_RADAR_HOME:-..}/output:/srv:ro"
       - caddy_data:/data
     # Host port is for local debugging only - the Cloudflare Tunnel reaches
     # caddy:8080 over the docker network and does not need a published port.

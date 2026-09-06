@@ -41,6 +41,12 @@ services:
       dockerfile: Dockerfile
     container_name: news-radar
     restart: unless-stopped
+    # The only container watchtower is allowed to replace. caddy is `2-alpine`
+    # and cloudflared is pinned to an exact version - letting either upgrade
+    # itself would be an unreviewed change to the two things standing between
+    # the report and the public internet.
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
@@ -112,6 +118,43 @@ services:
       - ./tunnel-credentials.json:/etc/cloudflared/creds.json:ro
     depends_on:
       - caddy
+
+  # Auto-update. Polls GHCR for a newer `:latest`, pulls it, and recreates the
+  # one container carrying the label above - the bind mounts come back exactly
+  # as they were, so nothing under NEWS_RADAR_HOME is touched by an update.
+  #
+  # Behind a profile for the same reason the tunnel is: on a dev checkout this
+  # would pull `:latest` straight over the image the developer just built.
+  # Production opts in:
+  #
+  #   docker compose --profile tunnel --profile autoupdate up -d
+  #
+  # A deployment that wants to freeze a version pins NEWS_RADAR_VERSION *and*
+  # leaves this profile off - pinning alone would still be overwritten here.
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    container_name: news-radar-watchtower
+    profiles: ["autoupdate"]
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      # Without this watchtower updates every container on the host, including
+      # ones that have nothing to do with this stack.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # Drop the image the update replaced; otherwise every release leaves a
+      # dangling copy on a homelab disk nobody is watching.
+      WATCHTOWER_CLEANUP: "true"
+      # Seconds. Once a day: this project cuts releases by hand, and a tighter
+      # poll only spends registry requests.
+      WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-86400}
+    volumes:
+      # `:ro` here is not a sandbox and must not be read as one: a socket is a
+      # socket, and the flag only stops the socket *file* being replaced - every
+      # Docker API call still goes through, which is exactly how watchtower
+      # recreates a container. Access to this socket is root on the host. The
+      # real narrowing is WATCHTOWER_LABEL_ENABLE above, plus the profile that
+      # keeps this container from running anywhere it is not wanted.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
 volumes:
   caddy_data:

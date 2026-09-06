@@ -124,8 +124,54 @@ check("the crawl service can still be built locally",
 # .env.example documents both new variables
 # --------------------------------------------------------------------------
 
-for key in ("NEWS_RADAR_HOME", "NEWS_RADAR_VERSION"):
+for key in ("NEWS_RADAR_HOME", "NEWS_RADAR_VERSION", "WATCHTOWER_POLL_INTERVAL"):
     check("{} is in .env.example".format(key), key + "=" in env_example)
+
+
+# --------------------------------------------------------------------------
+# auto-update: opt-in, and pointed at exactly one container
+# --------------------------------------------------------------------------
+
+WATCH_LABEL = "com.centurylinklabs.watchtower.enable"
+
+
+def labels(service):
+    """A service's labels as a dict. Compose accepts a map or a `k=v` list."""
+    raw = services.get(service, {}).get("labels", {}) or {}
+    if isinstance(raw, list):
+        return dict(str(item).split("=", 1) for item in raw if "=" in str(item))
+    return {str(k): str(v) for k, v in raw.items()}
+
+
+watchtower = services.get("watchtower", {})
+check("there is a watchtower service", bool(watchtower))
+
+# Opt-in, the same way the tunnel is. On a dev checkout watchtower would pull
+# `:latest` from GHCR straight over the image the developer just built - the
+# profile is what keeps `docker compose up -d` on this machine harmless.
+check("watchtower is behind the autoupdate profile",
+      watchtower.get("profiles") == ["autoupdate"],
+      repr(watchtower.get("profiles")))
+
+wt_env = watchtower.get("environment", {}) or {}
+check("watchtower only touches labelled containers",
+      str(wt_env.get("WATCHTOWER_LABEL_ENABLE")).lower() == "true",
+      repr(wt_env.get("WATCHTOWER_LABEL_ENABLE")))
+
+# caddy is `2-alpine` and cloudflared is pinned to an exact version; letting
+# either self-upgrade would be an unreviewed change to the two things standing
+# between the report and the public internet.
+labelled = [name for name in services if labels(name).get(WATCH_LABEL) == "true"]
+check("exactly the crawl container is labelled for auto-update",
+      labelled == ["news-radar"], repr(labelled))
+
+# The docker socket and nothing else. Note that `:ro` on a socket is not a
+# sandbox - it stops the socket file being replaced, not the API calls that go
+# through it - so what is pinned here is that watchtower sees no other path,
+# and in particular nothing under NEWS_RADAR_HOME.
+wt_mounts = [host_side(m) for m in mounts("watchtower")]
+check("the docker socket is watchtower's only mount",
+      wt_mounts == ["/var/run/docker.sock"], repr(mounts("watchtower")))
 
 
 # --------------------------------------------------------------------------

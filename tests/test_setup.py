@@ -149,6 +149,31 @@ with tempfile.TemporaryDirectory() as tmp:
 
 
 # --------------------------------------------------------------------------
+# --check on a file the checkout does not have
+# --------------------------------------------------------------------------
+
+# `git checkout <tag>` deletes a file that was tracked in the old commit and is
+# not in the new one - which is exactly what happens to
+# `config/frequency_words.txt` on the upgrade that introduces the template pair.
+# A verify run that called such a checkout ready would be calling a radar with
+# no keyword groups ready.
+with tempfile.TemporaryDirectory() as tmp:
+    real_root = setup.ROOT
+    try:
+        setup.ROOT = config_pair(tmp, EXAMPLE)
+        src, dst = setup.TEMPLATES[0]
+        check("--check passes when the destination is there",
+              setup.ensure_file(src, dst, True, False, verify=True))
+        (setup.ROOT / dst).unlink()
+        check("--check fails when the destination is missing",
+              not setup.ensure_file(src, dst, True, False, verify=True))
+        check("a plain dry run still only describes it",
+              setup.ensure_file(src, dst, True, False, verify=False))
+    finally:
+        setup.ROOT = real_root
+
+
+# --------------------------------------------------------------------------
 # the default argument is the real repository root
 # --------------------------------------------------------------------------
 

@@ -204,8 +204,16 @@ def missing_config_keys(root=None):
     return [key for key in template_keys(root / template) if key not in have]
 
 
-def ensure_file(src, dst, dry_run, force):
-    """Create dst from src. Returns False only on a real failure."""
+def ensure_file(src, dst, dry_run, force, verify=False):
+    """Create dst from src. Returns False only on a real failure.
+
+    `verify` is `--check`: it inspects a checkout that is supposed to be ready,
+    so a destination that does not exist is a finding rather than a plan. That
+    is not hypothetical - `git checkout <tag>` deletes a file that was tracked
+    in the old commit and is not in the new one, which is what an upgrade does
+    to `config/frequency_words.txt`, and a radar with no keyword groups is not a
+    ready checkout.
+    """
     src_abs = ROOT / src
     dst_abs = ROOT / dst
 
@@ -216,6 +224,11 @@ def ensure_file(src, dst, dry_run, force):
     if dst_abs.exists() and not force:
         say("skip", "{} exists, left alone (use --force to overwrite)".format(dst))
         return True
+
+    if verify:
+        say("fail", "{} is missing - re-run without --check to create it "
+                    "from {}".format(dst, src))
+        return False
 
     verb = "overwrite" if dst_abs.exists() else "create"
     if dry_run:
@@ -394,7 +407,7 @@ def main(argv=None):
     ok = check_docker() and ok
 
     for src, dst in TEMPLATES:
-        ok = ensure_file(src, dst, dry, args.force) and ok
+        ok = ensure_file(src, dst, dry, args.force, verify=args.check) and ok
 
     interactive = not args.non_interactive and not dry
     secrets_ok = ensure_secrets(dry, interactive, verify=args.check)

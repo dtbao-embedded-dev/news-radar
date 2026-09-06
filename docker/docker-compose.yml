@@ -129,8 +129,10 @@ services:
   #
   #   docker compose --profile tunnel --profile autoupdate up -d
   #
-  # A deployment that wants to freeze a version pins NEWS_RADAR_VERSION *and*
-  # leaves this profile off - pinning alone would still be overwritten here.
+  # Watchtower follows the tag the container was created from, not `:latest` in
+  # general - so pinning NEWS_RADAR_VERSION freezes a deployment even with this
+  # profile on, because a version tag does not move. Republishing that same tag
+  # is the one thing that would get past it.
   watchtower:
     image: containrrr/watchtower:1.7.1
     container_name: news-radar-watchtower

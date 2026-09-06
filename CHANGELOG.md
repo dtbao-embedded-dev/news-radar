@@ -73,9 +73,13 @@ one makes the file and the tags disagree.
   unreviewed. The profile is opt-in for the same reason the tunnel one is: on a
   dev checkout this would pull `:latest` over the image just built. A recreate
   re-attaches the same bind mounts, so an update still cannot touch anything
-  under `NEWS_RADAR_HOME`. Freezing a deployment means pinning
-  `NEWS_RADAR_VERSION` **and** leaving the profile off - pinning alone loses to
-  the next poll.
+  under `NEWS_RADAR_HOME`. Freezing a deployment is `NEWS_RADAR_VERSION` on its
+  own: watchtower polls the tag the running container was created from, and a
+  version tag does not move. **This does not have a safety net yet.** A release
+  that fails to load its config exits before `ops.Health` is ever constructed,
+  so a crash-looping container alerts nobody - measured, 9 restarts in 45
+  seconds with zero health lines - and `ops.heartbeat_url` ships empty. Arm a
+  monitor before turning `autoupdate` on.
 - **crawl**: `python -m news_radar --check` reports config keys the shipped
   template has and the running config does not, then exits - `1` when there is
   one, `0` when there is not. This is the half of `scripts/setup.py --check`

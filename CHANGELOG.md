@@ -72,6 +72,16 @@ one makes the file and the tags disagree.
   under `NEWS_RADAR_HOME`. Freezing a deployment means pinning
   `NEWS_RADAR_VERSION` **and** leaving the profile off - pinning alone loses to
   the next poll.
+- **crawl**: `python -m news_radar --check` reports config keys the shipped
+  template has and the running config does not, then exits - `1` when there is
+  one, `0` when there is not. This is the half of `scripts/setup.py --check`
+  that a deployment still needs after it stops being a checkout: the image
+  carries `config.yaml.example` at `/app/config-templates/`, deliberately not
+  under `/app/config`, which the deployment's own directory is mounted over. The
+  rules are the same as `setup.py`'s - missing keys only, never differing
+  values, and never keys inside a list item - and the two implementations stay
+  separate on purpose: `setup.py` runs before anything is installed and may not
+  `import yaml`, while the image has PyYAML and can parse properly.
 - **setup**: `scripts/setup.py` names every key that `config.yaml.example` has
   and the local `config.yaml` does not, and `--check` exits `1` when there is
   one. The documented contract already claimed this and no code had ever done

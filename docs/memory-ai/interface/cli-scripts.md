@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-06
 source: scripts/setup.py, scripts/release.py
 confidence: confirmed
-keywords: setup.py, release.py, missing_config_keys, template_keys, config drift, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI
+keywords: setup.py, release.py, checkout only, missing_config_keys, template_keys, config drift, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI
 order: 2
 ---
 
@@ -22,10 +22,19 @@ order: 2
 python scripts/setup.py [--dry-run] [--force] [--non-interactive] [--check]
 ```
 
-Bootstraps a homelab checkout and starts it: verifies the toolchain, creates the
+Bootstraps a **checkout** and starts it: verifies the toolchain, creates the
 real config and env files from their templates, validates the notification
 secrets, then brings the stack up. A successful run leaves nothing for the
 operator to type afterwards.
+
+**A checkout, not a deployment.** Production runs the published image and keeps
+no `scripts/`, so this script is not there to be run. The half of it a
+deployment still needs - naming the keys a release added - travelled into the
+image as `python -m news_radar --check`; see [[crawl-cli]]. The two
+implementations are deliberately separate: this one runs before anything is
+installed and may not `import yaml`, so it scans indentation, while the image
+has PyYAML and parses properly. They answer the same question by the same rules,
+and each has its own test.
 
 | Flag | Guarantee |
 |------|-----------|

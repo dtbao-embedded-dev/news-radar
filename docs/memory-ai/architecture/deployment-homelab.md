@@ -4,9 +4,9 @@ category: architecture
 purpose: How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world.
 status: active
 updated: 2026-09-06
-source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, scripts/setup.py
+source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, docker/.env.example, .github/workflows/image.yml, scripts/setup.py
 confidence: confirmed
-keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, schedule, volumes, restart policy
+keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, autoupdate profile, watchtower, ghcr, image, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, WATCHTOWER_POLL_INTERVAL, schedule, volumes, restart policy
 order: 3
 ---
 
@@ -14,7 +14,8 @@ order: 3
 
 > Three containers on the homelab: one crawls on a loop and writes `output/`,
 > one serves `output/` over HTTP, one carries that to `news.dtbao.org` through a
-> Cloudflare Tunnel. Nothing is published from GitHub.
+> Cloudflare Tunnel. A fourth, off by default, updates the first. The site is
+> served from here; only the image comes from GitHub.
 
 ## Topology
 
@@ -44,9 +45,36 @@ connection.
 
 | Service | Image | Role | Ports |
 |---------|-------|------|-------|
-| `news-radar` | built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
+| `news-radar` | `ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}`, or built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
 | `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` inside the network; published on the host as `NEWS_RADAR_HTTP_PORT`, default `8088` |
 | `cloudflared` | `cloudflare/cloudflared:2026.8.3` | Carries `news.dtbao.org` to `http://caddy:8080`. Behind the `tunnel` compose profile | none |
+| `watchtower` | `containrrr/watchtower:1.7.1` | Polls GHCR and recreates `news-radar` on a newer `:latest`. Behind the `autoupdate` compose profile | none |
+
+**The crawl service carries both `image:` and `build:`, deliberately.** Compose
+builds only when the image is absent locally, so a checkout compiles what it is
+editing and a deployment - where `pull` has already fetched the image - never
+builds. The cost is one footgun: `up -d` before `pull` on a deployment tries to
+build and dies on the absent `Dockerfile`. The gain is one compose file instead
+of two that can disagree, and `tests/test_deploy.py` pins its shape.
+
+**Two profiles, both opt-in, for the same reason.** `tunnel` needs a credentials
+file that is not in the repo; `autoupdate` would, on a development machine, pull
+`:latest` from GHCR straight over the image the developer just built. Production
+turns both on:
+
+```
+docker compose --profile tunnel --profile autoupdate up -d
+```
+
+**Watchtower touches exactly one container.** `news-radar` is the only service
+labelled `com.centurylinklabs.watchtower.enable`, and `WATCHTOWER_LABEL_ENABLE`
+makes that label the filter - without it watchtower updates every container on
+the host. caddy is `2-alpine` and cloudflared is pinned to an exact version;
+neither should upgrade itself unreviewed, since they are the two things standing
+between the report and the public internet. The `:ro` on its docker socket mount
+is **not** a sandbox - a socket is a socket, and every API call still goes
+through; access to it is root on the host. The narrowing is the label and the
+profile.
 
 **The published host port is `NEWS_RADAR_HTTP_PORT`, default `8088`**, and it
 exists only for local debugging: the tunnel talks to `caddy:8080` over the docker
@@ -112,16 +140,39 @@ Nothing outside the LAN reaches it.
 
 ## Volumes
 
+Every path a deployment owns is resolved from **one** variable,
+`NEWS_RADAR_HOME`, relative to the compose file. Unset it is `..`, which on a
+checkout is the repository root - exactly where those directories already are,
+so a checkout behaves as it always did. A deployment sets it to `.` and keeps
+its data beside the compose file, on a machine with no git checkout at all.
+
 | Host path | Container path | Mode | Holds |
 |-----------|----------------|------|-------|
-| `./config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` - both gitignored, both created by `setup.py` from their `.example`. The whole directory is mounted, so a `git checkout` in the host checkout changes what the container reads at its next restart |
-| `./output` | `/app/output` | read-write (crawl) / read-only (caddy, as `/srv`) | `index.html`, `news.db`, per-day snapshots |
-| `./docker/cloudflared.yml` | `/etc/cloudflared/config.yml` | read-only | the tunnel's ingress |
-| `./docker/tunnel-credentials.json` | `/etc/cloudflared/creds.json` | read-only | the connector's credentials |
+| `${NEWS_RADAR_HOME:-..}/config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` - both the deployment's own, neither ever written by an update |
+| `${NEWS_RADAR_HOME:-..}/output` | `/app/output` | read-write (crawl) / read-only (caddy, as `/srv`) | `index.html`, `news.db`, per-day snapshots |
+| `${NEWS_RADAR_HOME:-..}/backups` | `/app/backups` | read-write | dated copies of the store. Crawl service only - caddy never sees the path |
+| `./Caddyfile` | `/etc/caddy/Caddyfile` | read-only | the static-file config |
+| `./cloudflared.yml` | `/etc/cloudflared/config.yml` | read-only | the tunnel's ingress |
+| `./tunnel-credentials.json` | `/etc/cloudflared/creds.json` | read-only | the connector's credentials |
+| `/var/run/docker.sock` | same | see above | watchtower's only mount |
+
+**The two prefixes are not interchangeable.** `${NEWS_RADAR_HOME:-..}` is the
+deployment's data; `./` is a file that ships beside the compose file and is the
+same file in both layouts. Giving `Caddyfile` the variable would send a flat
+deployment looking for `./config/Caddyfile`.
+
+**Caddy's `/srv` moves with `output/`.** It is the one mount easy to leave
+behind, and leaving it behind has the crawl publish to one directory while the
+web server serves another - the site 404s while every log line in the crawl says
+success.
 
 `output/` is a bind mount, not a named volume, so a human can open
 `output/index.html` directly on the host to debug a render without touching the
-container.
+container. Because they are bind mounts, a container recreate - which is what
+both a manual update and watchtower do - re-attaches them exactly as they were.
+Measured on the homelab: a forced recreate left `config/config.yaml` and
+`output/news.db` byte-identical by `sha256sum`, with the container id genuinely
+changed.
 
 ## Scheduling
 
@@ -141,13 +192,19 @@ nothing outside the process will kill it.
 
 | Variable | Set in | Used by |
 |----------|--------|---------|
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | `docker/.env` | `notify/telegram.py` |
-| `DISCORD_WEBHOOK_URL` | `docker/.env` | `notify/discord.py` |
-| `TZ` | `docker/.env`, default `Asia/Ho_Chi_Minh` | timestamps on the page and in messages |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | `.env` | `notify/telegram.py` |
+| `DISCORD_WEBHOOK_URL` | `.env` | `notify/discord.py` |
+| `TZ` | `.env`, default `Asia/Ho_Chi_Minh` | timestamps on the page and in messages |
 | `NEWS_RADAR_CONFIG` | compose, default `/app/config/config.yaml` | `config.py` |
+| `NEWS_RADAR_HOME` | `.env`, default `..` | compose only - the three data bind mounts |
+| `NEWS_RADAR_VERSION` | `.env`, default `latest` | compose only - which published image to run |
+| `NEWS_RADAR_HTTP_PORT` | `.env`, default `8088` | compose only - caddy's host port |
+| `WATCHTOWER_POLL_INTERVAL` | `.env`, default `86400` | compose only - watchtower, when its profile is on |
 
-`docker/.env` is gitignored and created by `scripts/setup.py`. See
-[[config-and-env]] for the full key list.
+`.env` sits beside the compose file - `docker/.env` in a checkout, where
+`scripts/setup.py` creates it, and the deployment root otherwise. It is never
+committed. The last four are read by Compose during substitution, not by any
+Python in this project. See [[config-and-env]] for the full key list.
 
 ## Failure modes to design for
 
@@ -159,3 +216,5 @@ nothing outside the process will kill it.
 | Disk fills with snapshots | Writes fail | Retention window (P3-5, P6) |
 | Crawl crashes on a bad item | Container exits | `restart: unless-stopped` plus a heartbeat so a crash loop is visible (P6-1) |
 | Clock skew | Freshness ranking goes wrong | `TZ` pinned in the container, not inherited from the host |
+| Auto-update lands a bad release | The crawl fails or crash-loops without anyone having typed a command | P6-1's health alerting reports it within two cycles and the heartbeat ping stops. Rolling back is `NEWS_RADAR_VERSION=<previous>` in `.env` **plus** starting without `--profile autoupdate` - pinning alone loses to the next poll |
+| GHCR unreachable at poll time | Nothing updates | Watchtower logs it and retries at the next interval; the running container is untouched, so an unreachable registry costs nothing |

@@ -19,6 +19,62 @@ _Generated 2026-09-06 - 19 durable doc(s)._
 
 ## What works
 
+### The package is an image, and the data is out of its way (2026-09-06)
+
+The previous entry made the upgrade *checkable*. This one makes the failure it
+checks for **unreachable**: production stops being a git checkout, so no command
+on that machine can delete `config/`, `output/` or `backups/`. Five things, all
+on `release/v0.2`:
+
+- **One variable owns every path a deployment holds.**
+  `${NEWS_RADAR_HOME:-..}` in `docker-compose.yml`, resolved relative to the
+  compose file. Unset it is `..`, the repository root - so a checkout behaves
+  exactly as it always did, which is why the default is that and not something
+  tidier. A deployment sets `.` and keeps its data beside the compose file.
+  **Caddy's `/srv` moved with it**, and that is the mount that was easy to miss:
+  left behind, the crawl publishes to one directory while the web server serves
+  another, and the site 404s while every log line says success.
+- **The crawl service runs a published image.**
+  `ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}`, with
+  `build:` kept beside it so a checkout still compiles what it is editing.
+  Compose builds only when the image is absent locally, so a deployment that has
+  pulled never builds. One footgun, accepted and documented: `up -d` before
+  `pull` on a deployment tries to build and dies on the absent `Dockerfile`. The
+  alternative was two compose files that can disagree.
+- **A `v*` tag publishes that image.** `.github/workflows/image.yml`,
+  `linux/amd64` only because the homelab is `x86_64` (measured, not assumed). It
+  refuses a tag the `VERSION` file disagrees with - `VERSION` is baked into the
+  image, so a mismatch would have the container report a version that was never
+  published. Both guards were exercised locally against the real `VERSION`:
+  `v0.2.2` publishes, `v0.2.3` is refused, `0.2.2` and `vX.Y.Z` are refused as
+  malformed.
+- **The stack updates itself, opt-in and narrowly.** A `watchtower` service
+  behind an `autoupdate` profile, polling GHCR once a day and recreating
+  **only** the container carrying `com.centurylinklabs.watchtower.enable` -
+  which is the crawl and nothing else, because caddy and cloudflared are
+  version-pinned and are the two things standing between the report and the
+  public internet. Profile gating verified: `config --services` lists two
+  services, `--profile autoupdate config --services` lists three. The `:ro` on
+  its docker socket is **not** a sandbox and the compose file now says so; the
+  narrowing is the label and the profile.
+- **`python -m news_radar --check` carries the drift check into the image.**
+  Losing the checkout would have lost `setup.py --check` with it, and that check
+  is the whole reason `report.mode` cannot sit stale again. The image bakes
+  `config.yaml.example` at `/app/config-templates/` - deliberately not under
+  `/app/config`, which the deployment's own directory is mounted over. Measured:
+  exit `0` against the real `config/config.yaml`, exit `1` naming `report.mode`
+  against a copy with that key removed. The two implementations stay separate on
+  purpose - `setup.py` may not `import yaml`, the image can.
+
+**Measured on the homelab rather than reasoned about (R8).** A throwaway compose
+project with the same three mounts, a `config/config.yaml` and a 4 KB
+`output/news.db`: `up -d`, then `up -d --force-recreate`. The container id really
+changed (`8c8c765c84ae` -> `8fe8844cb33e`) and both files came out byte-identical
+by `sha256sum`. The mount was proven real in both directions first - the
+container listed the host's files, a file it wrote appeared on the host, and the
+`:ro` mount refused a write - because a mount that silently mounted nothing would
+have made "byte-identical" a claim about nothing.
+
 ### The upgrade path, made checkable (2026-09-06, after v0.2.2)
 
 Asking "what happens on a version update" turned up a procedure that existed,
@@ -465,18 +521,28 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **Nothing published to GHCR yet, so nothing can be pulled.** The workflow
+  exists and is tested as far as a workflow can be tested without running; the
+  first real evidence is the `Publish image` run going green after the next
+  `release.py`. Until then `docker compose pull` has nothing to fetch, and the
+  homelab migration cannot start. Cut the version first, in that order.
 - **v0.2.2 is cut and pushed but not deployed.** The homelab still runs
-  `v0.2.1`; nothing reaches `news.dtbao.org` until it is checked out and rebuilt.
-  Two steps no release carries: `~/news-radar/config/config.yaml` is gitignored
-  and still says `report.mode: incremental`, and the upgrade **past** v0.2.2
-  deletes `config/frequency_words.txt` - run `python scripts/setup.py --check`
-  after the checkout and it will name both.
-- **Everything after v0.2.2 is unreleased.** The `--check` drift detection, the
-  `open_db` refusal and the keyword-file split are on `release/v0.2` with no tag
-  yet, so the very upgrade they are meant to protect is the one that installs
-  them - the deletion of `config/frequency_words.txt` happens on that same
-  checkout, before the new `--check` is running to warn about it. Read
-  `## Updating` in [[setup-homelab]] before that deploy, not after.
+  `v0.2.1`; nothing reaches `news.dtbao.org` until it is updated.
+  `~/news-radar/config/config.yaml` is gitignored and still says
+  `report.mode: incremental` - a hand edit no release can make for you, and what
+  `--check` will name.
+- **The `git checkout` that deletes `config/frequency_words.txt` is now
+  avoidable, but only if the migration is followed.** That file stopped being
+  tracked after v0.2.2, so `git checkout <tag>` past it deletes the deployment's
+  tuned groups. The migration in [[setup-homelab]] never checks anything out -
+  it removes `.git` and pulls an image instead - so the trap is stepped around
+  rather than walked into. Doing a plain `git checkout v0.2.3` on the homelab
+  out of habit still springs it. Read `## Migrating an existing checkout` before
+  that visit, not after.
+- **This dev checkout's own `config/config.yaml` says `report.mode:
+  incremental`** too, found while verifying `--check`. Harmless here (it is
+  gitignored and this machine is not production) but it is the same drift, and
+  it is what `--check` is for.
 - **A day page written before the fix stays broken.** Only today's snapshot is
   rewritten each cycle; a past day keeps whatever nav it was written with. On
   2026-09-06 the homelab held exactly one day file, so this costs nothing now -
@@ -553,7 +619,29 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Current focus
 
-**The upgrade path is the current work (2026-09-06, after v0.2.2).** Asking how
+**Shipping as an image, with the deployment's data out of reach (2026-09-06,
+unreleased on `release/v0.2`).** The previous work made an upgrade *checkable*;
+this makes the failure it checks for unreachable. Production stops being a git
+checkout, so the machine holding `config/`, `output/` and `backups/` has no
+command that can delete them. Five changes: `${NEWS_RADAR_HOME:-..}` on every
+bind mount including caddy's `/srv`, a GHCR image reference beside the kept
+`build:`, `.github/workflows/image.yml` publishing on a `v*` tag, a `watchtower`
+service behind an opt-in `autoupdate` profile scoped by label to the crawl
+container alone, and `python -m news_radar --check` carrying the config-drift
+check into the image where `scripts/setup.py` no longer exists.
+
+**Three answers to one question.** The package is the **image** - not an app
+binary. The stack is three processes and a binary would package one of them,
+while breaking this project's own rule that a release may never overwrite a
+local config file. Auto-update is then a registry pull, and "user data
+somewhere an update cannot reach" is "the deployment has no git".
+
+**Nothing is live and nothing is even pullable yet.** The image has never been
+published; the workflow's first real evidence is the run after the next
+`release.py`. Cut the version, then migrate the homelab - in that order, since
+the migration's first command is `docker compose pull`.
+
+**The upgrade path was the previous work (2026-09-06, after v0.2.2).** Asking how
 a version update is handled found a procedure that existed, described a
 production this one is not, and promised a check nothing performed. Four
 changes, all unreleased on `release/v0.2`: `setup.py --check` now names config
@@ -599,6 +687,40 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The image and data-layout work landed in seven commits on `release/v0.2`**
+  (2026-09-06): `docker/docker-compose.yml` (the four data mounts, the `image:`
+  line, the watchtower service and the label), `docker/.env.example`
+  (`NEWS_RADAR_HOME`, `NEWS_RADAR_VERSION`, `WATCHTOWER_POLL_INTERVAL`),
+  `.github/workflows/image.yml` (new), `src/news_radar/config.py`
+  (`TEMPLATE_CANDIDATES`, `template_path()`, `_key_paths()`, `_mapping()`,
+  `missing_keys()`), `src/news_radar/__main__.py` (`--check`, `_check_config()`),
+  `Dockerfile` (the baked template), `tests/test_deploy.py` (new),
+  `tests/test_config.py`, `CHANGELOG.md`, and six bank docs.
+- **The default has to be the old behaviour, or the variable is a migration.**
+  `${NEWS_RADAR_HOME:-..}` resolves to the repository root when nothing sets it,
+  which is exactly where a checkout's `config/`, `output/` and `backups/`
+  already are. That is what let this land without moving a single byte on the
+  homelab, and it is why the migration's phase 1 leaves the variable unset.
+- **The fourth mount is the one that bites.** The plan said "the three bind
+  mounts"; caddy's `../output:/srv:ro` is a fourth, on a different service.
+  Left behind it would have the crawl publish to one directory and the web
+  server serve another - the site 404s while every crawl log line says success.
+  Found by writing the test before the edit.
+- **A check that passes by checking nothing is worse than no check.** The first
+  R8 run reported byte-identical files while `ls` inside the container showed
+  empty directories, which would have been a mount that mounted nothing. Proving
+  the mount in both directions first - host file visible inside, container write
+  visible outside, `:ro` refusing - is what made the result mean anything.
+- **`:ro` on a docker socket is not a sandbox**, and the first comment written
+  for it claimed it was. A socket is a socket: the flag stops the socket *file*
+  being replaced, every API call still goes through, and access is root on the
+  host. The real narrowing is `WATCHTOWER_LABEL_ENABLE` plus the profile. Same
+  shape as the `rel="noopener"` with no `target="_blank"` this project already
+  shipped once - half a pattern reads as the whole one.
+- **`bash -s` reads its script from stdin**, so `docker compose exec` inside a
+  heredoc'd remote script eats the rest of the script, and redirecting stdin
+  kills it outright. Both were hit in one afternoon. Write the script to a file
+  on the remote first.
 - **The upgrade work landed in thirteen commits on `release/v0.2`**
   (2026-09-06): `scripts/setup.py` (`template_keys()`, `missing_config_keys()`,
   `ensure_file(..., verify=)`, a third `TEMPLATES` pair), `src/news_radar/store.py`
@@ -757,18 +879,31 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **Cut the next version and deploy it in one visit.** v0.2.2 is tagged and
-   pushed but not deployed, and everything since is untagged. Cut it
-   (`python scripts/release.py 0.2.3`), then on the homelab follow `## Updating`
-   in [[setup-homelab]] - and expect that checkout to delete
-   `config/frequency_words.txt`, because that is the release that splits it.
-   `python scripts/setup.py` (no flags) puts it back from the `.example`.
-2. **Edit `report.mode` on the homelab by hand, in the same visit.**
+1. **Cut the version first, and watch the image get published.**
+   `python scripts/release.py 0.2.3`. Two workflows fire on that tag now: the
+   existing `Release`, and `Publish image`. Nothing can be migrated until the
+   second one is green and
+   `docker pull ghcr.io/dtbao-embedded-dev/news-radar:0.2.3` works from the
+   homelab. **First run of a workflow that has never run** - expect to check
+   that the package was created public, or the pull needs a login.
+2. **Migrate the homelab, phase 1 only.** `## Migrating an existing checkout` in
+   [[setup-homelab]]: `rm -rf .git .github`, re-fetch the compose file, `pull`,
+   then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays
+   unset** - the compose file is still in `docker/`, so the default `..` is
+   already `~/news-radar`. Do **not** `git checkout v0.2.3` out of habit: that
+   is the command that deletes `config/frequency_words.txt`.
+3. **Edit `report.mode` on the homelab by hand, in the same visit.**
    `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
-   no template change can reach it, which is what the new `--check` will tell
-   you. Set `mode: daily`. Expect a small burst on the first cycle after it -
-   every story of the current day the channel has not already been told about
-   goes out at once.
+   no release can reach it, which is what
+   `docker compose run --rm news-radar --check` will tell you. Set
+   `mode: daily`. Expect a small burst on the first cycle after it - every story
+   of the current day the channel has not already been told about goes out at
+   once.
+4. **Then watch one auto-update happen on its own.** Cut a trivial version after
+   the migration and leave it: within `WATCHTOWER_POLL_INTERVAL` the crawl
+   container should be recreated and `docker compose logs news-radar | head`
+   should say the new version. Until that has been seen once, auto-update is
+   built and not proven.
 3. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
    of P6-1 that survives the container being killed is built but not armed. A
    healthchecks.io ping url or an Uptime Kuma push url in `config/config.yaml`
@@ -837,6 +972,21 @@ loader and the design bank - see `progress.md`.
   timestamp spelling - a phone showing the same story differently is a second
   report, and the reader has to reconcile two things that were meant to be one.
   When the page's story row changes, `notify/` changes in the same commit.
+- **The package is the image, and it is not an app.** The stack is three
+  processes - crawl, caddy, cloudflared - so a PyInstaller or Tauri binary would
+  package one of them and leave you installing the other two. Docker already
+  supplies everything "background app" means here: restart on crash, start at
+  boot with no login, log rotation, network isolation. And a single binary would
+  have to carry `config.yaml` inside it, which breaks the rule directly below
+  this one. The user-facing app is the page at `news.dtbao.org`.
+- **Production holds no git checkout.** That is the whole mechanism behind "an
+  update cannot clean the data": not a rule anyone has to follow, but the
+  absence of the command that does the damage. It is why the deployment gets a
+  compose file over HTTP rather than a clone.
+- **A default must reproduce the old behaviour.** `${NEWS_RADAR_HOME:-..}` is
+  `..` when unset, which is where a checkout's data already lives - so
+  introducing the variable moved nothing and broke nothing. A variable whose
+  default changes behaviour is a migration wearing a variable's clothes.
 - **A local file is one a release may not overwrite.** `config.yaml`,
   `frequency_words.txt` and `.env` are the deployment's, not the repository's;
   each ships as a committed `.example` that `setup.py` copies once. A release can
@@ -1258,13 +1408,14 @@ Secrets — bot tokens, webhook URLs — live **only** in the environment layer.
 must be harmless.
 
 ### [architecture] Homelab Deployment
-*`architecture/deployment-homelab.md` - How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world. - status: active - source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, scripts/setup.py - keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, schedule, volumes, restart policy*
+*`architecture/deployment-homelab.md` - How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world. - status: active - source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, docker/.env.example, .github/workflows/image.yml, scripts/setup.py - keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, autoupdate profile, watchtower, ghcr, image, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, WATCHTOWER_POLL_INTERVAL, schedule, volumes, restart policy*
 
 # Homelab Deployment
 
 > Three containers on the homelab: one crawls on a loop and writes `output/`,
 > one serves `output/` over HTTP, one carries that to `news.dtbao.org` through a
-> Cloudflare Tunnel. Nothing is published from GitHub.
+> Cloudflare Tunnel. A fourth, off by default, updates the first. The site is
+> served from here; only the image comes from GitHub.
 
 ## Topology
 
@@ -1294,9 +1445,36 @@ connection.
 
 | Service | Image | Role | Ports |
 |---------|-------|------|-------|
-| `news-radar` | built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
+| `news-radar` | `ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}`, or built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
 | `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` inside the network; published on the host as `NEWS_RADAR_HTTP_PORT`, default `8088` |
 | `cloudflared` | `cloudflare/cloudflared:2026.8.3` | Carries `news.dtbao.org` to `http://caddy:8080`. Behind the `tunnel` compose profile | none |
+| `watchtower` | `containrrr/watchtower:1.7.1` | Polls GHCR and recreates `news-radar` on a newer `:latest`. Behind the `autoupdate` compose profile | none |
+
+**The crawl service carries both `image:` and `build:`, deliberately.** Compose
+builds only when the image is absent locally, so a checkout compiles what it is
+editing and a deployment - where `pull` has already fetched the image - never
+builds. The cost is one footgun: `up -d` before `pull` on a deployment tries to
+build and dies on the absent `Dockerfile`. The gain is one compose file instead
+of two that can disagree, and `tests/test_deploy.py` pins its shape.
+
+**Two profiles, both opt-in, for the same reason.** `tunnel` needs a credentials
+file that is not in the repo; `autoupdate` would, on a development machine, pull
+`:latest` from GHCR straight over the image the developer just built. Production
+turns both on:
+
+```
+docker compose --profile tunnel --profile autoupdate up -d
+```
+
+**Watchtower touches exactly one container.** `news-radar` is the only service
+labelled `com.centurylinklabs.watchtower.enable`, and `WATCHTOWER_LABEL_ENABLE`
+makes that label the filter - without it watchtower updates every container on
+the host. caddy is `2-alpine` and cloudflared is pinned to an exact version;
+neither should upgrade itself unreviewed, since they are the two things standing
+between the report and the public internet. The `:ro` on its docker socket mount
+is **not** a sandbox - a socket is a socket, and every API call still goes
+through; access to it is root on the host. The narrowing is the label and the
+profile.
 
 **The published host port is `NEWS_RADAR_HTTP_PORT`, default `8088`**, and it
 exists only for local debugging: the tunnel talks to `caddy:8080` over the docker
@@ -1362,16 +1540,39 @@ Nothing outside the LAN reaches it.
 
 ## Volumes
 
+Every path a deployment owns is resolved from **one** variable,
+`NEWS_RADAR_HOME`, relative to the compose file. Unset it is `..`, which on a
+checkout is the repository root - exactly where those directories already are,
+so a checkout behaves as it always did. A deployment sets it to `.` and keeps
+its data beside the compose file, on a machine with no git checkout at all.
+
 | Host path | Container path | Mode | Holds |
 |-----------|----------------|------|-------|
-| `./config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` - both gitignored, both created by `setup.py` from their `.example`. The whole directory is mounted, so a `git checkout` in the host checkout changes what the container reads at its next restart |
-| `./output` | `/app/output` | read-write (crawl) / read-only (caddy, as `/srv`) | `index.html`, `news.db`, per-day snapshots |
-| `./docker/cloudflared.yml` | `/etc/cloudflared/config.yml` | read-only | the tunnel's ingress |
-| `./docker/tunnel-credentials.json` | `/etc/cloudflared/creds.json` | read-only | the connector's credentials |
+| `${NEWS_RADAR_HOME:-..}/config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` - both the deployment's own, neither ever written by an update |
+| `${NEWS_RADAR_HOME:-..}/output` | `/app/output` | read-write (crawl) / read-only (caddy, as `/srv`) | `index.html`, `news.db`, per-day snapshots |
+| `${NEWS_RADAR_HOME:-..}/backups` | `/app/backups` | read-write | dated copies of the store. Crawl service only - caddy never sees the path |
+| `./Caddyfile` | `/etc/caddy/Caddyfile` | read-only | the static-file config |
+| `./cloudflared.yml` | `/etc/cloudflared/config.yml` | read-only | the tunnel's ingress |
+| `./tunnel-credentials.json` | `/etc/cloudflared/creds.json` | read-only | the connector's credentials |
+| `/var/run/docker.sock` | same | see above | watchtower's only mount |
+
+**The two prefixes are not interchangeable.** `${NEWS_RADAR_HOME:-..}` is the
+deployment's data; `./` is a file that ships beside the compose file and is the
+same file in both layouts. Giving `Caddyfile` the variable would send a flat
+deployment looking for `./config/Caddyfile`.
+
+**Caddy's `/srv` moves with `output/`.** It is the one mount easy to leave
+behind, and leaving it behind has the crawl publish to one directory while the
+web server serves another - the site 404s while every log line in the crawl says
+success.
 
 `output/` is a bind mount, not a named volume, so a human can open
 `output/index.html` directly on the host to debug a render without touching the
-container.
+container. Because they are bind mounts, a container recreate - which is what
+both a manual update and watchtower do - re-attaches them exactly as they were.
+Measured on the homelab: a forced recreate left `config/config.yaml` and
+`output/news.db` byte-identical by `sha256sum`, with the container id genuinely
+changed.
 
 ## Scheduling
 
@@ -1391,13 +1592,19 @@ nothing outside the process will kill it.
 
 | Variable | Set in | Used by |
 |----------|--------|---------|
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | `docker/.env` | `notify/telegram.py` |
-| `DISCORD_WEBHOOK_URL` | `docker/.env` | `notify/discord.py` |
-| `TZ` | `docker/.env`, default `Asia/Ho_Chi_Minh` | timestamps on the page and in messages |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | `.env` | `notify/telegram.py` |
+| `DISCORD_WEBHOOK_URL` | `.env` | `notify/discord.py` |
+| `TZ` | `.env`, default `Asia/Ho_Chi_Minh` | timestamps on the page and in messages |
 | `NEWS_RADAR_CONFIG` | compose, default `/app/config/config.yaml` | `config.py` |
+| `NEWS_RADAR_HOME` | `.env`, default `..` | compose only - the three data bind mounts |
+| `NEWS_RADAR_VERSION` | `.env`, default `latest` | compose only - which published image to run |
+| `NEWS_RADAR_HTTP_PORT` | `.env`, default `8088` | compose only - caddy's host port |
+| `WATCHTOWER_POLL_INTERVAL` | `.env`, default `86400` | compose only - watchtower, when its profile is on |
 
-`docker/.env` is gitignored and created by `scripts/setup.py`. See
-[[config-and-env]] for the full key list.
+`.env` sits beside the compose file - `docker/.env` in a checkout, where
+`scripts/setup.py` creates it, and the deployment root otherwise. It is never
+committed. The last four are read by Compose during substitution, not by any
+Python in this project. See [[config-and-env]] for the full key list.
 
 ## Failure modes to design for
 
@@ -1409,6 +1616,8 @@ nothing outside the process will kill it.
 | Disk fills with snapshots | Writes fail | Retention window (P3-5, P6) |
 | Crawl crashes on a bad item | Container exits | `restart: unless-stopped` plus a heartbeat so a crash loop is visible (P6-1) |
 | Clock skew | Freshness ranking goes wrong | `TZ` pinned in the container, not inherited from the host |
+| Auto-update lands a bad release | The crawl fails or crash-loops without anyone having typed a command | P6-1's health alerting reports it within two cycles and the heartbeat ping stops. Rolling back is `NEWS_RADAR_VERSION=<previous>` in `.env` **plus** starting without `--profile autoupdate` - pinning alone loses to the next poll |
+| GHCR unreachable at poll time | Nothing updates | Watchtower logs it and retries at the next interval; the running container is untouched, so an unreachable registry costs nothing |
 
 ### [data] News Sources and Search Paths
 *`data/news-sources.md` - Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns. - status: active - source: config/config.yaml.example, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py - keywords: sources, feeds, RSS, Atom, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent*
@@ -1667,7 +1876,7 @@ Two consequences worth knowing before changing this:
   asserts the rule is on the page.
 
 ### [interface] Config Keys, Keyword File and Environment
-*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
 
 # Config Keys, Keyword File and Environment
 
@@ -1788,7 +1997,8 @@ Here `ESP32` is the primary term - the search templates are queried with it - wh
 
 ## Environment variables
 
-The only place secrets live. In the container they come from `docker/.env`;
+The only place secrets live. In the container they come from the `.env` beside
+the compose file - `docker/.env` in a checkout, the deployment root otherwise;
 outside it, from the real environment.
 
 | Variable | Required | Default | Read by |
@@ -1799,6 +2009,24 @@ outside it, from the real environment.
 | `OPENAI_API_KEY` | only if the endpoint wants one | - | `__main__.py`, handed to `summarize.summarize()`. Unset (or blank) sends **no `Authorization` header at all**, which is what a LAN SGLang/vLLM/Ollama expects |
 | `NEWS_RADAR_CONFIG` | no | `config/config.yaml` | `config.py` |
 | `TZ` | no | `Asia/Ho_Chi_Minh` | container clock; `app.timezone` still wins for rendering |
+
+### Read by Compose, not by any Python here
+
+These four never reach the application. Compose substitutes them while it parses
+`docker-compose.yml`, so a typo in one is a wrong mount or a wrong image rather
+than a config error the code could report.
+
+| Variable | Default | What it decides |
+|----------|---------|-----------------|
+| `NEWS_RADAR_HOME` | `..` | The directory holding `config/`, `output/` and `backups/`, resolved relative to the compose file. Unset is the repository root, which is a checkout's own layout; a deployment sets `.` and keeps its data beside the compose file with no git checkout on the machine |
+| `NEWS_RADAR_VERSION` | `latest` | Which published image the crawl service runs. Pin it to freeze a deployment or roll one back - **and** start without `--profile autoupdate`, because pinning alone loses to the next watchtower poll |
+| `NEWS_RADAR_HTTP_PORT` | `8088` | Caddy's published host port, for local debugging only |
+| `WATCHTOWER_POLL_INTERVAL` | `86400` | Seconds between GHCR polls, when the `autoupdate` profile is on |
+
+`NEWS_RADAR_HOME` is the one that matters most and the one with no runtime
+symptom: set it wrong and the container mounts an empty directory, comes up
+clean, and publishes a report with no history in it. [[setup-homelab]] carries
+the value each layout wants.
 
 Startup validation: a channel that is `enabled: true` with its variable missing is
 a **fatal config error**, not a warning.
@@ -1814,7 +2042,7 @@ this project most wants to avoid. `scripts/setup.py` checks the same rule before
 the container is ever started - see [[cli-scripts]].
 
 ### [interface] Script CLIs - setup.py and release.py
-*`interface/cli-scripts.md` - The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees. - status: active - source: scripts/setup.py, scripts/release.py - keywords: setup.py, release.py, missing_config_keys, template_keys, config drift, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI*
+*`interface/cli-scripts.md` - The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees. - status: active - source: scripts/setup.py, scripts/release.py - keywords: setup.py, release.py, checkout only, missing_config_keys, template_keys, config drift, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI*
 
 # Script CLIs - setup.py and release.py
 
@@ -1828,10 +2056,19 @@ the container is ever started - see [[cli-scripts]].
 python scripts/setup.py [--dry-run] [--force] [--non-interactive] [--check]
 ```
 
-Bootstraps a homelab checkout and starts it: verifies the toolchain, creates the
+Bootstraps a **checkout** and starts it: verifies the toolchain, creates the
 real config and env files from their templates, validates the notification
 secrets, then brings the stack up. A successful run leaves nothing for the
 operator to type afterwards.
+
+**A checkout, not a deployment.** Production runs the published image and keeps
+no `scripts/`, so this script is not there to be run. The half of it a
+deployment still needs - naming the keys a release added - travelled into the
+image as `python -m news_radar --check`; see [[crawl-cli]]. The two
+implementations are deliberately separate: this one runs before anything is
+installed and may not `import yaml`, so it scans indentation, while the image
+has PyYAML and parses properly. They answer the same question by the same rules,
+and each has its own test.
 
 | Flag | Guarantee |
 |------|-----------|
@@ -2172,7 +2409,7 @@ wrong, which makes it the least surprising place in the program for a second
 thing to go wrong, and nothing it does may end the schedule loop.
 
 ### [interface] Crawl CLI - python -m news_radar
-*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/ops.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile - keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
+*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/ops.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile - keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --check, --config, --debug, config drift, config-templates, missing_keys, template_path, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
 
 # Crawl CLI - `python -m news_radar`
 
@@ -2180,20 +2417,46 @@ thing to go wrong, and nothing it does may end the schedule loop.
 > loop and nothing else; every stage it calls lives in its own module.
 
 ```
-python -m news_radar [--once] [--config PATH] [--debug]
+python -m news_radar [--once] [--check] [--config PATH] [--debug]
 ```
 
 | Flag | Effect |
 |------|--------|
 | *(none)* | Loop forever on `schedule.interval_minutes`, crawling immediately unless `schedule.run_on_start` is `false` |
 | `--once` | One cycle, then exit. This is the command a phase is verified with - P1 is done when it prints N raw items |
+| `--check` | Name every key the shipped template has and this config does not, then exit. Crawls nothing |
 | `--config PATH` | Config file to read. Default: `$NEWS_RADAR_CONFIG`, then `config/config.yaml` |
 | `--debug` | `DEBUG` logging. `advanced.debug: true` in the config does the same |
 
 | Exit code | Meaning |
 |-----------|---------|
-| `0` | The cycle ran, or the loop was stopped by a signal |
-| `1` | The configuration is unusable; every problem is listed, and nothing was started |
+| `0` | The cycle ran, the loop was stopped by a signal, or `--check` found no drift |
+| `1` | The configuration is unusable; every problem is listed, and nothing was started. Also `--check` finding at least one key, or no template in the build |
+
+**`--check` is the drift check that survives losing the checkout.**
+`scripts/setup.py --check` answers the same question, but production runs the
+published image and keeps no `scripts/` - so the guarantee had to travel into
+the image with the code. From a deployment directory:
+
+```
+docker compose run --rm news-radar --check
+```
+
+It reads `config.yaml.example` from `/app/config-templates/` (baked in by the
+`Dockerfile`, deliberately **not** under `/app/config`, which the deployment's
+own directory is mounted over), falling back to `config/config.yaml.example` on
+a checkout. The rules match `setup.py`'s exactly: missing keys only, never a
+differing value - `ops.site_url` and the `ai.*` endpoint are meant to differ on
+a real deployment - and never a key inside a list item, because `feeds[].id`
+differs per deployment by design.
+
+The two implementations stay separate on purpose. `setup.py` runs before
+anything is installed and may not `import yaml`, so it scans indentation; the
+image has PyYAML and parses properly. See [[cli-scripts]].
+
+It runs **after** `load()`, so a config that cannot start at all is reported by
+`load()` first - that is the louder finding, and `--check` never reaches a
+config the crawl would refuse anyway.
 
 ## Behaviour that matters
 
@@ -3136,26 +3399,93 @@ Recovery is ordinary git. Find out which step failed from the output, then:
   reset the release commit; then re-run.
 
 ### [rule] Setting Up on the Homelab
-*`rule/setup-homelab.md` - The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux. - status: active - source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile, docker/cloudflared.yml - keywords: upgrade, updating, detached tag, --build, git checkout, config drift, setup, setup.py, docker compose, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088*
+*`rule/setup-homelab.md` - The procedure from nothing to news.dtbao.org serving, for a deployment running the published image and for a development checkout. - status: active - source: docker/docker-compose.yml, docker/.env.example, docker/Caddyfile, docker/cloudflared.yml, .github/workflows/image.yml, scripts/setup.py, src/news_radar/__main__.py - keywords: deployment directory, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, ghcr, image, docker compose pull, watchtower, autoupdate profile, auto-update, migrating, upgrade, updating, --check, config drift, setup, setup.py, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088*
 
 # Setting Up on the Homelab
 
-> Two steps: clone, then `python scripts/setup.py` - the script starts the stack
-> itself. The same two on Windows and on Linux; that is why setup is a Python
-> script and not a pair of shell scripts.
+> A **deployment** runs the published image and keeps no source. A **checkout**
+> is for developing. They share one `docker-compose.yml`, told apart by a single
+> variable, so there is no second file to drift.
+
+## Two ways to run it
+
+| | Deployment (production) | Checkout (development) |
+|---|---|---|
+| What it holds | compose file, `.env`, and the deployment's own data | the whole repository |
+| `NEWS_RADAR_HOME` | `.` - data beside the compose file | unset (`..`) - data at the repo root |
+| Crawl image | pulled from GHCR | built from the local `Dockerfile` |
+| Install | `docker compose pull && up -d` | `python scripts/setup.py` |
+| Update | `docker compose pull && up -d`, or watchtower | `git pull`, rebuild |
+| Git | **none** | yes |
+
+**The absence of git on a deployment is the design, not a shortcut.** This
+project has already lost a file to `git checkout <tag>` deleting a path the new
+commit does not carry (`config/frequency_words.txt`, v0.2.2). A machine with no
+checkout has no command that can do that to `config/`, `output/` or `backups/`.
 
 ## Prerequisites
 
-| Needs | Why |
-|-------|-----|
-| Python 3.11+ | Runs `setup.py` and `release.py`; `setup.py` checks the version and refuses an older one |
-| Docker Engine + Compose v2 | Runs the stack. `setup.py` reports both versions before doing anything else |
-| A free host port | The default published port is `8088`, overridable with `NEWS_RADAR_HTTP_PORT`. `8080` is deliberately not the default even though it is free - see [[deployment-homelab]] |
+| Needs | Deployment | Checkout |
+|-------|-----------|----------|
+| Docker Engine + Compose v2 | yes | yes |
+| Python 3.11+ | **no** | yes - runs `setup.py` and `release.py` |
+| A free host port | `8088` by default, `NEWS_RADAR_HTTP_PORT` overrides it | same |
 
-Nothing else. There are no API keys for fetching news; every secret is a
-notification secret.
+There are no API keys for fetching news; every secret is a notification secret.
 
-## Procedure
+## Installing a deployment
+
+The deployment directory is flat: the compose file and the three files beside it
+come from the release, everything else is yours and nothing ever overwrites it.
+
+```
+~/news-radar/
+  docker-compose.yml         from the release
+  Caddyfile                  from the release
+  cloudflared.yml            from the release
+  .env                       yours - secrets, and NEWS_RADAR_HOME=.
+  tunnel-credentials.json    yours
+  config/config.yaml         yours
+  config/frequency_words.txt yours
+  output/                    yours - the store and the published pages
+  backups/                   yours - dated copies of the store
+```
+
+```
+mkdir -p ~/news-radar/config ~/news-radar/output ~/news-radar/backups
+cd ~/news-radar
+BASE=https://raw.githubusercontent.com/dtbao-embedded-dev/news-radar/v<version>
+curl -fsSLO "$BASE/docker/docker-compose.yml"
+curl -fsSLO "$BASE/docker/Caddyfile"
+curl -fsSLO "$BASE/docker/cloudflared.yml"
+curl -fsSL  "$BASE/docker/.env.example"                  -o .env
+curl -fsSL  "$BASE/config/config.yaml.example"           -o config/config.yaml
+curl -fsSL  "$BASE/config/frequency_words.txt.example"   -o config/frequency_words.txt
+```
+
+Then edit `.env`. Two things it will not work without:
+
+- the notification secrets - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+  `DISCORD_WEBHOOK_URL`. The crawl **refuses to start** while an enabled channel
+  has none: a stack that runs and silently never notifies is the failure this
+  project most wants to avoid.
+- **`NEWS_RADAR_HOME=.`** - without it the compose default is `..`, and the
+  container mounts the directory *above* the deployment.
+
+```
+docker compose pull
+docker compose --profile tunnel --profile autoupdate up -d
+docker compose run --rm news-radar --check
+```
+
+**`pull` first, always.** The compose file carries `image:` and `build:` both.
+An `up -d` before the pull finds no image locally, tries to build, and dies on
+the `Dockerfile` a deployment does not have. Pulling puts the image there and
+nothing builds again.
+
+## Installing a checkout
+
+Unchanged, and still two steps:
 
 ```
 git clone git@github.com:dtbao-embedded-dev/news-radar.git
@@ -3163,35 +3493,24 @@ cd news-radar
 python scripts/setup.py
 ```
 
-**Step 2 in detail.** `setup.py` checks Python and Docker, then creates the two
-files that are deliberately not in git:
+`setup.py` checks Python and Docker, creates the three files that are
+deliberately not in git, asks for any notification secret still empty, and then
+starts the stack itself.
 
 | Created | From | Holds |
 |---------|------|-------|
 | `config/config.yaml` | `config/config.yaml.example` | Feeds, search templates, ranking weights, schedule |
-| `docker/.env` | `docker/.env.example` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL`, `TZ`, `NEWS_RADAR_HTTP_PORT` |
+| `config/frequency_words.txt` | `config/frequency_words.txt.example` | The keyword groups |
+| `docker/.env` | `docker/.env.example` | The secrets, `TZ`, `NEWS_RADAR_HTTP_PORT`, `NEWS_RADAR_HOME`, `NEWS_RADAR_VERSION` |
 
-It then asks for any notification secret that is still empty and writes it into
-`docker/.env`, preserving the comments. It **exits non-zero while a required
-secret is blank** - a stack that starts and silently never notifies is the
-failure this project most wants to avoid.
-
-An existing file is never overwritten: it is reported as `[skip]`. Use `--force`
-to replace one deliberately.
-
-**Step 3 happens inside step 2.** Once the checks pass and the secrets are
-filled, `setup.py` runs `docker compose -f docker/docker-compose.yml up -d`
-itself and prints the URL the page is served on. There is no separate command to
-type. Two things it decides for itself by looking at the checkout: it names
-`caddy` alone when there is no `Dockerfile` to build the crawl service from, and
-it adds `--profile tunnel` when `docker/tunnel-credentials.json` is there. A
-compose failure is reported and exits non-zero - the script never claims a stack
-it could not start.
+An existing file is never overwritten; it is reported as `[skip]`. `--force`
+replaces one deliberately. Leave `NEWS_RADAR_HOME` empty here - the compose
+default `..` is already the repo root.
 
 | Flag | Use it when |
 |------|-------------|
 | `--dry-run` | You want to see what it would do. Writes nothing, asks nothing |
-| `--check` | Verifying an existing install - the same checks plus the secrets, a missing destination file, and any key the template has that your `config.yaml` does not. Creates nothing, non-zero on a gap. This is the upgrade's check - see `## Updating` |
+| `--check` | Verifying a checkout - the same checks plus the secrets, a missing destination file, and any key the template has that your `config.yaml` does not |
 | `--force` | Regenerating a config from the template on purpose |
 | `--non-interactive` | Unattended provisioning; a blank secret is reported, not prompted for |
 
@@ -3202,14 +3521,13 @@ it could not start.
   `https://api.telegram.org/bot<TOKEN>/getUpdates`.
 - **Discord** - channel settings, Integrations, Webhooks, New Webhook, Copy URL.
 
-Both live only in `docker/.env`, which is gitignored. They never go into
-`config.yaml`.
+Both live only in `.env`, never in `config.yaml`.
 
 ## Exposing news.dtbao.org
 
-Caddy serves `output/` inside the docker network on port `8080`. The published
-host port (`8088` by default) is for local debugging only - the tunnel never
-touches it.
+Caddy serves the deployment's `output/` inside the docker network on port
+`8080`. The published host port (`8088` by default) is for local debugging only -
+the tunnel never touches it.
 
 The connector runs as the `cloudflared` service in this same compose project,
 behind the `tunnel` profile. Two steps, once per machine:
@@ -3219,16 +3537,9 @@ behind the `tunnel` profile. Two steps, once per machine:
    it. Both write to the Cloudflare account, not to this repo.
 2. **Give the container its credentials.** Copy the tunnel's credentials JSON
    (`~/.cloudflared/<tunnel-id>.json`, written by `tunnel create`) to
-   `docker/tunnel-credentials.json`. It is gitignored; the tunnel id in
-   `docker/cloudflared.yml` is not a secret and stays committed. A different
-   tunnel means editing that id.
-
-After that `python scripts/setup.py` starts the tunnel too - it adds
-`--profile tunnel` on its own once it sees the credentials file. By hand:
-
-```
-docker compose -f docker/docker-compose.yml --profile tunnel up -d
-```
+   `tunnel-credentials.json` beside the compose file. It is never committed; the
+   tunnel id in `cloudflared.yml` is not a secret and is. A different tunnel
+   means editing that id.
 
 **Do not add `news.dtbao.org` to a connector running on the host instead.** A
 host connector cannot resolve `caddy`, so it would have to be pointed at the
@@ -3238,72 +3549,112 @@ the operator's own remote access. See [[deployment-homelab]].
 
 ## Verifying it works
 
-1. `docker compose -f docker/docker-compose.yml --profile tunnel ps` - all
-   three services `running`. Drop `--profile tunnel` and `cloudflared`
-   disappears from the listing; that is the profile working, not a fault.
-2. `curl http://localhost:8088/` - Caddy answers with the current report.
-   A 200 from a *different* service means the port is taken; change
+1. `docker compose ps` - `news-radar` and `caddy` running, plus `cloudflared`
+   and `watchtower` when their profiles are on. A service missing from the
+   listing without its profile is the profile working, not a fault.
+2. `curl http://localhost:8088/` - Caddy answers with the current report. A 200
+   from a *different* service means the port is taken; change
    `NEWS_RADAR_HTTP_PORT` rather than guessing.
 3. `curl https://news.dtbao.org/` - `200`, and the same report. This already
-   leaves the LAN: the request goes out to the Cloudflare edge and comes back
-   in through the tunnel. `curl https://news.dtbao.org/news.db` must answer
-   `404`.
+   leaves the LAN: out to the Cloudflare edge and back in through the tunnel.
+   `curl https://news.dtbao.org/news.db` must answer `404`.
 4. Cloudflare error `1033` there means the hostname is routed to a tunnel with
    no connector - read `docker compose logs cloudflared`, which prints
    `Registered tunnel connection` once per edge connection when it is healthy.
-5. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
+5. `docker compose logs news-radar | head` - `news-radar <version> starting`.
+   That version is the one the image was published as, so it is also how you
+   read whether an update actually landed.
+6. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
    received exactly one message.
 
 ## Updating
 
-Production runs a **detached checkout of a release tag**, not a tracking branch,
-so `git pull` has nothing to pull onto. Four commands, from the checkout root:
+**By hand**, from the deployment directory:
 
 ```
-git fetch --tags origin
-git checkout v<version>
-python scripts/setup.py --check
-docker compose -f docker/docker-compose.yml --profile tunnel up -d --build
+docker compose pull
+docker compose --profile tunnel --profile autoupdate up -d
+docker compose run --rm news-radar --check
 ```
 
-**`--build` is not optional.** `Dockerfile` copies `VERSION` and `src/` **into
-the image**, so `up -d` without it recreates the container from the image it
-already had and the new code never runs. The giveaway is the log line at
-startup: `news-radar <version> starting`.
+**By itself.** The `autoupdate` profile runs a `watchtower` container that polls
+GHCR every `WATCHTOWER_POLL_INTERVAL` seconds (86400 by default), pulls a newer
+`:latest`, and recreates the crawl container. It touches only that one - it is
+the only service carrying `com.centurylinklabs.watchtower.enable`, because caddy
+and cloudflared are version-pinned and should not upgrade themselves unreviewed.
 
-**`--check` is the step that reads the upgrade.** It exits `1`, naming the file
-or the key, when either half of the config has fallen behind the release:
+**Freezing a version takes two changes, not one.** Set
+`NEWS_RADAR_VERSION=<version>` in `.env` **and** start without
+`--profile autoupdate`. Pinning alone loses to the next poll. The same pair is
+how a rollback works.
 
-- a file `setup.py` is meant to create is **missing** - which is what a checkout
-  does to `config/frequency_words.txt` the first time you upgrade past v0.2.2,
-  because that file stopped being tracked and `git checkout` deletes a path the
-  new commit does not carry;
-- a **key** `config.yaml.example` has that the local `config.yaml` does not. The
-  key is not fatal to the run - the code default fills it - but the default is a
-  decision nobody made. `report.mode` sat at `incremental` through a release
-  that had moved to `daily` exactly this way.
+**`--check` is what reads the upgrade.** `docker compose run --rm news-radar
+--check` exits `1` naming every key that the release's `config.yaml.example` has
+and your `config.yaml` does not. The key is not fatal to the run - the code
+default fills it - but a default is a decision nobody made. `report.mode` sat at
+`incremental` through a release that had moved to `daily` exactly this way.
+Copy the named key across by hand: no release may overwrite your config, and
+there is no config migration and is not going to be one.
 
-Fix either by running `python scripts/setup.py` with no flags: it creates what
-is missing from the templates, never overwrites what exists, and brings the
-stack up. A key it names has to be copied across by hand - a template is not
-allowed to overwrite your config.
+### What an update changes, and what it cannot
 
-### What a checkout changes, and what it cannot
+| Thing | On `docker compose pull && up -d` |
+|-------|-----------------------------------|
+| `src/`, `VERSION` | replaced - they are inside the image |
+| `config/config.yaml`, `config/frequency_words.txt`, `.env` | **never touched** - they are yours, and nothing in an update writes to them |
+| `output/news.db`, `output/days/`, `backups/` | **never touched** - bind mounts, re-attached to the new container as they were |
+| `docker-compose.yml`, `Caddyfile`, `cloudflared.yml` | **not updated either** - they came from a release by hand. Re-fetch them when a release says to |
 
-| Thing | On `git checkout v<version>` |
-|-------|------------------------------|
-| `src/`, `VERSION` | into the image, **only with `--build`** |
-| `config/*.example`, `docker/.env.example` | updated on disk; nothing reads them at runtime |
-| `config/config.yaml`, `config/frequency_words.txt`, `docker/.env` | **never touched** - all three are gitignored and yours |
-| `output/news.db`, `output/days/`, `backups/` | untouched; they are bind mounts, not image content |
+The last row is the one to remember: a pull updates the code, never the compose
+file that runs it. A release that changes the stack's shape says so in
+`CHANGELOG.md`.
 
-There is no config migration and there is not going to be one: the local files
-are yours, and the release can only tell you what it added. That is what
-`--check` is for.
+## Migrating an existing checkout
 
-The crawl container reads its config at startup, so any config change needs the
-`up -d` above - see [[deployment-homelab]]. Cutting the version in the first
-place is [[release-flow]].
+For the homelab as it stands today: a detached checkout at `~/news-radar` with
+`config/`, `output/` and `backups/` inside it. **No data moves in either phase.**
+
+Cut and publish a version first - the image has to exist before anything can
+pull it. `python scripts/release.py <version>` from a development checkout, then
+watch the `Publish image` workflow go green.
+
+**Phase 1 - stop being a checkout.** This is the whole of the fix; everything
+after it is tidying.
+
+```
+cd ~/news-radar
+docker compose -f docker/docker-compose.yml --profile tunnel down
+rm -rf .git .github
+curl -fsSL https://raw.githubusercontent.com/dtbao-embedded-dev/news-radar/v<version>/docker/docker-compose.yml \
+     -o docker/docker-compose.yml
+docker compose -f docker/docker-compose.yml pull
+docker compose -f docker/docker-compose.yml --profile tunnel --profile autoupdate up -d
+docker compose -f docker/docker-compose.yml run --rm news-radar --check
+```
+
+`NEWS_RADAR_HOME` stays **unset** here: the compose file sits in `docker/`, the
+default `..` is `~/news-radar`, and that is already where `config/`, `output/`
+and `backups/` are. Nothing is moved and no path changes.
+
+**Phase 2 - flatten it, optional.** Only worth doing to stop the leftover `src/`
+and `scripts/` from looking like something anyone should run.
+
+```
+cd ~/news-radar
+docker compose -f docker/docker-compose.yml --profile tunnel --profile autoupdate down
+mv docker/.env docker/Caddyfile docker/cloudflared.yml docker/tunnel-credentials.json .
+mv docker/docker-compose.yml .
+printf '\nNEWS_RADAR_HOME=.\n' >> .env
+rm -rf docker src scripts tests docs Dockerfile requirements.txt VERSION \
+       README.md CHANGELOG.md CLAUDE.md LICENSE .gitignore
+docker compose --profile tunnel --profile autoupdate up -d
+```
+
+`ls` before the `rm -rf` and confirm `config`, `output` and `backups` are not in
+that list. They are the three directories this whole change exists to protect.
+
+Cutting the version in the first place is [[release-flow]]; what the stack looks
+like once it is running is [[deployment-homelab]].
 
 ### [rule] TrendRadar Is the Reference Repo When You Get Stuck
 *`rule/reference-trendradar.md` - When and how to consult TrendRadar for a problem news-radar hits, and exactly what may not be carried back. - status: active - source: https://github.com/sansan0/TrendRadar, docs/memory-ai/adr/adr-0001-clean-room-from-trendradar.md - keywords: TrendRadar, reference, stuck, GPL-3.0, clean-room, copyleft, prior art, how to consult*

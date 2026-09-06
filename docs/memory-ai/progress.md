@@ -9,6 +9,62 @@ updated: 2026-09-06
 
 ## What works
 
+### The package is an image, and the data is out of its way (2026-09-06)
+
+The previous entry made the upgrade *checkable*. This one makes the failure it
+checks for **unreachable**: production stops being a git checkout, so no command
+on that machine can delete `config/`, `output/` or `backups/`. Five things, all
+on `release/v0.2`:
+
+- **One variable owns every path a deployment holds.**
+  `${NEWS_RADAR_HOME:-..}` in `docker-compose.yml`, resolved relative to the
+  compose file. Unset it is `..`, the repository root - so a checkout behaves
+  exactly as it always did, which is why the default is that and not something
+  tidier. A deployment sets `.` and keeps its data beside the compose file.
+  **Caddy's `/srv` moved with it**, and that is the mount that was easy to miss:
+  left behind, the crawl publishes to one directory while the web server serves
+  another, and the site 404s while every log line says success.
+- **The crawl service runs a published image.**
+  `ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}`, with
+  `build:` kept beside it so a checkout still compiles what it is editing.
+  Compose builds only when the image is absent locally, so a deployment that has
+  pulled never builds. One footgun, accepted and documented: `up -d` before
+  `pull` on a deployment tries to build and dies on the absent `Dockerfile`. The
+  alternative was two compose files that can disagree.
+- **A `v*` tag publishes that image.** `.github/workflows/image.yml`,
+  `linux/amd64` only because the homelab is `x86_64` (measured, not assumed). It
+  refuses a tag the `VERSION` file disagrees with - `VERSION` is baked into the
+  image, so a mismatch would have the container report a version that was never
+  published. Both guards were exercised locally against the real `VERSION`:
+  `v0.2.2` publishes, `v0.2.3` is refused, `0.2.2` and `vX.Y.Z` are refused as
+  malformed.
+- **The stack updates itself, opt-in and narrowly.** A `watchtower` service
+  behind an `autoupdate` profile, polling GHCR once a day and recreating
+  **only** the container carrying `com.centurylinklabs.watchtower.enable` -
+  which is the crawl and nothing else, because caddy and cloudflared are
+  version-pinned and are the two things standing between the report and the
+  public internet. Profile gating verified: `config --services` lists two
+  services, `--profile autoupdate config --services` lists three. The `:ro` on
+  its docker socket is **not** a sandbox and the compose file now says so; the
+  narrowing is the label and the profile.
+- **`python -m news_radar --check` carries the drift check into the image.**
+  Losing the checkout would have lost `setup.py --check` with it, and that check
+  is the whole reason `report.mode` cannot sit stale again. The image bakes
+  `config.yaml.example` at `/app/config-templates/` - deliberately not under
+  `/app/config`, which the deployment's own directory is mounted over. Measured:
+  exit `0` against the real `config/config.yaml`, exit `1` naming `report.mode`
+  against a copy with that key removed. The two implementations stay separate on
+  purpose - `setup.py` may not `import yaml`, the image can.
+
+**Measured on the homelab rather than reasoned about (R8).** A throwaway compose
+project with the same three mounts, a `config/config.yaml` and a 4 KB
+`output/news.db`: `up -d`, then `up -d --force-recreate`. The container id really
+changed (`8c8c765c84ae` -> `8fe8844cb33e`) and both files came out byte-identical
+by `sha256sum`. The mount was proven real in both directions first - the
+container listed the host's files, a file it wrote appeared on the host, and the
+`:ro` mount refused a write - because a mount that silently mounted nothing would
+have made "byte-identical" a claim about nothing.
+
 ### The upgrade path, made checkable (2026-09-06, after v0.2.2)
 
 Asking "what happens on a version update" turned up a procedure that existed,
@@ -455,18 +511,28 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **Nothing published to GHCR yet, so nothing can be pulled.** The workflow
+  exists and is tested as far as a workflow can be tested without running; the
+  first real evidence is the `Publish image` run going green after the next
+  `release.py`. Until then `docker compose pull` has nothing to fetch, and the
+  homelab migration cannot start. Cut the version first, in that order.
 - **v0.2.2 is cut and pushed but not deployed.** The homelab still runs
-  `v0.2.1`; nothing reaches `news.dtbao.org` until it is checked out and rebuilt.
-  Two steps no release carries: `~/news-radar/config/config.yaml` is gitignored
-  and still says `report.mode: incremental`, and the upgrade **past** v0.2.2
-  deletes `config/frequency_words.txt` - run `python scripts/setup.py --check`
-  after the checkout and it will name both.
-- **Everything after v0.2.2 is unreleased.** The `--check` drift detection, the
-  `open_db` refusal and the keyword-file split are on `release/v0.2` with no tag
-  yet, so the very upgrade they are meant to protect is the one that installs
-  them - the deletion of `config/frequency_words.txt` happens on that same
-  checkout, before the new `--check` is running to warn about it. Read
-  `## Updating` in [[setup-homelab]] before that deploy, not after.
+  `v0.2.1`; nothing reaches `news.dtbao.org` until it is updated.
+  `~/news-radar/config/config.yaml` is gitignored and still says
+  `report.mode: incremental` - a hand edit no release can make for you, and what
+  `--check` will name.
+- **The `git checkout` that deletes `config/frequency_words.txt` is now
+  avoidable, but only if the migration is followed.** That file stopped being
+  tracked after v0.2.2, so `git checkout <tag>` past it deletes the deployment's
+  tuned groups. The migration in [[setup-homelab]] never checks anything out -
+  it removes `.git` and pulls an image instead - so the trap is stepped around
+  rather than walked into. Doing a plain `git checkout v0.2.3` on the homelab
+  out of habit still springs it. Read `## Migrating an existing checkout` before
+  that visit, not after.
+- **This dev checkout's own `config/config.yaml` says `report.mode:
+  incremental`** too, found while verifying `--check`. Harmless here (it is
+  gitignored and this machine is not production) but it is the same drift, and
+  it is what `--check` is for.
 - **A day page written before the fix stays broken.** Only today's snapshot is
   rewritten each cycle; a past day keeps whatever nav it was written with. On
   2026-09-06 the homelab held exactly one day file, so this costs nothing now -

@@ -9,7 +9,29 @@ updated: 2026-09-06
 
 ## Current focus
 
-**The upgrade path is the current work (2026-09-06, after v0.2.2).** Asking how
+**Shipping as an image, with the deployment's data out of reach (2026-09-06,
+unreleased on `release/v0.2`).** The previous work made an upgrade *checkable*;
+this makes the failure it checks for unreachable. Production stops being a git
+checkout, so the machine holding `config/`, `output/` and `backups/` has no
+command that can delete them. Five changes: `${NEWS_RADAR_HOME:-..}` on every
+bind mount including caddy's `/srv`, a GHCR image reference beside the kept
+`build:`, `.github/workflows/image.yml` publishing on a `v*` tag, a `watchtower`
+service behind an opt-in `autoupdate` profile scoped by label to the crawl
+container alone, and `python -m news_radar --check` carrying the config-drift
+check into the image where `scripts/setup.py` no longer exists.
+
+**Three answers to one question.** The package is the **image** - not an app
+binary. The stack is three processes and a binary would package one of them,
+while breaking this project's own rule that a release may never overwrite a
+local config file. Auto-update is then a registry pull, and "user data
+somewhere an update cannot reach" is "the deployment has no git".
+
+**Nothing is live and nothing is even pullable yet.** The image has never been
+published; the workflow's first real evidence is the run after the next
+`release.py`. Cut the version, then migrate the homelab - in that order, since
+the migration's first command is `docker compose pull`.
+
+**The upgrade path was the previous work (2026-09-06, after v0.2.2).** Asking how
 a version update is handled found a procedure that existed, described a
 production this one is not, and promised a check nothing performed. Four
 changes, all unreleased on `release/v0.2`: `setup.py --check` now names config
@@ -55,6 +77,40 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The image and data-layout work landed in seven commits on `release/v0.2`**
+  (2026-09-06): `docker/docker-compose.yml` (the four data mounts, the `image:`
+  line, the watchtower service and the label), `docker/.env.example`
+  (`NEWS_RADAR_HOME`, `NEWS_RADAR_VERSION`, `WATCHTOWER_POLL_INTERVAL`),
+  `.github/workflows/image.yml` (new), `src/news_radar/config.py`
+  (`TEMPLATE_CANDIDATES`, `template_path()`, `_key_paths()`, `_mapping()`,
+  `missing_keys()`), `src/news_radar/__main__.py` (`--check`, `_check_config()`),
+  `Dockerfile` (the baked template), `tests/test_deploy.py` (new),
+  `tests/test_config.py`, `CHANGELOG.md`, and six bank docs.
+- **The default has to be the old behaviour, or the variable is a migration.**
+  `${NEWS_RADAR_HOME:-..}` resolves to the repository root when nothing sets it,
+  which is exactly where a checkout's `config/`, `output/` and `backups/`
+  already are. That is what let this land without moving a single byte on the
+  homelab, and it is why the migration's phase 1 leaves the variable unset.
+- **The fourth mount is the one that bites.** The plan said "the three bind
+  mounts"; caddy's `../output:/srv:ro` is a fourth, on a different service.
+  Left behind it would have the crawl publish to one directory and the web
+  server serve another - the site 404s while every crawl log line says success.
+  Found by writing the test before the edit.
+- **A check that passes by checking nothing is worse than no check.** The first
+  R8 run reported byte-identical files while `ls` inside the container showed
+  empty directories, which would have been a mount that mounted nothing. Proving
+  the mount in both directions first - host file visible inside, container write
+  visible outside, `:ro` refusing - is what made the result mean anything.
+- **`:ro` on a docker socket is not a sandbox**, and the first comment written
+  for it claimed it was. A socket is a socket: the flag stops the socket *file*
+  being replaced, every API call still goes through, and access is root on the
+  host. The real narrowing is `WATCHTOWER_LABEL_ENABLE` plus the profile. Same
+  shape as the `rel="noopener"` with no `target="_blank"` this project already
+  shipped once - half a pattern reads as the whole one.
+- **`bash -s` reads its script from stdin**, so `docker compose exec` inside a
+  heredoc'd remote script eats the rest of the script, and redirecting stdin
+  kills it outright. Both were hit in one afternoon. Write the script to a file
+  on the remote first.
 - **The upgrade work landed in thirteen commits on `release/v0.2`**
   (2026-09-06): `scripts/setup.py` (`template_keys()`, `missing_config_keys()`,
   `ensure_file(..., verify=)`, a third `TEMPLATES` pair), `src/news_radar/store.py`
@@ -213,18 +269,31 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **Cut the next version and deploy it in one visit.** v0.2.2 is tagged and
-   pushed but not deployed, and everything since is untagged. Cut it
-   (`python scripts/release.py 0.2.3`), then on the homelab follow `## Updating`
-   in [[setup-homelab]] - and expect that checkout to delete
-   `config/frequency_words.txt`, because that is the release that splits it.
-   `python scripts/setup.py` (no flags) puts it back from the `.example`.
-2. **Edit `report.mode` on the homelab by hand, in the same visit.**
+1. **Cut the version first, and watch the image get published.**
+   `python scripts/release.py 0.2.3`. Two workflows fire on that tag now: the
+   existing `Release`, and `Publish image`. Nothing can be migrated until the
+   second one is green and
+   `docker pull ghcr.io/dtbao-embedded-dev/news-radar:0.2.3` works from the
+   homelab. **First run of a workflow that has never run** - expect to check
+   that the package was created public, or the pull needs a login.
+2. **Migrate the homelab, phase 1 only.** `## Migrating an existing checkout` in
+   [[setup-homelab]]: `rm -rf .git .github`, re-fetch the compose file, `pull`,
+   then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays
+   unset** - the compose file is still in `docker/`, so the default `..` is
+   already `~/news-radar`. Do **not** `git checkout v0.2.3` out of habit: that
+   is the command that deletes `config/frequency_words.txt`.
+3. **Edit `report.mode` on the homelab by hand, in the same visit.**
    `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
-   no template change can reach it, which is what the new `--check` will tell
-   you. Set `mode: daily`. Expect a small burst on the first cycle after it -
-   every story of the current day the channel has not already been told about
-   goes out at once.
+   no release can reach it, which is what
+   `docker compose run --rm news-radar --check` will tell you. Set
+   `mode: daily`. Expect a small burst on the first cycle after it - every story
+   of the current day the channel has not already been told about goes out at
+   once.
+4. **Then watch one auto-update happen on its own.** Cut a trivial version after
+   the migration and leave it: within `WATCHTOWER_POLL_INTERVAL` the crawl
+   container should be recreated and `docker compose logs news-radar | head`
+   should say the new version. Until that has been seen once, auto-update is
+   built and not proven.
 3. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
    of P6-1 that survives the container being killed is built but not armed. A
    healthchecks.io ping url or an Uptime Kuma push url in `config/config.yaml`
@@ -293,6 +362,21 @@ loader and the design bank - see `progress.md`.
   timestamp spelling - a phone showing the same story differently is a second
   report, and the reader has to reconcile two things that were meant to be one.
   When the page's story row changes, `notify/` changes in the same commit.
+- **The package is the image, and it is not an app.** The stack is three
+  processes - crawl, caddy, cloudflared - so a PyInstaller or Tauri binary would
+  package one of them and leave you installing the other two. Docker already
+  supplies everything "background app" means here: restart on crash, start at
+  boot with no login, log rotation, network isolation. And a single binary would
+  have to carry `config.yaml` inside it, which breaks the rule directly below
+  this one. The user-facing app is the page at `news.dtbao.org`.
+- **Production holds no git checkout.** That is the whole mechanism behind "an
+  update cannot clean the data": not a rule anyone has to follow, but the
+  absence of the command that does the damage. It is why the deployment gets a
+  compose file over HTTP rather than a clone.
+- **A default must reproduce the old behaviour.** `${NEWS_RADAR_HOME:-..}` is
+  `..` when unset, which is where a checkout's data already lives - so
+  introducing the variable moved nothing and broke nothing. A variable whose
+  default changes behaviour is a migration wearing a variable's clothes.
 - **A local file is one a release may not overwrite.** `config.yaml`,
   `frequency_words.txt` and `.env` are the deployment's, not the repository's;
   each ships as a committed `.example` that `setup.py` copies once. A release can

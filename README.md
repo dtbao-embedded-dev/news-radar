@@ -34,13 +34,41 @@ what has not been reported before.
 
 ## Requirements
 
-- **Python 3.11+** — `setup.py` and `release.py` are standard library only, so
-  they run on a bare checkout before anything is installed.
-- **Docker Engine + Compose v2** — for the stack.
+- **Docker Engine + Compose v2** — for the stack. This is the only requirement
+  for running it.
+- **Python 3.11+** — only to develop: `setup.py` and `release.py` are standard
+  library only, so they run on a bare checkout before anything is installed.
 - Two runtime dependencies, total: `pyyaml` and `feedparser`. HTTP, storage and
   templating come from the standard library.
 
-## Quick start
+## Running it
+
+The package is a **container image**, not a source checkout. A deployment holds
+its own data and a compose file, and nothing else — no git, so no command on
+that machine can clean `config/`, `output/` or `backups/`.
+
+```bash
+mkdir -p ~/news-radar/config ~/news-radar/output ~/news-radar/backups
+cd ~/news-radar
+BASE=https://raw.githubusercontent.com/dtbao-embedded-dev/news-radar/v<version>
+curl -fsSLO "$BASE/docker/docker-compose.yml"
+curl -fsSLO "$BASE/docker/Caddyfile"
+curl -fsSL  "$BASE/docker/.env.example"                -o .env
+curl -fsSL  "$BASE/config/config.yaml.example"         -o config/config.yaml
+curl -fsSL  "$BASE/config/frequency_words.txt.example" -o config/frequency_words.txt
+# edit .env: the Telegram/Discord secrets, and NEWS_RADAR_HOME=.
+docker compose pull
+docker compose up -d
+```
+
+Updating is `docker compose pull && docker compose up -d`, or nothing at all —
+`--profile autoupdate` runs a watchtower container that does it for you once a
+day. `docker compose run --rm news-radar --check` names any config key a release
+added and your `config.yaml` has not got. See
+[docs/memory-ai/rule/setup-homelab.md](docs/memory-ai/rule/setup-homelab.md) for
+the tunnel, the migration from an older checkout, and how to pin a version.
+
+## Developing it
 
 ```bash
 git clone git@github.com:dtbao-embedded-dev/news-radar.git
@@ -48,12 +76,11 @@ cd news-radar
 python scripts/setup.py
 ```
 
-That is the whole install, and it is the same on Windows and Linux. `setup.py`
-checks Python and Docker, creates `config/config.yaml` and `docker/.env` from
-their templates without ever overwriting an existing file, asks for the Telegram
-and Discord secrets, then brings the stack up and prints the URL the page is
-served on — default `http://localhost:8088`, overridable with
-`NEWS_RADAR_HTTP_PORT`.
+Same two steps on Windows and Linux. `setup.py` checks Python and Docker,
+creates `config/config.yaml`, `config/frequency_words.txt` and `docker/.env`
+from their templates without ever overwriting an existing file, asks for the
+Telegram and Discord secrets, then builds the image locally and brings the stack
+up — default `http://localhost:8088`, overridable with `NEWS_RADAR_HTTP_PORT`.
 
 | Flag | For |
 |---|---|
@@ -72,7 +99,11 @@ service cannot build, so only the web half is started and the script says so.
 |---|---|
 | `config/config.yaml` | feeds, search templates, schedule, ranking weights |
 | `config/frequency_words.txt` | the keyword groups — created from `frequency_words.txt.example`, gitignored so an upgrade never reverts your tuning |
-| `docker/.env` | secrets and the published port — never committed |
+| `.env` | secrets, the published port, and where the data lives — never committed. `docker/.env` in a checkout |
+
+`NEWS_RADAR_HOME` in `.env` is the one that decides where `config/`, `output/`
+and `backups/` are read from, relative to the compose file: unset it is `..`,
+the repository root, which is what a checkout wants; a deployment sets `.`.
 
 Keyword file syntax: a blank line separates groups; `+` requires a word, `!`
 excludes one, `@n` caps a group, `/re/` matches by regex.

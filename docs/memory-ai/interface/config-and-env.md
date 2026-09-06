@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-06
 source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py
 confidence: confirmed
-keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
+keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
 order: 1
 ---
 
@@ -129,7 +129,8 @@ Here `ESP32` is the primary term - the search templates are queried with it - wh
 
 ## Environment variables
 
-The only place secrets live. In the container they come from `docker/.env`;
+The only place secrets live. In the container they come from the `.env` beside
+the compose file - `docker/.env` in a checkout, the deployment root otherwise;
 outside it, from the real environment.
 
 | Variable | Required | Default | Read by |
@@ -140,6 +141,24 @@ outside it, from the real environment.
 | `OPENAI_API_KEY` | only if the endpoint wants one | - | `__main__.py`, handed to `summarize.summarize()`. Unset (or blank) sends **no `Authorization` header at all**, which is what a LAN SGLang/vLLM/Ollama expects |
 | `NEWS_RADAR_CONFIG` | no | `config/config.yaml` | `config.py` |
 | `TZ` | no | `Asia/Ho_Chi_Minh` | container clock; `app.timezone` still wins for rendering |
+
+### Read by Compose, not by any Python here
+
+These four never reach the application. Compose substitutes them while it parses
+`docker-compose.yml`, so a typo in one is a wrong mount or a wrong image rather
+than a config error the code could report.
+
+| Variable | Default | What it decides |
+|----------|---------|-----------------|
+| `NEWS_RADAR_HOME` | `..` | The directory holding `config/`, `output/` and `backups/`, resolved relative to the compose file. Unset is the repository root, which is a checkout's own layout; a deployment sets `.` and keeps its data beside the compose file with no git checkout on the machine |
+| `NEWS_RADAR_VERSION` | `latest` | Which published image the crawl service runs. Pin it to freeze a deployment or roll one back - **and** start without `--profile autoupdate`, because pinning alone loses to the next watchtower poll |
+| `NEWS_RADAR_HTTP_PORT` | `8088` | Caddy's published host port, for local debugging only |
+| `WATCHTOWER_POLL_INTERVAL` | `86400` | Seconds between GHCR polls, when the `autoupdate` profile is on |
+
+`NEWS_RADAR_HOME` is the one that matters most and the one with no runtime
+symptom: set it wrong and the container mounts an empty directory, comes up
+clean, and publishes a report with no history in it. [[setup-homelab]] carries
+the value each layout wants.
 
 Startup validation: a channel that is `enabled: true` with its variable missing is
 a **fatal config error**, not a warning.

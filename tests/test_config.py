@@ -357,6 +357,15 @@ if example.is_file():
           cfg.get("storage.retention_days") == 0)
     check("the template ships the heartbeat off, url to be filled in locally",
           shipped.get("ops.heartbeat_url") == "")
+    # Same shape as retention: the code default is the harmless one an upgrade
+    # inherits, the template is the one somebody chose. `daily` reads the whole
+    # local day - the window the page renders - so the phone and the page agree
+    # on which stories exist, and a story missed by one refused cycle still
+    # goes out on the next.
+    check("the shipped template mirrors the page's window",
+          shipped.get("report.mode") == "daily", repr(shipped.get("report.mode")))
+    check("an absent report.mode still means incremental",
+          cfg.get("report.mode") == "incremental", repr(cfg.get("report.mode")))
     # The template loads with no OPENAI_API_KEY in `SECRETS`, which only holds
     # because it ships the summary off. That is the check, not the value.
     check("the template ships the summary off, so it needs no API key",

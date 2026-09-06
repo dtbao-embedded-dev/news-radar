@@ -18,7 +18,7 @@ import json
 import logging
 import re
 
-from . import SendResult, chunk, clip
+from . import SendResult, UTC, chunk, clip, stamp
 from ..fetch.http import HttpError
 
 __all__ = ["NAME", "LIMIT", "build", "send", "alert"]
@@ -52,30 +52,35 @@ def _url(url):
     return (url or "#").replace("(", "%28").replace(")", "%29")
 
 
-def _line(row):
-    """One story: a bullet, the masked link, and where it came from.
+def _line(row, tz):
+    """One story: a bullet, the masked link, and when it was published.
 
     A masked link rather than a bare url on two counts - the raw address would
     widen every line past the phone's width, and Discord does not auto-embed a
     masked link, so ten stories stay ten lines instead of ten preview cards.
-    The sources go in a code span because a source id may carry an underscore
-    (`hn_algolia`, `r_embedded`) that italics would eat.
+
+    The time goes in a code span, where the source ids used to be: it is
+    monospaced, so a column of them lines up the way the page's tabular figures
+    do. The sources themselves left with v0.2.1's page.
     """
-    sources = ", ".join(row.get("sources") or ())
-    return "• [{title}]({url}){sources}".format(
+    return "• [{title}]({url}) `{when}`".format(
         title=_e(clip(row.get("title"))),
         url=_url(row.get("url") or row.get("canonical_url")),
-        sources=" `{}`".format(sources) if sources else "")
+        when=stamp(row.get("published_at"), tz))
 
 
-def build(groups, limit=LIMIT):
-    """`[(label, [row])]` -> `[(text, keys)]`, ready to post. Pure."""
+def build(groups, tz=UTC, limit=LIMIT):
+    """`[(label, [row])]` -> `[(text, keys)]`, ready to post. Pure.
+
+    `tz` is the display zone from `app.timezone`, defaulting to UTC so this
+    stays callable with nothing configured.
+    """
     return chunk([("**{}**".format(_e(label)),
-                   [(_line(row), row["dedup_key"]) for row in rows])
+                   [(_line(row, tz), row["dedup_key"]) for row in rows])
                   for label, rows in groups], limit)
 
 
-def send(fetcher, groups, webhook_url):
+def send(fetcher, groups, webhook_url, tz=UTC):
     """Post every chunk to the webhook. Returns the accepted keys.
 
     Stops at the first refusal, like Telegram does: a 400 here is a deleted or
@@ -83,7 +88,7 @@ def send(fetcher, groups, webhook_url):
     """
     result = SendResult()
 
-    for text, keys in build(groups):
+    for text, keys in build(groups, tz):
         try:
             fetcher.post_json(webhook_url, {"content": text})
         except HttpError as exc:

@@ -3,7 +3,7 @@ title: Config Keys, Keyword File and Environment
 category: interface
 purpose: Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads.
 status: active
-updated: 2026-09-05
+updated: 2026-09-06
 source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py
 confidence: confirmed
 keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
@@ -22,7 +22,7 @@ Loaded from `NEWS_RADAR_CONFIG`, default `config/config.yaml`. Any key omitted
 falls back to the default below.
 
 **The Default column is `config.py`'s `DEFAULTS`, not what the template ships**,
-and the two disagree on purpose in four places (marked inline). A default is what
+and the two disagree on purpose in five places (marked inline). A default is what
 an *absent* key falls back to, so it has to be the harmless value: an upgrade
 that never mentioned `storage.retention_days` must not start deleting rows, and a
 clone with no `feeds` should fail the "nothing to hunt" gate rather than silently
@@ -47,7 +47,7 @@ someone chose it.
 | `search_templates[].enabled` | bool | `true` | `reddit_search` ships **disabled** in the template - it duplicates the fixed Reddit feed heavily |
 | `search_templates[].rank_weight` | float | `1.0` *(template ships `0.8`)* | Search hits rank below front-page hits in the shipped template |
 | `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file |
-| `report.mode` | str | `incremental` | `incremental` (only new), `current` (this run's matches), `daily` (whole day) |
+| `report.mode` | str | `incremental` **(template ships `daily`)** | `incremental` (this run's new matches), `current` (this run's whole shortlist, every cycle), `daily` (the whole local day minus what the channel already got). The template ships `daily` because it reads the same window the page renders, so a phone and the page agree on which stories exist - and a story missed by one refused cycle is offered again instead of lost |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
 | `report.rank_threshold` | int | `5` | The first N of each group are highlighted on the page |
 | `rank.weight_source` | float | `0.5` | Weight of the source term |

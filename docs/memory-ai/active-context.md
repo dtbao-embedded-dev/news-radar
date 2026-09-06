@@ -9,6 +9,16 @@ updated: 2026-09-06
 
 ## Current focus
 
+**Three defects reported off the live site were fixed on `release/v0.2`
+(2026-09-06)**, all three landing after v0.2.1 and none of them yet on
+`news.dtbao.org`: a day page whose day list 404'd (`/days/days/<date>.html`), a
+story link that replaced the report instead of opening beside it, and
+Telegram/Discord messages that disagreed with the page in both content and
+membership. `render.py`, `notify/` (all three files), `__main__.py`,
+`config.yaml.example` and three test files changed. **Nothing is live until
+`release.py 0.2.2` and a homelab redeploy**, and `report.mode` needs a hand edit
+there on top - see Next steps.
+
 **The page was redesigned on 2026-09-06**, after v0.2.0 and against a real day
 pulled out of the store rather than a mockup. Five candidate layouts were built
 and thrown away except one: a sticky rail beside a single column of stories, in
@@ -32,6 +42,30 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The three live defects landed in ten commits on `release/v0.2`**
+  (2026-09-06): `render.py` (`_day_nav()` takes a prefix, `write()` renders once
+  per destination, `_story()` gains `target="_blank"`), `notify/__init__.py`
+  (`stamp()`, `TIME_FMT`, `NO_TIME`, `UTC`), `notify/telegram.py` and
+  `notify/discord.py` (`_line()`, `build()`, `send()` all take `tz`),
+  `__main__.py` (`_rows_to_send()`, `_send_channel()` and both `SENDERS`
+  wrappers take `tz`; `_notify()` resolves it once), `config.yaml.example`, and
+  `tests/test_render.py`, `test_notify.py`, `test_config.py`.
+- **Two files that are identical are two files that cannot both be right.**
+  `index.html` and `days/<today>.html` shared their bytes, and the day list is
+  the one block whose correctness depends on where the file sits. The general
+  shape: a relative href is a fact about the *file*, not about the page.
+- **A `rel` with no `target` is a comment.** `rel="noopener noreferrer"` had
+  been on every story link since P3 doing nothing at all - it only means
+  something next to `target="_blank"`. Half a pattern reads as the whole one on
+  review.
+- **The messages and the page had drifted apart the moment the page changed.**
+  v0.2.1 took the source ids off the page and put a timestamp on it; nothing
+  told `notify/`, and there was no test that could have. The one now in
+  `test_notify.py` compares `notify.stamp()` against `render._when()` directly,
+  so the two halves of layer 5 cannot spell a timestamp differently again.
+- **`incremental` loses a story the channel refused.** The next cycle reads its
+  own run and the story is not in it. `daily` re-offers it, which is the
+  argument for the template change independent of matching the page.
 - **The page redesign touched two files** (2026-09-06): `src/news_radar/render.py`
   (`STYLE` rewritten, `_slug()` and `_jump_nav()` new, `_story()`, `_group()` and
   `_page()` rebuilt) and `tests/test_render.py`. `write()` keeps its signature,
@@ -147,21 +181,30 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
+1. **Cut v0.2.2 and redeploy, or the three fixes stay in the branch.**
+   `python scripts/release.py 0.2.2` on `release/v0.2`, then on the homelab:
+   `git fetch --tags origin` → `git checkout v0.2.2` → `cd docker` →
+   `docker compose --profile tunnel up -d --build`.
+2. **Edit `report.mode` on the homelab by hand.** `~/news-radar/config/config.yaml`
+   is gitignored and still says `incremental`; the template change cannot reach
+   it. Set `mode: daily` before the redeploy, in the same visit. Expect a small
+   burst on the first cycle after it - every story of the current day that the
+   channel has not already been told about goes out at once.
+3. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
    of P6-1 that survives the container being killed is built but not armed. A
    healthchecks.io ping url or an Uptime Kuma push url in `config/config.yaml`
    (gitignored) is the whole change - no code, no restart of anything else.
-2. **Let it run seven days.** That is P6's definition of done and the only thing
+4. **Let it run seven days.** That is P6's definition of done and the only thing
    still open. On day seven: the crawl container still `Up` with no restart,
    `backups/` holding one file per day and no more, the day list capped at 90,
    and however many alerts arrived being ones you would have wanted.
-3. **Watch whether `ALERT_AFTER = 2` is the right chattiness.** Every alert so
+5. **Watch whether `ALERT_AFTER = 2` is the right chattiness.** Every alert so
    far came from a `site_url` pointed at a 404 on purpose; real feed flakiness
    has not been through it yet.
-4. **Retention will actually delete something for the first time** once the
+6. **Retention will actually delete something for the first time** once the
    store holds anything older than 90 days. A backup is written immediately
    before each prune, so the first one has a copy standing in front of it.
-5. **Still worth eyeballing from P4**: whether 5 Discord messages per cycle is
+7. **Still worth eyeballing from P4**: whether 5 Discord messages per cycle is
    pleasant or noisy, and whether any real headline trips an escaping case the
    fixtures missed.
 
@@ -211,6 +254,13 @@ loader and the design bank - see `progress.md`.
   contract says a dead webhook must leave the other channel still attempted.
 - **The page is rendered from the store, not from `ranked`.** A
   `render.write(..., ranked)` anywhere is a bug, not a shortcut.
+- **A message line is the page's line.** Same fields, same order, same
+  timestamp spelling - a phone showing the same story differently is a second
+  report, and the reader has to reconcile two things that were meant to be one.
+  When the page's story row changes, `notify/` changes in the same commit.
+- **A relative href is a fact about the file, not about the page.** Two output
+  files at two depths cannot share one nav. `index.html` and `days/<date>.html`
+  differ in exactly that block and nowhere else.
 - **Layer 3 and layer 4 import no config and read no clock.** The weights, the
   `{source_id: rank_weight}` map, the data directory, the retention window and
   `now` are all arguments `__main__.py` builds. It is why ten of the twelve test

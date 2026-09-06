@@ -254,9 +254,15 @@ def _story(row, hot, tz):
     `item_sources` still records who carried it - but a reader asked what
     `0.74` meant, and a number nobody can act on is chrome. `hot` survives as
     a heavier title: the order of the list is the ranking.
+
+    `target="_blank"` because a story leads off this site and the report is what
+    the reader came back to; the `rel` beside it is the half that stops the
+    opened page reaching back through `window.opener`. Only story links get it -
+    the group and day navs move around this same report and belong in this tab.
     """
     return (
-        '<li class="{cls}"><a href="{url}" rel="noopener noreferrer">{title}</a>'
+        '<li class="{cls}"><a href="{url}" target="_blank"'
+        ' rel="noopener noreferrer">{title}</a>'
         '<span class="meta">{when}</span></li>').format(
             cls="story hot" if hot else "story",
             url=_e(row.get("url") or row.get("canonical_url") or "#"),
@@ -324,18 +330,24 @@ def _summary(text):
     return '<section class="summary">{}</section>'.format("".join(paragraphs))
 
 
-def _day_nav(data_dir, today):
+def _day_nav(data_dir, today, prefix=""):
     """Links to every snapshot on disk, newest first, today's included.
 
     Today's file is added explicitly rather than globbed: it is written by this
     same call, and scanning before writing it would leave the current day off
     its own page.
+
+    `prefix` is whatever stands between the page carrying this nav and the
+    `days/` directory - `"days/"` for `index.html` at the root, `""` for a
+    snapshot that already lives in there. It is not cosmetic: a relative href
+    is resolved against the file carrying it, so the same string on both pages
+    sends the day page to `/days/days/<date>.html`, which is a 404.
     """
     days = Path(data_dir) / DAYS_DIR
     stems = {p.stem for p in days.glob("*.html")} | {today}
     return '<nav class="days">{}</nav>'.format("".join(
-        '<a href="{dir}/{d}.html"{cur}>{d}</a>'.format(
-            dir=DAYS_DIR, d=_e(stem), cur=' aria-current="page"'
+        '<a href="{prefix}{d}.html"{cur}>{d}</a>'.format(
+            prefix=prefix, d=_e(stem), cur=' aria-current="page"'
             if stem == today else "")
         for stem in sorted(stems, reverse=True)))
 
@@ -408,6 +420,11 @@ def write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None):
     is still never touched, because the filename moves with the date - and there
     is no rollover branch to get wrong.
 
+    The two files carry the same page and two different day lists: they sit at
+    different depths, and a relative href is resolved against the file carrying
+    it. One nav for both is how `days/<date>.html` inside `days/` became
+    `/days/days/<date>.html` and a 404.
+
     `summary` is the AI summary, one topic per line, or `None`. Absent is the
     shipped case - `ai.enabled` defaults to false - and it renders nothing at
     all rather than an empty card, so a clone's page is the page it always was.
@@ -418,12 +435,11 @@ def write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None):
     generated = meta.get("generated_at") or dt.datetime.now(dt.timezone.utc)
     today = generated.astimezone(tz).date().isoformat()
 
-    page = _page(labels, day_rows, meta, tz, threshold, today,
-                 _day_nav(data_dir, today), summary)
-
     written = []
-    for path in (data_dir / INDEX_NAME,
-                 data_dir / DAYS_DIR / "{}.html".format(today)):
+    for path, prefix in ((data_dir / INDEX_NAME, DAYS_DIR + "/"),
+                         (data_dir / DAYS_DIR / "{}.html".format(today), "")):
+        page = _page(labels, day_rows, meta, tz, threshold, today,
+                     _day_nav(data_dir, today, prefix), summary)
         path.write_text(page, encoding="utf-8")
         written.append(path)
 

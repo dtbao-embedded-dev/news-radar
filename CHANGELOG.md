@@ -16,6 +16,35 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.2 - 2026-09-06
+
+### Fixes
+
+- **render**: every day link on a day page reaches the day it names. The
+  snapshot in `days/` used to carry `index.html`'s own day list verbatim, and a
+  relative href resolves against the file carrying it - so clicking any date on
+  `/days/2026-09-06.html` asked for `/days/days/<date>.html` and got a 404. The
+  day list is now written for the depth of the page carrying it, which is the
+  only block in which the two files differ.
+- **config**: the shipped template moves to `report.mode: daily`, so a message
+  covers the same window the page does - the whole local day, minus what that
+  channel has already been told. Under `incremental` a story missed by one
+  refused cycle was never offered again, because the next cycle only reads its
+  own run. The **default** for an absent key stays `incremental`: an upgrade
+  that never mentioned the key must not change what a phone receives. An
+  existing deployment has to set it by hand.
+- **notify**: a story on Telegram or Discord is spelled the way the page spells
+  it - the title and the local publication time, `--` when the source gave none.
+  The source ids left the page in v0.2.1 and now leave the message with it, so a
+  reader comparing the two is comparing one report with itself. `notify.stamp()`
+  is the shared formatter and the display zone is threaded from `app.timezone`
+  down to both channels, so a message cannot read an hour off the page it
+  mirrors.
+- **render**: a story opens in a new tab instead of replacing the report.
+  `rel="noopener noreferrer"` was already on every story link; `target="_blank"`
+  is the half it was missing. The group and day navs move around this same
+  report and deliberately stay in the tab.
+
 ## v0.2.1 - 2026-09-06
 
 - **render**: the page is redesigned around a sticky left rail - the run's

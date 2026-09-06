@@ -14,7 +14,7 @@ import html
 import json
 import logging
 
-from . import SendResult, chunk, clip
+from . import SendResult, UTC, chunk, clip, stamp
 from ..fetch.http import HttpError
 
 __all__ = ["NAME", "LIMIT", "build", "send", "alert"]
@@ -37,27 +37,34 @@ def _e(text):
     return html.escape("" if text is None else str(text), quote=True)
 
 
-def _line(row):
-    """One story: a bullet, the linked title, and where it came from."""
-    sources = ", ".join(row.get("sources") or ())
-    return '• <a href="{url}">{title}</a>{sources}'.format(
+def _line(row, tz):
+    """One story: a bullet, the linked title, and when it was published.
+
+    The same two things the page shows, in the same order. The source ids used
+    to sit where the time is now; they left the page in v0.2.1 and left the
+    message with it, because a reader comparing the two should be comparing one
+    report with itself.
+    """
+    return '• <a href="{url}">{title}</a> <i>{when}</i>'.format(
         url=_e(row.get("url") or row.get("canonical_url") or "#"),
         title=_e(clip(row.get("title"))),
-        sources=" <i>{}</i>".format(_e(sources)) if sources else "")
+        when=_e(stamp(row.get("published_at"), tz)))
 
 
-def build(groups, limit=LIMIT):
+def build(groups, tz=UTC, limit=LIMIT):
     """`[(label, [row])]` -> `[(text, keys)]`, ready to post.
 
-    Pure: no network, no clock, no config. Every escaping and splitting rule
-    this channel has is decided here and can be checked without a socket.
+    Pure: no network, no clock, no config - `tz` is the display zone the caller
+    read out of `app.timezone`, and it defaults to UTC so this stays callable
+    with nothing configured at all. Every escaping and splitting rule this
+    channel has is decided here and can be checked without a socket.
     """
     return chunk([("<b>{}</b>".format(_e(label)),
-                   [(_line(row), row["dedup_key"]) for row in rows])
+                   [(_line(row, tz), row["dedup_key"]) for row in rows])
                   for label, rows in groups], limit)
 
 
-def send(fetcher, groups, token, chat_id):
+def send(fetcher, groups, token, chat_id, tz=UTC):
     """Post every chunk. Returns a SendResult carrying the accepted keys.
 
     The first refusal ends the channel for this run. A 400 is a bad token, a bad
@@ -70,7 +77,7 @@ def send(fetcher, groups, token, chat_id):
     url = API.format(token=token)
     result = SendResult()
 
-    for text, keys in build(groups):
+    for text, keys in build(groups, tz):
         try:
             fetcher.post_json(url, {
                 "chat_id": chat_id,

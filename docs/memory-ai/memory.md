@@ -19,6 +19,42 @@ _Generated 2026-09-06 - 19 durable doc(s)._
 
 ## What works
 
+### Three post-redesign defects, closed (2026-09-06)
+
+All three were reported off the live site, not off a test, and all three were
+verified against the real thing rather than a screenshot.
+
+- **A day page's day list reached `/days/days/<date>.html` and got a 404.**
+  `index.html` and `days/<today>.html` were byte-identical, and a relative href
+  resolves against the file carrying it - so the one nav that was right at the
+  root was wrong one directory down. `_day_nav()` now takes the prefix and
+  `write()` renders the page once per destination; the two files differ in that
+  block and nowhere else, which `tests/test_render.py` pins by inverting the
+  assertion that used to demand they be identical. Confirmed on the live page
+  before the fix: `<a href="days/2026-09-06.html" aria-current="page">`.
+- **A story replaced the report instead of opening beside it.**
+  `rel="noopener noreferrer"` had been on every story link since P3 - it is the
+  half of the pair that closes `window.opener`, and it had been sitting there
+  without the `target="_blank"` that makes it mean anything. Only story links
+  get it; `nav.jump` and `nav.days` move around this same report and stay in the
+  tab, which the test pins separately.
+- **Telegram and Discord disagreed with the page in both directions.** Each
+  line still carried the source ids the page dropped in v0.2.1 and carried no
+  time where the page shows one, and `report.mode: incremental` only ever read
+  the run it was called for. Both halves are fixed: `notify.stamp()` renders
+  `published_at` exactly as `render._when()` does (`--` and all), the display
+  zone is threaded from `app.timezone` through `_notify()` into both channels,
+  and the shipped template moves to `report.mode: daily` - the same local-day
+  window the page renders. Measured through the real `_notify()` chain against
+  a local stub: `• <a href="...">ESP32-S3 ra ban 5.5</a> <i>09:30 06/09</i>` on
+  Telegram and ``• [ESP32-S3 ra ban 5.5](...) `09:30 06/09` `` on Discord, from
+  a row stored at 02:30 UTC with `hn_algolia` in `item_sources` and no source id
+  in either message.
+- **`incremental` had a hole `daily` closes.** A story matched by one cycle and
+  refused by the channel was never offered again: the next cycle reads its own
+  run, and the story is not in it. This was the argument for the template
+  change, over and above matching the page.
+
 **P0 Foundation is released as v0.1.0; P1 Fetch, P2 Filter and rank, P3 Store
 and render, P4 Notify and P5 Deploy are complete, and P6 Ops is built**
 (2026-09-05). See `architecture/delivery-phases.md` for the phase map and the
@@ -389,6 +425,16 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **The three fixes above are in the branch, not on the site.** Production runs
+  a detached checkout of a release tag (`v0.2.1`), so nothing reaches
+  `news.dtbao.org` until `scripts/release.py 0.2.2` cuts the next one and the
+  homelab is redeployed. The `report.mode` half needs one more step that no
+  release carries: `~/news-radar/config/config.yaml` is gitignored and still
+  says `incremental`, and changing the shipped template cannot change it.
+- **A day page written before the fix stays broken.** Only today's snapshot is
+  rewritten each cycle; a past day keeps whatever nav it was written with. On
+  2026-09-06 the homelab held exactly one day file, so this costs nothing now -
+  but a page written today and read next month is the shape to remember.
 - **The archive is public now.** Every `output/days/*.html` ever written is
   readable by anyone with the URL - that is finished-product statement 3, not a
   defect, but it is worth stating plainly: only `news.db*` and directory
@@ -461,6 +507,16 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Current focus
 
+**Three defects reported off the live site were fixed on `release/v0.2`
+(2026-09-06)**, all three landing after v0.2.1 and none of them yet on
+`news.dtbao.org`: a day page whose day list 404'd (`/days/days/<date>.html`), a
+story link that replaced the report instead of opening beside it, and
+Telegram/Discord messages that disagreed with the page in both content and
+membership. `render.py`, `notify/` (all three files), `__main__.py`,
+`config.yaml.example` and three test files changed. **Nothing is live until
+`release.py 0.2.2` and a homelab redeploy**, and `report.mode` needs a hand edit
+there on top - see Next steps.
+
 **The page was redesigned on 2026-09-06**, after v0.2.0 and against a real day
 pulled out of the store rather than a mockup. Five candidate layouts were built
 and thrown away except one: a sticky rail beside a single column of stories, in
@@ -484,6 +540,30 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The three live defects landed in ten commits on `release/v0.2`**
+  (2026-09-06): `render.py` (`_day_nav()` takes a prefix, `write()` renders once
+  per destination, `_story()` gains `target="_blank"`), `notify/__init__.py`
+  (`stamp()`, `TIME_FMT`, `NO_TIME`, `UTC`), `notify/telegram.py` and
+  `notify/discord.py` (`_line()`, `build()`, `send()` all take `tz`),
+  `__main__.py` (`_rows_to_send()`, `_send_channel()` and both `SENDERS`
+  wrappers take `tz`; `_notify()` resolves it once), `config.yaml.example`, and
+  `tests/test_render.py`, `test_notify.py`, `test_config.py`.
+- **Two files that are identical are two files that cannot both be right.**
+  `index.html` and `days/<today>.html` shared their bytes, and the day list is
+  the one block whose correctness depends on where the file sits. The general
+  shape: a relative href is a fact about the *file*, not about the page.
+- **A `rel` with no `target` is a comment.** `rel="noopener noreferrer"` had
+  been on every story link since P3 doing nothing at all - it only means
+  something next to `target="_blank"`. Half a pattern reads as the whole one on
+  review.
+- **The messages and the page had drifted apart the moment the page changed.**
+  v0.2.1 took the source ids off the page and put a timestamp on it; nothing
+  told `notify/`, and there was no test that could have. The one now in
+  `test_notify.py` compares `notify.stamp()` against `render._when()` directly,
+  so the two halves of layer 5 cannot spell a timestamp differently again.
+- **`incremental` loses a story the channel refused.** The next cycle reads its
+  own run and the story is not in it. `daily` re-offers it, which is the
+  argument for the template change independent of matching the page.
 - **The page redesign touched two files** (2026-09-06): `src/news_radar/render.py`
   (`STYLE` rewritten, `_slug()` and `_jump_nav()` new, `_story()`, `_group()` and
   `_page()` rebuilt) and `tests/test_render.py`. `write()` keeps its signature,
@@ -599,21 +679,30 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
+1. **Cut v0.2.2 and redeploy, or the three fixes stay in the branch.**
+   `python scripts/release.py 0.2.2` on `release/v0.2`, then on the homelab:
+   `git fetch --tags origin` → `git checkout v0.2.2` → `cd docker` →
+   `docker compose --profile tunnel up -d --build`.
+2. **Edit `report.mode` on the homelab by hand.** `~/news-radar/config/config.yaml`
+   is gitignored and still says `incremental`; the template change cannot reach
+   it. Set `mode: daily` before the redeploy, in the same visit. Expect a small
+   burst on the first cycle after it - every story of the current day that the
+   channel has not already been told about goes out at once.
+3. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
    of P6-1 that survives the container being killed is built but not armed. A
    healthchecks.io ping url or an Uptime Kuma push url in `config/config.yaml`
    (gitignored) is the whole change - no code, no restart of anything else.
-2. **Let it run seven days.** That is P6's definition of done and the only thing
+4. **Let it run seven days.** That is P6's definition of done and the only thing
    still open. On day seven: the crawl container still `Up` with no restart,
    `backups/` holding one file per day and no more, the day list capped at 90,
    and however many alerts arrived being ones you would have wanted.
-3. **Watch whether `ALERT_AFTER = 2` is the right chattiness.** Every alert so
+5. **Watch whether `ALERT_AFTER = 2` is the right chattiness.** Every alert so
    far came from a `site_url` pointed at a 404 on purpose; real feed flakiness
    has not been through it yet.
-4. **Retention will actually delete something for the first time** once the
+6. **Retention will actually delete something for the first time** once the
    store holds anything older than 90 days. A backup is written immediately
    before each prune, so the first one has a copy standing in front of it.
-5. **Still worth eyeballing from P4**: whether 5 Discord messages per cycle is
+7. **Still worth eyeballing from P4**: whether 5 Discord messages per cycle is
    pleasant or noisy, and whether any real headline trips an escaping case the
    fixtures missed.
 
@@ -663,6 +752,13 @@ loader and the design bank - see `progress.md`.
   contract says a dead webhook must leave the other channel still attempted.
 - **The page is rendered from the store, not from `ranked`.** A
   `render.write(..., ranked)` anywhere is a bug, not a shortcut.
+- **A message line is the page's line.** Same fields, same order, same
+  timestamp spelling - a phone showing the same story differently is a second
+  report, and the reader has to reconcile two things that were meant to be one.
+  When the page's story row changes, `notify/` changes in the same commit.
+- **A relative href is a fact about the file, not about the page.** Two output
+  files at two depths cannot share one nav. `index.html` and `days/<date>.html`
+  differ in exactly that block and nowhere else.
 - **Layer 3 and layer 4 import no config and read no clock.** The weights, the
   `{source_id: rank_weight}` map, the data directory, the retention window and
   `now` are all arguments `__main__.py` builds. It is why ten of the twelve test
@@ -1421,10 +1517,17 @@ output/
 ```
 
 - `index.html` is rewritten every run; it is never appended to.
-- `days/<date>.html` is written **every run**, with the identical body, under the
-  current local date. A past day is still never touched - the filename moves with
-  the date - and there is no day-rollover branch to get wrong. The design called
-  for writing it once at midnight; this has the same effect with less to break.
+- `days/<date>.html` is written **every run** under the current local date. A past
+  day is still never touched - the filename moves with the date - and there is no
+  day-rollover branch to get wrong. The design called for writing it once at
+  midnight; this has the same effect with less to break.
+- The snapshot carries the same page as `index.html` **except for `nav.days`**,
+  which is written for the depth of the file carrying it: `days/<date>.html` from
+  the root, a bare `<date>.html` from inside `days/`. The two files were once
+  byte-identical, and that is precisely what made every day link on a day page a
+  404 - a relative href resolves against the file carrying it, so the snapshot
+  was asking for `/days/days/<date>.html`. `render._day_nav()` takes the prefix
+  as an argument and `write()` renders the page once per destination.
 - Both files are self-contained: inline CSS and JavaScript, no external
   stylesheet, script or image. A report that needs a CDN stops being readable
   exactly when the network is the thing you wanted to read about.
@@ -1448,7 +1551,14 @@ the optional AI summary, then one `<section class="group">` per label in order.
 | `#theme` | the light/dark toggle, remembered in `localStorage` under `news-radar-theme` |
 | `nav.jump` | one link per group to `#g-<slug>`, with its count; an empty group is dimmed, never dropped |
 | `nav.days` | one link per snapshot on disk, newest first, today's included |
-| `li.story` | **the title, and the timestamp only** - two grid cells on one baseline |
+| `li.story` | **the title, and the timestamp only** - two grid cells on one baseline; the title is `target="_blank"` + `rel="noopener noreferrer"` |
+
+**Story links open in a new tab, internal links do not.** A story leads off this
+site and the report is what the reader came back to, so `li.story a` carries
+`target="_blank"`; `rel="noopener noreferrer"` is the half of that pair that
+stops the opened page reaching back through `window.opener`, and neither is
+useful alone. `nav.jump` and `nav.days` move around this same report and stay in
+the tab - `tests/test_render.py` asserts both halves of that split.
 
 **The score and the source ids are deliberately not on the page.** Both are still
 in the store - `matches.score` is what ordered the list, `item_sources` still
@@ -1480,7 +1590,7 @@ Loaded from `NEWS_RADAR_CONFIG`, default `config/config.yaml`. Any key omitted
 falls back to the default below.
 
 **The Default column is `config.py`'s `DEFAULTS`, not what the template ships**,
-and the two disagree on purpose in four places (marked inline). A default is what
+and the two disagree on purpose in five places (marked inline). A default is what
 an *absent* key falls back to, so it has to be the harmless value: an upgrade
 that never mentioned `storage.retention_days` must not start deleting rows, and a
 clone with no `feeds` should fail the "nothing to hunt" gate rather than silently
@@ -1505,7 +1615,7 @@ someone chose it.
 | `search_templates[].enabled` | bool | `true` | `reddit_search` ships **disabled** in the template - it duplicates the fixed Reddit feed heavily |
 | `search_templates[].rank_weight` | float | `1.0` *(template ships `0.8`)* | Search hits rank below front-page hits in the shipped template |
 | `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file |
-| `report.mode` | str | `incremental` | `incremental` (only new), `current` (this run's matches), `daily` (whole day) |
+| `report.mode` | str | `incremental` **(template ships `daily`)** | `incremental` (this run's new matches), `current` (this run's whole shortlist, every cycle), `daily` (the whole local day minus what the channel already got). The template ships `daily` because it reads the same window the page renders, so a phone and the page agree on which stories exist - and a story missed by one refused cycle is offered again instead of lost |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
 | `report.rank_threshold` | int | `5` | The first N of each group are highlighted on the page |
 | `rank.weight_source` | float | `0.5` | Weight of the source term |
@@ -1717,7 +1827,7 @@ chain it drives.
   config template is copied verbatim, not parsed.
 
 ### [interface] Notification Channels - Telegram and Discord
-*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: alert, Health, ALERT_AFTER, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set*
+*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set*
 
 # Notification Channels - Telegram and Discord
 
@@ -1734,8 +1844,8 @@ does, and honouring a 429's `Retry-After` is a transport concern rather than a
 per-channel one. The alternative was a second HTTP client inside `notify/`.
 
 Neither channel reads the environment, the config or the clock. The secrets, the
-row set and the group order all arrive as arguments, which is why
-`tests/test_notify.py` exercises both channels against a local `http.server`
+row set, the group order and the display timezone all arrive as arguments, which
+is why `tests/test_notify.py` exercises both channels against a local `http.server`
 with nothing installed and nothing configured.
 
 ## `notify/__init__.py` - what both channels share
@@ -1745,6 +1855,7 @@ with nothing installed and nothing configured.
 | `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order + the seen-set diff. Empty groups dropped |
 | `chunk(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. Every text under `limit` |
 | `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
+| `stamp(moment, tz)` | `str` | `published_at` as `TIME_FMT` (`%H:%M %d/%m`), or `NO_TIME` (`--`) |
 | `SendResult(sent, failed, keys)` | dataclass | `.stories` is `len(keys)` |
 
 `TITLE_MAX` is `240`: long enough that no real headline is touched, short enough
@@ -1772,7 +1883,23 @@ buzz to say nothing happened.
 
 The same row `store.day_matches()` and `store.run_matches()` return - see
 [[storage-layer]]. A channel reads `dedup_key`, `title`, `url`,
-`canonical_url` and `sources`, and ignores the rest.
+`canonical_url` and `published_at`, and ignores the rest - `sources` included,
+since v0.2.2.
+
+**A message line is the page's line.** The page shows a title and a local time
+and nothing else ([[news-item]]); a message that shows the same story with a
+source id and no time is a second report, not the same one. `notify.stamp(moment,
+tz)` renders `published_at` as `%H:%M %d/%m`, or `--` when the source gave no
+timestamp - the page's own honest dash. The format is duplicated from
+`render._when()` rather than imported: `render` and `notify` are the two halves
+of layer 5 and neither owns the other. `tests/test_notify.py` asserts the two
+spellings agree, so the duplication cannot drift quietly.
+
+**The zone is an argument, never the host's.** `__main__._notify()` resolves
+`app.timezone` once and hands the same `tz` to `_rows_to_send()` and to every
+channel, so a message cannot read an hour off the page it mirrors. `build()` and
+`send()` default it to UTC, which is what keeps them callable with no config at
+all.
 
 ## Telegram
 
@@ -1787,17 +1914,17 @@ The same row `store.day_matches()` and `store.run_matches()` return - see
 
 | Signature | Returns |
 |-----------|---------|
-| `build(groups, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
-| `send(fetcher, groups, token, chat_id)` | `SendResult` |
+| `build(groups, tz=UTC, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
+| `send(fetcher, groups, token, chat_id, tz=UTC)` | `SendResult` |
 | `alert(fetcher, text, token, chat_id)` | `bool` - one operational message, **no `parse_mode`** |
 
 Formatting: `<b>label</b>` per group, then
-`• <a href="url">title</a> <i>sources</i>` per story.
+`• <a href="url">title</a> <i>HH:MM dd/mm</i>` per story.
 
 - **HTML, not Markdown.** Telegram's Markdown refuses a message over any
   unbalanced `*` or `_` in a headline and the whole message is lost; HTML has one
   escaping rule.
-- Every title, link and source id goes through `html.escape(..., quote=True)`
+- Every title, link and timestamp goes through `html.escape(..., quote=True)`
   **before** being wrapped in a tag. An unescaped `&` makes the message fail with
   `Bad Request: can't parse entities` and every story in it disappears.
 - Link preview is off: one preview per message would bury the list under a single
@@ -1821,11 +1948,11 @@ Formatting: `<b>label</b>` per group, then
 
 | Signature | Returns |
 |-----------|---------|
-| `build(groups, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
-| `send(fetcher, groups, webhook_url)` | `SendResult` |
+| `build(groups, tz=UTC, limit=LIMIT)` | `[(text, keys)]` - pure, no network |
+| `send(fetcher, groups, webhook_url, tz=UTC)` | `SendResult` |
 | `alert(fetcher, text, webhook_url)` | `bool` - one operational message, Markdown-escaped |
 
-Formatting: `**label**` per group, then ``• [title](url) `sources` `` per story.
+Formatting: `**label**` per group, then ``• [title](url) `HH:MM dd/mm` `` per story.
 
 - **Plain `content`, no embeds.** The 6000-character total across embeds is
   easier to overrun than any per-embed limit, and it buys nothing here.
@@ -1837,8 +1964,10 @@ Formatting: `**label**` per group, then ``• [title](url) `sources` `` per stor
 - A **masked** link rather than a bare url, on two counts: the raw address would
   widen every line past a phone's width, and Discord does not auto-embed a masked
   link, so ten stories stay ten lines instead of ten preview cards.
-- Sources sit in a code span because a source id may carry an underscore
-  (`hn_algolia`, `r_embedded`) that italics would eat.
+- The timestamp sits in a code span, where the source ids used to be: it is
+  monospaced, so a column of them lines up the way the page's tabular figures do.
+  Nothing inside a code span is Markdown-escaped - a backslash there would be
+  printed rather than obeyed.
 - 1900 is a quarter of Telegram's budget: **the same run makes more Discord
   messages than Telegram messages**, which is expected rather than a bug.
   Measured on 2026-09-05, 43 stories were 2 Telegram messages and 5 Discord ones.

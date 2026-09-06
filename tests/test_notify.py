@@ -11,6 +11,7 @@ rule is checked without a socket at all.
 
 from __future__ import annotations
 
+import datetime as dt
 import http.server
 import json
 import pathlib
@@ -19,13 +20,16 @@ import threading
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from news_radar import notify  # noqa: E402
+from news_radar import notify, render  # noqa: E402
 from news_radar.fetch.http import Fetcher  # noqa: E402
 from news_radar.notify import discord, telegram  # noqa: E402
 
 FAILURES = []
 HITS = {}
 BODIES = {}
+
+VN = dt.timezone(dt.timedelta(hours=7))
+WHEN = dt.datetime(2026, 9, 6, 2, 30, tzinfo=dt.timezone.utc)  # 09:30 in +07:00
 
 
 def check(name, condition, detail=""):
@@ -37,10 +41,11 @@ def eq(name, got, want):
     check(name, got == want, "got {!r}, want {!r}".format(got, want))
 
 
-def row(title, key, url="https://example.com/a", sources=("hn",)):
+def row(title, key, url="https://example.com/a", sources=("hn",),
+        published_at=None):
     """The shape `store.run_matches()` hands back, and nothing more."""
     return {"dedup_key": key, "title": title, "url": url,
-            "canonical_url": url, "score": 0.9, "published_at": None,
+            "canonical_url": url, "score": 0.9, "published_at": published_at,
             "first_seen_at": None, "sources": sources}
 
 
@@ -165,11 +170,47 @@ check("an ampersand is escaped, or Telegram drops the whole message",
       "&amp;" in text, text)
 check("the group label is a bold tag", text.startswith("<b>ESP32</b>"), text)
 check("the link is a real anchor", '<a href="https://example.com/a">' in text)
-check("the sources travel with the story", "<i>hn</i>" in text, text)
 
 quoted = telegram.build([("G", [row("t", "k", url='https://x/?a="b"')])])[0][0]
 check("a quote in a url cannot break out of href",
       '"' not in quoted.split('href="')[1].split('"')[0], quoted)
+
+
+# --- the message line is the page's line ----------------------------------
+
+# This file used to pin "the sources travel with the story". The page stopped
+# rendering source ids in v0.2.1 and started rendering the local time, so those
+# assertions are inverted rather than deleted: a message that spells the same
+# story differently from the page is a second report, not the same one.
+timed = telegram.build([("ESP32", [row("Timed", "k1", published_at=WHEN)])],
+                       VN)[0][0]
+check("telegram carries the published time, in the configured zone",
+      "09:30 06/09" in timed, timed)
+check("...and no source id", "<i>hn</i>" not in timed, timed)
+
+undated = telegram.build([("ESP32", [row("Undated", "k2")])], VN)[0][0]
+check("telegram is honest when the source gave no timestamp",
+      notify.NO_TIME in undated, undated)
+
+dtimed = discord.build([("ESP32", [row("Timed", "k1", published_at=WHEN)])],
+                       VN)[0][0]
+check("discord carries the same time", "09:30 06/09" in dtimed, dtimed)
+check("...and no source id either", "`hn`" not in dtimed, dtimed)
+check("discord is honest about a missing timestamp too",
+      notify.NO_TIME in discord.build([("G", [row("Undated", "k2")])],
+                                      VN)[0][0])
+
+eq("no timestamp is the same dash the page renders",
+   notify.stamp(None, VN), "--")
+check("the two halves of layer 5 spell a timestamp the same way",
+      notify.stamp(WHEN, VN) in render._when(WHEN, VN),
+      "{} vs {}".format(notify.stamp(WHEN, VN), render._when(WHEN, VN)))
+
+# The zone is an argument, not a default read off the host: the same moment
+# reads two hours apart in Ho Chi Minh and in UTC, and the page is rendered in
+# `app.timezone`.
+eq("the stamp is rendered in the zone it is given",
+   notify.stamp(WHEN, dt.timezone.utc), "02:30 06/09")
 
 
 # --- telegram: the wire ---------------------------------------------------

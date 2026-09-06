@@ -43,6 +43,18 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **deploy**: `docker-compose.yml` reads every directory a deployment owns -
+  `config/`, `output/`, `backups/` - from one variable, `NEWS_RADAR_HOME`,
+  resolved relative to the compose file. Unset it is `..`, the repository root,
+  which is exactly where those directories already are: a dev checkout behaves
+  as before. A deployment sets it to `.` and keeps its data beside the compose
+  file, with no git checkout on that machine at all - which is the point, since
+  the way this project has already lost a file is `git checkout <tag>` deleting
+  a path the new commit does not carry. The crawl service also names a published
+  image, `ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}`,
+  keeping `build:` beside it so a checkout still builds what it is editing.
+  `caddy`'s `/srv` mount moved with the others: leaving it behind would have the
+  crawl publish to one directory and the web server serve another.
 - **setup**: `scripts/setup.py` names every key that `config.yaml.example` has
   and the local `config.yaml` does not, and `--check` exits `1` when there is
   one. The documented contract already claimed this and no code had ever done

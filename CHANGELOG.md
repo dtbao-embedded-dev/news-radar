@@ -24,6 +24,10 @@ one makes the file and the tags disagree.
   `/days/2026-09-06.html` asked for `/days/days/<date>.html` and got a 404. The
   day list is now written for the depth of the page carrying it, which is the
   only block in which the two files differ.
+- **render**: a story opens in a new tab instead of replacing the report.
+  `rel="noopener noreferrer"` was already on every story link; `target="_blank"`
+  is the half it was missing. The group and day navs move around this same
+  report and deliberately stay in the tab.
 
 ## v0.2.1 - 2026-09-06
 

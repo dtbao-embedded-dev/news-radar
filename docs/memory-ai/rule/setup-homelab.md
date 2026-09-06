@@ -3,10 +3,10 @@ title: Setting Up on the Homelab
 category: rule
 purpose: The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux.
 status: active
-updated: 2026-09-05
+updated: 2026-09-06
 source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile, docker/cloudflared.yml
 confidence: confirmed
-keywords: setup, setup.py, docker compose, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088
+keywords: upgrade, updating, detached tag, --build, git checkout, config drift, setup, setup.py, docker compose, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088
 order: 2
 ---
 
@@ -63,7 +63,7 @@ it could not start.
 | Flag | Use it when |
 |------|-------------|
 | `--dry-run` | You want to see what it would do. Writes nothing, asks nothing |
-| `--check` | Verifying an existing install - same checks plus the secrets, creates nothing, non-zero on a gap |
+| `--check` | Verifying an existing install - the same checks plus the secrets, a missing destination file, and any key the template has that your `config.yaml` does not. Creates nothing, non-zero on a gap. This is the upgrade's check - see `## Updating` |
 | `--force` | Regenerating a config from the template on purpose |
 | `--non-interactive` | Unattended provisioning; a blank secret is reported, not prompted for |
 
@@ -128,12 +128,51 @@ the operator's own remote access. See [[deployment-homelab]].
 
 ## Updating
 
+Production runs a **detached checkout of a release tag**, not a tracking branch,
+so `git pull` has nothing to pull onto. Four commands, from the checkout root:
+
 ```
-git pull
+git fetch --tags origin
+git checkout v<version>
 python scripts/setup.py --check
 docker compose -f docker/docker-compose.yml --profile tunnel up -d --build
 ```
 
-`--check` catches a config key added upstream that the local `config.yaml` does
-not have yet. The crawl container reads its config at startup, so a config change
-needs a restart - see [[deployment-homelab]].
+**`--build` is not optional.** `Dockerfile` copies `VERSION` and `src/` **into
+the image**, so `up -d` without it recreates the container from the image it
+already had and the new code never runs. The giveaway is the log line at
+startup: `news-radar <version> starting`.
+
+**`--check` is the step that reads the upgrade.** It exits `1`, naming the file
+or the key, when either half of the config has fallen behind the release:
+
+- a file `setup.py` is meant to create is **missing** - which is what a checkout
+  does to `config/frequency_words.txt` the first time you upgrade past v0.2.2,
+  because that file stopped being tracked and `git checkout` deletes a path the
+  new commit does not carry;
+- a **key** `config.yaml.example` has that the local `config.yaml` does not. The
+  key is not fatal to the run - the code default fills it - but the default is a
+  decision nobody made. `report.mode` sat at `incremental` through a release
+  that had moved to `daily` exactly this way.
+
+Fix either by running `python scripts/setup.py` with no flags: it creates what
+is missing from the templates, never overwrites what exists, and brings the
+stack up. A key it names has to be copied across by hand - a template is not
+allowed to overwrite your config.
+
+### What a checkout changes, and what it cannot
+
+| Thing | On `git checkout v<version>` |
+|-------|------------------------------|
+| `src/`, `VERSION` | into the image, **only with `--build`** |
+| `config/*.example`, `docker/.env.example` | updated on disk; nothing reads them at runtime |
+| `config/config.yaml`, `config/frequency_words.txt`, `docker/.env` | **never touched** - all three are gitignored and yours |
+| `output/news.db`, `output/days/`, `backups/` | untouched; they are bind mounts, not image content |
+
+There is no config migration and there is not going to be one: the local files
+are yours, and the release can only tell you what it added. That is what
+`--check` is for.
+
+The crawl container reads its config at startup, so any config change needs the
+`up -d` above - see [[deployment-homelab]]. Cutting the version in the first
+place is [[release-flow]].

@@ -3,10 +3,10 @@ title: Release Flow
 category: rule
 purpose: How a version is cut - the branch model, running release.py, what CI does with the tag, and what to do when it fails midway.
 status: active
-updated: 2026-09-05
+updated: 2026-09-06
 source: scripts/release.py, .github/workflows/release.yml, .github/workflows/test.yml, CHANGELOG.md
 confidence: confirmed
-keywords: release, release.py, Unreleased, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release
+keywords: deploy, release, release.py, Unreleased, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release
 order: 1
 ---
 
@@ -76,6 +76,11 @@ CI takes over from the tag: `.github/workflows/release.yml` triggers on a pushed
 `release.py`'s own extractor, so there is no second parser) and publishes it as
 the GitHub Release notes. A version with no changelog section still publishes,
 falling back to GitHub-generated notes and logging a warning.
+
+**The release ends at the tag; nothing is deployed by it.** `news.dtbao.org`
+runs a detached checkout of a tag on the homelab and stays on the old one until
+somebody checks the new one out and rebuilds - the four commands are under
+`## Updating` in [[setup-homelab]].
 
 The other half of CI runs before that: `.github/workflows/test.yml` runs every
 `tests/test_*.py` on Python 3.12 on each push and pull request, with no install

@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.1 - 2026-09-06
+
 - **render**: the page is redesigned around a sticky left rail - the run's
   numbers, the filter, a per-group jump list with counts and the day list stay
   on screen while the stories scroll - in a container 80% of the viewport wide

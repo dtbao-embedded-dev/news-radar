@@ -73,6 +73,82 @@ with tempfile.TemporaryDirectory() as tmp:
           "--profile" in argv and argv[-1] == "caddy", " ".join(argv))
 
 # --------------------------------------------------------------------------
+# config drift: keys the template gained that the local config never got
+# --------------------------------------------------------------------------
+
+# The shape that matters, in miniature: two levels, three levels under
+# `notification`, and a list whose items carry keys of their own.
+EXAMPLE = """\
+app:
+  timezone: Asia/Ho_Chi_Minh
+report:
+  mode: daily            # incremental | current | daily
+  max_per_group: 0
+notification:
+  enabled: true
+  channels:
+    telegram:
+      enabled: true
+feeds:
+  - id: hn
+    url: https://example.invalid/hn
+"""
+
+
+def config_pair(tmp, local):
+    """A checkout carrying the template above and `local` beside it."""
+    root = pathlib.Path(tmp)
+    (root / "config").mkdir(exist_ok=True)
+    (root / "config" / "config.yaml.example").write_text(EXAMPLE, encoding="utf-8")
+    if local is not None:
+        (root / "config" / "config.yaml").write_text(local, encoding="utf-8")
+    return root
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = config_pair(tmp, EXAMPLE)
+    check("an up-to-date config drifts by nothing",
+          setup.missing_config_keys(root) == [],
+          repr(setup.missing_config_keys(root)))
+
+with tempfile.TemporaryDirectory() as tmp:
+    # Exactly the shape that went unnoticed for a release: the template gained
+    # a value for a key the deployment's own file never mentions.
+    root = config_pair(tmp, EXAMPLE.replace(
+        "  mode: daily            # incremental | current | daily\n", ""))
+    check("a key only the template has is named",
+          setup.missing_config_keys(root) == ["report.mode"],
+          repr(setup.missing_config_keys(root)))
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = config_pair(tmp, EXAMPLE.replace("      enabled: true\n", "", 1))
+    check("a key three levels down is named in full",
+          setup.missing_config_keys(root)
+          == ["notification.channels.telegram.enabled"],
+          repr(setup.missing_config_keys(root)))
+
+with tempfile.TemporaryDirectory() as tmp:
+    root = config_pair(tmp, EXAMPLE)
+    # A list item is not a config key. `feeds[].id` differs per deployment by
+    # design, and reporting it would make the check noise on every upgrade.
+    check("keys inside a list item are not compared",
+          not any("feeds." in k for k in setup.template_keys(
+              root / "config" / "config.yaml.example")),
+          repr(setup.template_keys(root / "config" / "config.yaml.example")))
+    check("the top-level list itself is still a key",
+          "feeds" in setup.template_keys(
+              root / "config" / "config.yaml.example"))
+
+with tempfile.TemporaryDirectory() as tmp:
+    # No local config at all is `ensure_file()`'s business, not this check's -
+    # it has just created one from the template, so nothing has drifted.
+    root = config_pair(tmp, None)
+    check("a checkout with no local config reports no drift",
+          setup.missing_config_keys(root) == [],
+          repr(setup.missing_config_keys(root)))
+
+
+# --------------------------------------------------------------------------
 # the default argument is the real repository root
 # --------------------------------------------------------------------------
 

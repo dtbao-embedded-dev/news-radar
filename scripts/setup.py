@@ -118,6 +118,84 @@ def check_docker():
 # --------------------------------------------------------------------------
 
 
+def template_keys(path):
+    """Every `parent.child` key path in a config file, in file order.
+
+    A deliberate non-parser. This script runs before anything is installed, so
+    it cannot `import yaml` - and it does not need to: the question is which
+    keys a file mentions, not what they mean. Two rules keep the scan honest:
+
+    - a line inside a list item is skipped, because `feeds[].id` differs per
+      deployment by design and naming it would make this noise on every upgrade;
+    - indentation drives a stack, so `notification.channels.telegram.enabled`
+      comes out whole rather than as its last segment.
+
+    ponytail: line scan, not a parser - a key whose name is quoted, or a value
+    written as a multi-line block, is not understood. Both files it is pointed
+    at are this project's own templates. Swap in `yaml.safe_load` the day
+    setup.py is allowed a dependency.
+    """
+    keys = []
+    stack = []  # (indent, name) for each open parent
+    list_indent = None  # inside a list item until something dedents past it
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return keys
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        indent = len(line) - len(line.lstrip())
+        if list_indent is not None and indent > list_indent:
+            # A continuation line of a list item: `url:` under `- id:`. Same
+            # rule as the dash itself, and the reason the test pins `feeds.url`
+            # out of the result.
+            continue
+        list_indent = None
+        if stripped.startswith("-"):
+            list_indent = indent
+            continue
+
+        name, sep, _rest = stripped.partition(":")
+        if not sep or not name or " " in name:
+            continue
+
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        stack.append((indent, name))
+        keys.append(".".join(part for _i, part in stack))
+    return keys
+
+
+def missing_config_keys(root=None):
+    """Keys `config.yaml.example` has that the local `config.yaml` does not.
+
+    This is what an upgrade needs and nothing else offered: a new release can
+    add a key or change what the template recommends, and `ensure_file()`
+    deliberately leaves an existing `config.yaml` alone - so a deployment can
+    run for releases on a config that never heard of the key. `report.mode` did
+    exactly that.
+
+    **Missing keys only, never differing values.** `ops.site_url`, `ai.api_url`
+    and `ai.model` are meant to differ from the template on any real
+    deployment; a value diff would fire on every upgrade and be learned away.
+
+    No local config is not drift - `ensure_file()` has just created one from
+    this same template, and it has already said so.
+    """
+    root = ROOT if root is None else Path(root)
+    template, local = TEMPLATES[0]
+    local_path = root / local
+    if not local_path.is_file():
+        return []
+
+    have = set(template_keys(local_path))
+    return [key for key in template_keys(root / template) if key not in have]
+
+
 def ensure_file(src, dst, dry_run, force):
     """Create dst from src. Returns False only on a real failure."""
     src_abs = ROOT / src
@@ -313,6 +391,15 @@ def main(argv=None):
     interactive = not args.non_interactive and not dry
     secrets_ok = ensure_secrets(dry, interactive, verify=args.check)
 
+    # Reported in every mode, fatal only under --check. A key the local config
+    # never got falls back to the code's own default, so the stack runs either
+    # way - but it runs on a decision nobody made, which is exactly how
+    # `report.mode` stayed `incremental` through a release that had moved on.
+    drifted = missing_config_keys()
+    for key in drifted:
+        say("warn", "{} has {} and {} does not".format(
+            TEMPLATES[0][0].as_posix(), key, TEMPLATES[0][1].as_posix()))
+
     print()
     if args.dry_run:
         # A dry run reports what would happen; it never fails on state it was
@@ -329,6 +416,11 @@ def main(argv=None):
         return 1
 
     if args.check:
+        if drifted:
+            say("fail", "{} key(s) above are in the template and not in your "
+                        "config - add them, or accept the default knowing it is "
+                        "a default".format(len(drifted)))
+            return 1
         say("ok", "checkout is ready - re-run without --check to start the stack")
         return 0
 

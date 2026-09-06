@@ -212,13 +212,13 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
             conn.close()
 
 
-def _send_telegram(fetcher, groups, env):
+def _send_telegram(fetcher, groups, env, tz):
     return telegram.send(fetcher, groups, env.get("TELEGRAM_BOT_TOKEN"),
-                         env.get("TELEGRAM_CHAT_ID"))
+                         env.get("TELEGRAM_CHAT_ID"), tz)
 
 
-def _send_discord(fetcher, groups, env):
-    return discord.send(fetcher, groups, env.get("DISCORD_WEBHOOK_URL"))
+def _send_discord(fetcher, groups, env, tz):
+    return discord.send(fetcher, groups, env.get("DISCORD_WEBHOOK_URL"), tz)
 
 
 def _alert_telegram(fetcher, text, env):
@@ -231,8 +231,8 @@ def _alert_discord(fetcher, text, env):
 
 
 # Channel name (as `notification.channels` spells it) -> how to send on it. The
-# secrets are read here and handed down, so a channel module needs no
-# environment to be exercised.
+# secrets and the display zone are read here and handed down, so a channel
+# module needs no environment and no config to be exercised.
 SENDERS = {telegram.NAME: _send_telegram, discord.NAME: _send_discord}
 
 # The same channels, carrying an operational message instead of a story. A
@@ -275,20 +275,20 @@ def _alert(cfg, text):
                 text.replace("\n", " | "))
 
 
-def _rows_to_send(cfg, conn, run_id, fetched_at):
+def _rows_to_send(cfg, conn, run_id, fetched_at, tz):
     """The store rows `report.mode` selects, before the seen-set diff.
 
-    `daily` reads the whole local day, the other two read this run. Both come
-    out of the store rather than out of `ranked`, so the story that goes out is
-    the same row, with the same score, as the one on the page.
+    `daily` reads the whole local day - the same window the page renders, which
+    is what makes a phone and the page agree on which stories exist. The other
+    two read this run. All three come out of the store rather than out of
+    `ranked`, so the story that goes out is the same row as the one on the page.
     """
     if cfg.get("report.mode") == "daily":
-        tz = render.local_tz(cfg.get("app.timezone") or "UTC")
         return store.day_matches(conn, *render.day_bounds(fetched_at, tz))
     return store.run_matches(conn, run_id)
 
 
-def _send_channel(conn, cfg, fetcher, name, rows, labels, now):
+def _send_channel(conn, cfg, fetcher, name, rows, labels, now, tz):
     """One channel: diff, send, and mark only what was accepted."""
     keys = None
     if cfg.get("report.mode") != "current":
@@ -304,7 +304,7 @@ def _send_channel(conn, cfg, fetcher, name, rows, labels, now):
         log.info("  %-8s nothing new to send", name)
         return
 
-    result = SENDERS[name](fetcher, groups, os.environ)
+    result = SENDERS[name](fetcher, groups, os.environ, tz)
     if result.keys:
         # Only now, and only what was accepted. A crash between the send and
         # this line re-sends next cycle - a duplicate is the acceptable
@@ -332,13 +332,18 @@ def _notify(cfg, fetcher, run_id, labels, fetched_at):
 
     log.info("notifying %d channel(s) in %s mode", len(channels),
              cfg.get("report.mode"))
+    # One zone for the whole notification, and the same one `_publish()` gave
+    # the page: a message an hour out from the page it mirrors is worse than no
+    # timestamp at all.
+    tz = render.local_tz(cfg.get("app.timezone") or "UTC")
     conn = None
     try:
         conn = store.open_db(cfg.get("storage.data_dir", "output"))
-        rows = _rows_to_send(cfg, conn, run_id, fetched_at)
+        rows = _rows_to_send(cfg, conn, run_id, fetched_at, tz)
         for name in channels:
             try:
-                _send_channel(conn, cfg, fetcher, name, rows, labels, fetched_at)
+                _send_channel(conn, cfg, fetcher, name, rows, labels,
+                              fetched_at, tz)
             except Exception:
                 log.exception("channel %s failed; the page and the other "
                               "channels are unaffected", name)

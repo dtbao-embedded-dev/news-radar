@@ -13,7 +13,7 @@ per-host gap a GET does, and honouring a 429's `Retry-After` is a transport
 concern, not a per-channel one. Writing a second HTTP client here would be the
 alternative.
 
-Three things this file owns, because both channels need them and they differ
+Four things this file owns, because both channels need them and they differ
 only by a number:
 
 - **`pick()`** - the group order and the seen-set diff, applied to the store's
@@ -22,19 +22,37 @@ only by a number:
   the fallback, and a story is never cut in half.
 - **`clip()`** - the cap that keeps one absurd headline from making a whole
   chunk unsendable.
+- **`stamp()`** - the published time, spelled the way the page spells it.
 
 Contract: docs/memory-ai/interface/notify-channels.md
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 
 from dataclasses import dataclass, field
 
-__all__ = ["SendResult", "pick", "chunk", "clip", "TITLE_MAX"]
+__all__ = ["SendResult", "pick", "chunk", "clip", "stamp", "TITLE_MAX",
+           "TIME_FMT", "NO_TIME", "UTC"]
 
 log = logging.getLogger("news_radar.notify")
+
+# The page prints `09:30 06/09` beside a story and nothing else; a message that
+# prints the same story with a source id and no time is a second report, not the
+# same one. The format is duplicated from `render._when()` rather than imported:
+# `render` and `notify` are the two halves of layer 5 and neither owns the
+# other, and one strftime is cheaper than a dependency between them.
+# `tests/test_notify.py` asserts the two spellings agree, so the duplication
+# cannot drift quietly.
+TIME_FMT = "%H:%M %d/%m"
+
+# What an undated story renders as - the page's own honest dash. A source that
+# gave no `pubDate` is not a story published at midnight.
+NO_TIME = "--"
+
+UTC = dt.timezone.utc
 
 # The longest title that goes into a message. Long enough that no real headline
 # is touched, short enough that title + link can never on their own overflow the
@@ -61,6 +79,18 @@ class SendResult:
     @property
     def stories(self):
         return len(self.keys)
+
+
+def stamp(moment, tz):
+    """`published_at` as the page spells it, or the same dash the page uses.
+
+    The zone is an argument rather than the host's own: the page is rendered in
+    `app.timezone`, and a message an hour out from the page it mirrors is worse
+    than no timestamp at all.
+    """
+    if moment is None:
+        return NO_TIME
+    return moment.astimezone(tz).strftime(TIME_FMT)
 
 
 def clip(text, limit=TITLE_MAX):

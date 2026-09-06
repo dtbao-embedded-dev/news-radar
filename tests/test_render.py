@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -47,6 +48,14 @@ def data_dir():
     path = TMP / "out{}".format(COUNTER[0])
     path.mkdir(parents=True)
     return path
+
+
+DAY_NAV = re.compile(r'<nav class="days">.*?</nav>', re.S)
+
+
+def without_day_nav(text):
+    """The page minus its day list - the one block the two files may differ in."""
+    return DAY_NAV.sub("<nav/>", text)
 
 
 def row(title, url, score, sources=("hn",), published_at=NOW - HOUR):
@@ -102,8 +111,13 @@ check("index.html is written", index.is_file())
 check("today's snapshot is written", snapshot.is_file())
 
 html = index.read_text(encoding="utf-8")
-eq("the snapshot carries the same body as index.html",
-   snapshot.read_text(encoding="utf-8"), html)
+# The two files used to be byte-identical, and that is exactly what served the
+# day page a 404: a relative href is resolved against the file carrying it, so
+# `days/<date>.html` written into `days/<today>.html` asks for
+# `/days/days/<date>.html`. Inverted rather than deleted - the day list is now
+# the one block the two files are allowed to differ in.
+eq("the two files differ only in the day list",
+   without_day_nav(snapshot.read_text(encoding="utf-8")), without_day_nav(html))
 
 # Every group, empty ones included. A keyword that has gone quiet is exactly
 # what a total would hide - the log makes the same promise for the same reason.
@@ -176,6 +190,17 @@ check("older days are linked", 'days/2026-09-04.html' in html
 eq("newest first",
    html.index("days/2026-09-05.html") < html.index("days/2026-09-04.html")
    < html.index("days/2026-09-03.html"), True)
+
+# The href is relative, so it has to be written for the depth of the file that
+# carries it. index.html sits above `days/`; a snapshot sits inside it.
+snap = snapshot.read_text(encoding="utf-8")
+check("index.html links down into days/", 'href="days/2026-09-04.html"' in html)
+check("a snapshot links its siblings instead",
+      'href="2026-09-04.html"' in snap, snap[:200])
+check("no page asks for days/days - the 404 this fixes",
+      "days/days" not in html and "days/days" not in snap)
+check("the current day is still marked on the snapshot",
+      'href="2026-09-05.html" aria-current="page"' in snap, snap[:200])
 
 
 # -- a day with nothing at all --------------------------------------------

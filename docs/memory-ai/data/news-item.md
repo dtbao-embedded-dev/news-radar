@@ -118,10 +118,17 @@ output/
 ```
 
 - `index.html` is rewritten every run; it is never appended to.
-- `days/<date>.html` is written **every run**, with the identical body, under the
-  current local date. A past day is still never touched - the filename moves with
-  the date - and there is no day-rollover branch to get wrong. The design called
-  for writing it once at midnight; this has the same effect with less to break.
+- `days/<date>.html` is written **every run** under the current local date. A past
+  day is still never touched - the filename moves with the date - and there is no
+  day-rollover branch to get wrong. The design called for writing it once at
+  midnight; this has the same effect with less to break.
+- The snapshot carries the same page as `index.html` **except for `nav.days`**,
+  which is written for the depth of the file carrying it: `days/<date>.html` from
+  the root, a bare `<date>.html` from inside `days/`. The two files were once
+  byte-identical, and that is precisely what made every day link on a day page a
+  404 - a relative href resolves against the file carrying it, so the snapshot
+  was asking for `/days/days/<date>.html`. `render._day_nav()` takes the prefix
+  as an argument and `write()` renders the page once per destination.
 - Both files are self-contained: inline CSS and JavaScript, no external
   stylesheet, script or image. A report that needs a CDN stops being readable
   exactly when the network is the thing you wanted to read about.

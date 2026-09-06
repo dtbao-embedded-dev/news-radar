@@ -16,6 +16,15 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Fixes
+
+- **render**: every day link on a day page reaches the day it names. The
+  snapshot in `days/` used to carry `index.html`'s own day list verbatim, and a
+  relative href resolves against the file carrying it - so clicking any date on
+  `/days/2026-09-06.html` asked for `/days/days/<date>.html` and got a 404. The
+  day list is now written for the depth of the page carrying it, which is the
+  only block in which the two files differ.
+
 ## v0.2.1 - 2026-09-06
 
 - **render**: the page is redesigned around a sticky left rail - the run's

@@ -9,6 +9,19 @@ updated: 2026-09-06
 
 ## Current focus
 
+**The upgrade path is the current work (2026-09-06, after v0.2.2).** Asking how
+a version update is handled found a procedure that existed, described a
+production this one is not, and promised a check nothing performed. Four
+changes, all unreleased on `release/v0.2`: `setup.py --check` now names config
+keys the template has and the local file lacks (and fails on a missing
+destination file), `store.open_db()` refuses a store between `0` and
+`SCHEMA_VERSION` instead of returning it, `config/frequency_words.txt` became a
+local file created from a committed `.example`, and `## Updating` in
+[[setup-homelab]] was rewritten for the detached-tag production that actually
+runs. **The next deploy is the awkward one**: it is the checkout that deletes
+`config/frequency_words.txt`, and the `--check` that warns about it only exists
+on the far side of that same checkout.
+
 **Three defects reported off the live site were fixed on `release/v0.2`
 (2026-09-06)**, all three landing after v0.2.1 and none of them yet on
 `news.dtbao.org`: a day page whose day list 404'd (`/days/days/<date>.html`), a
@@ -42,6 +55,25 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The upgrade work landed in thirteen commits on `release/v0.2`**
+  (2026-09-06): `scripts/setup.py` (`template_keys()`, `missing_config_keys()`,
+  `ensure_file(..., verify=)`, a third `TEMPLATES` pair), `src/news_radar/store.py`
+  (`open_db()`'s fourth branch), `.gitignore`, the rename to
+  `config/frequency_words.txt.example`, `tests/test_setup.py`,
+  `tests/test_store.py`, `tests/test_keywords.py`, `tests/test_filter.py`,
+  `README.md`, and five bank docs.
+- **A documented promise nothing implements is worse than an undocumented gap.**
+  `cli-scripts.md` had claimed for months that `--check` catches a key added
+  upstream. Believing it is what let `report.mode` sit stale through a release.
+  Both halves of that sentence are now code, and both are tested.
+- **`git checkout <tag>` is a deploy step with side effects.** It deletes a path
+  the new commit does not carry - which is how the keyword-file split breaks the
+  next upgrade, and why that entry is a `### Breaking Changes` rather than a
+  `### Features`. Proven on a throwaway clone, not reasoned about.
+- **`skill-support-commit` cannot commit a pure untrack.** `git rm --cached`
+  leaves the file byte-identical on disk, so the skill's `git reset` baseline
+  re-tracks it and `git add` finds no diff; it stopped cleanly and said so. That
+  one commit (`34138b5`) was made by hand. Worth knowing before the next rename.
 - **The three live defects landed in ten commits on `release/v0.2`**
   (2026-09-06): `render.py` (`_day_nav()` takes a prefix, `write()` renders once
   per destination, `_story()` gains `target="_blank"`), `notify/__init__.py`
@@ -181,15 +213,18 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **Cut v0.2.2 and redeploy, or the three fixes stay in the branch.**
-   `python scripts/release.py 0.2.2` on `release/v0.2`, then on the homelab:
-   `git fetch --tags origin` → `git checkout v0.2.2` → `cd docker` →
-   `docker compose --profile tunnel up -d --build`.
-2. **Edit `report.mode` on the homelab by hand.** `~/news-radar/config/config.yaml`
-   is gitignored and still says `incremental`; the template change cannot reach
-   it. Set `mode: daily` before the redeploy, in the same visit. Expect a small
-   burst on the first cycle after it - every story of the current day that the
-   channel has not already been told about goes out at once.
+1. **Cut the next version and deploy it in one visit.** v0.2.2 is tagged and
+   pushed but not deployed, and everything since is untagged. Cut it
+   (`python scripts/release.py 0.2.3`), then on the homelab follow `## Updating`
+   in [[setup-homelab]] - and expect that checkout to delete
+   `config/frequency_words.txt`, because that is the release that splits it.
+   `python scripts/setup.py` (no flags) puts it back from the `.example`.
+2. **Edit `report.mode` on the homelab by hand, in the same visit.**
+   `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
+   no template change can reach it, which is what the new `--check` will tell
+   you. Set `mode: daily`. Expect a small burst on the first cycle after it -
+   every story of the current day the channel has not already been told about
+   goes out at once.
 3. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
    of P6-1 that survives the container being killed is built but not armed. A
    healthchecks.io ping url or an Uptime Kuma push url in `config/config.yaml`
@@ -258,6 +293,15 @@ loader and the design bank - see `progress.md`.
   timestamp spelling - a phone showing the same story differently is a second
   report, and the reader has to reconcile two things that were meant to be one.
   When the page's story row changes, `notify/` changes in the same commit.
+- **A local file is one a release may not overwrite.** `config.yaml`,
+  `frequency_words.txt` and `.env` are the deployment's, not the repository's;
+  each ships as a committed `.example` that `setup.py` copies once. A release can
+  only *tell* you what it added - which is what `setup.py --check` is for, and
+  why there is no config migration and is not going to be one.
+- **A promise in the bank is a promise the code has to keep.** `--check` was
+  documented for months as catching a key added upstream and never did, and a
+  deployment ran a whole release on a stale value because the doc was believed.
+  A doc sentence that describes behaviour is a test that has not been written.
 - **A relative href is a fact about the file, not about the page.** Two output
   files at two depths cannot share one nav. `index.html` and `days/<date>.html`
   differ in exactly that block and nowhere else.

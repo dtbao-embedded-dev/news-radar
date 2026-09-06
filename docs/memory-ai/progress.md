@@ -9,6 +9,46 @@ updated: 2026-09-06
 
 ## What works
 
+### The upgrade path, made checkable (2026-09-06, after v0.2.2)
+
+Asking "what happens on a version update" turned up a procedure that existed,
+described a production this one is not, and promised a check nothing performed.
+Four things came out of it, all on `release/v0.2`:
+
+- **`setup.py --check` finally does what `cli-scripts.md` has always said it
+  does.** It names every key `config.yaml.example` has that the local
+  `config.yaml` does not, and exits `1`. Missing keys only, never differing
+  values: `ops.site_url` and the `ai.*` endpoint are meant to differ on a real
+  deployment, and a check that fires every upgrade is one nobody reads. It also
+  fails now when a file it is meant to create is absent, instead of printing
+  `would create` and calling the checkout ready. This is the check that would
+  have caught `report.mode` sitting at `incremental` through a release that had
+  moved to `daily`.
+- **The key scan is a deliberate non-parser.** `setup.py` runs before anything
+  is installed, so it cannot `import yaml`; `template_keys()` reads key paths
+  off the indentation, skipping list items so `feeds[].id` never becomes noise.
+  Marked `ponytail:` with the upgrade path - swap in `yaml.safe_load` the day
+  the script is allowed a dependency.
+- **`store.open_db()` refuses a store it cannot migrate.** `0 < user_version <
+  SCHEMA_VERSION` fell through all three branches and returned a connection to a
+  file whose shape the build did not match. Unreachable today (`SCHEMA_VERSION`
+  is `1`) and that is the point: the day someone bumps the constant is now a
+  loud one, with an error naming both versions and saying to write the migration
+  first.
+- **The keyword file is a local file now, like `config.yaml`.**
+  `config/frequency_words.txt.example` ships; the working copy is gitignored and
+  created by `setup.py`. It holds no secret - the reason is that `git checkout
+  <tag>` overwrites a tracked file, so a deployment's tuned groups were one
+  deploy away from being silently reverted. Measured on a throwaway clone rather
+  than asserted: checking out the new commit over `v0.2.2` **deletes**
+  `config/frequency_words.txt`, and `setup.py --check` then names it and exits
+  `1`.
+- **`## Updating` describes the production that exists.** It said `git pull` on a
+  machine running a detached tag, where `git pull` cannot work. It now carries
+  the four real commands, why `--build` is not optional (`Dockerfile` copies
+  `VERSION` and `src/` into the image), and a table of what a checkout changes
+  and what it cannot touch.
+
 ### Three post-redesign defects, closed (2026-09-06)
 
 All three were reported off the live site, not off a test, and all three were
@@ -415,12 +455,18 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
-- **The three fixes above are in the branch, not on the site.** Production runs
-  a detached checkout of a release tag (`v0.2.1`), so nothing reaches
-  `news.dtbao.org` until `scripts/release.py 0.2.2` cuts the next one and the
-  homelab is redeployed. The `report.mode` half needs one more step that no
-  release carries: `~/news-radar/config/config.yaml` is gitignored and still
-  says `incremental`, and changing the shipped template cannot change it.
+- **v0.2.2 is cut and pushed but not deployed.** The homelab still runs
+  `v0.2.1`; nothing reaches `news.dtbao.org` until it is checked out and rebuilt.
+  Two steps no release carries: `~/news-radar/config/config.yaml` is gitignored
+  and still says `report.mode: incremental`, and the upgrade **past** v0.2.2
+  deletes `config/frequency_words.txt` - run `python scripts/setup.py --check`
+  after the checkout and it will name both.
+- **Everything after v0.2.2 is unreleased.** The `--check` drift detection, the
+  `open_db` refusal and the keyword-file split are on `release/v0.2` with no tag
+  yet, so the very upgrade they are meant to protect is the one that installs
+  them - the deletion of `config/frequency_words.txt` happens on that same
+  checkout, before the new `--check` is running to warn about it. Read
+  `## Updating` in [[setup-homelab]] before that deploy, not after.
 - **A day page written before the fix stays broken.** Only today's snapshot is
   rewritten each cycle; a past day keeps whatever nav it was written with. On
   2026-09-06 the homelab held exactly one day file, so this costs nothing now -

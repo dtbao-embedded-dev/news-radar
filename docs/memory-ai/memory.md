@@ -19,6 +19,46 @@ _Generated 2026-09-06 - 19 durable doc(s)._
 
 ## What works
 
+### The upgrade path, made checkable (2026-09-06, after v0.2.2)
+
+Asking "what happens on a version update" turned up a procedure that existed,
+described a production this one is not, and promised a check nothing performed.
+Four things came out of it, all on `release/v0.2`:
+
+- **`setup.py --check` finally does what `cli-scripts.md` has always said it
+  does.** It names every key `config.yaml.example` has that the local
+  `config.yaml` does not, and exits `1`. Missing keys only, never differing
+  values: `ops.site_url` and the `ai.*` endpoint are meant to differ on a real
+  deployment, and a check that fires every upgrade is one nobody reads. It also
+  fails now when a file it is meant to create is absent, instead of printing
+  `would create` and calling the checkout ready. This is the check that would
+  have caught `report.mode` sitting at `incremental` through a release that had
+  moved to `daily`.
+- **The key scan is a deliberate non-parser.** `setup.py` runs before anything
+  is installed, so it cannot `import yaml`; `template_keys()` reads key paths
+  off the indentation, skipping list items so `feeds[].id` never becomes noise.
+  Marked `ponytail:` with the upgrade path - swap in `yaml.safe_load` the day
+  the script is allowed a dependency.
+- **`store.open_db()` refuses a store it cannot migrate.** `0 < user_version <
+  SCHEMA_VERSION` fell through all three branches and returned a connection to a
+  file whose shape the build did not match. Unreachable today (`SCHEMA_VERSION`
+  is `1`) and that is the point: the day someone bumps the constant is now a
+  loud one, with an error naming both versions and saying to write the migration
+  first.
+- **The keyword file is a local file now, like `config.yaml`.**
+  `config/frequency_words.txt.example` ships; the working copy is gitignored and
+  created by `setup.py`. It holds no secret - the reason is that `git checkout
+  <tag>` overwrites a tracked file, so a deployment's tuned groups were one
+  deploy away from being silently reverted. Measured on a throwaway clone rather
+  than asserted: checking out the new commit over `v0.2.2` **deletes**
+  `config/frequency_words.txt`, and `setup.py --check` then names it and exits
+  `1`.
+- **`## Updating` describes the production that exists.** It said `git pull` on a
+  machine running a detached tag, where `git pull` cannot work. It now carries
+  the four real commands, why `--build` is not optional (`Dockerfile` copies
+  `VERSION` and `src/` into the image), and a table of what a checkout changes
+  and what it cannot touch.
+
 ### Three post-redesign defects, closed (2026-09-06)
 
 All three were reported off the live site, not off a test, and all three were
@@ -425,12 +465,18 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
-- **The three fixes above are in the branch, not on the site.** Production runs
-  a detached checkout of a release tag (`v0.2.1`), so nothing reaches
-  `news.dtbao.org` until `scripts/release.py 0.2.2` cuts the next one and the
-  homelab is redeployed. The `report.mode` half needs one more step that no
-  release carries: `~/news-radar/config/config.yaml` is gitignored and still
-  says `incremental`, and changing the shipped template cannot change it.
+- **v0.2.2 is cut and pushed but not deployed.** The homelab still runs
+  `v0.2.1`; nothing reaches `news.dtbao.org` until it is checked out and rebuilt.
+  Two steps no release carries: `~/news-radar/config/config.yaml` is gitignored
+  and still says `report.mode: incremental`, and the upgrade **past** v0.2.2
+  deletes `config/frequency_words.txt` - run `python scripts/setup.py --check`
+  after the checkout and it will name both.
+- **Everything after v0.2.2 is unreleased.** The `--check` drift detection, the
+  `open_db` refusal and the keyword-file split are on `release/v0.2` with no tag
+  yet, so the very upgrade they are meant to protect is the one that installs
+  them - the deletion of `config/frequency_words.txt` happens on that same
+  checkout, before the new `--check` is running to warn about it. Read
+  `## Updating` in [[setup-homelab]] before that deploy, not after.
 - **A day page written before the fix stays broken.** Only today's snapshot is
   rewritten each cycle; a past day keeps whatever nav it was written with. On
   2026-09-06 the homelab held exactly one day file, so this costs nothing now -
@@ -507,6 +553,19 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Current focus
 
+**The upgrade path is the current work (2026-09-06, after v0.2.2).** Asking how
+a version update is handled found a procedure that existed, described a
+production this one is not, and promised a check nothing performed. Four
+changes, all unreleased on `release/v0.2`: `setup.py --check` now names config
+keys the template has and the local file lacks (and fails on a missing
+destination file), `store.open_db()` refuses a store between `0` and
+`SCHEMA_VERSION` instead of returning it, `config/frequency_words.txt` became a
+local file created from a committed `.example`, and `## Updating` in
+[[setup-homelab]] was rewritten for the detached-tag production that actually
+runs. **The next deploy is the awkward one**: it is the checkout that deletes
+`config/frequency_words.txt`, and the `--check` that warns about it only exists
+on the far side of that same checkout.
+
 **Three defects reported off the live site were fixed on `release/v0.2`
 (2026-09-06)**, all three landing after v0.2.1 and none of them yet on
 `news.dtbao.org`: a day page whose day list 404'd (`/days/days/<date>.html`), a
@@ -540,6 +599,25 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The upgrade work landed in thirteen commits on `release/v0.2`**
+  (2026-09-06): `scripts/setup.py` (`template_keys()`, `missing_config_keys()`,
+  `ensure_file(..., verify=)`, a third `TEMPLATES` pair), `src/news_radar/store.py`
+  (`open_db()`'s fourth branch), `.gitignore`, the rename to
+  `config/frequency_words.txt.example`, `tests/test_setup.py`,
+  `tests/test_store.py`, `tests/test_keywords.py`, `tests/test_filter.py`,
+  `README.md`, and five bank docs.
+- **A documented promise nothing implements is worse than an undocumented gap.**
+  `cli-scripts.md` had claimed for months that `--check` catches a key added
+  upstream. Believing it is what let `report.mode` sit stale through a release.
+  Both halves of that sentence are now code, and both are tested.
+- **`git checkout <tag>` is a deploy step with side effects.** It deletes a path
+  the new commit does not carry - which is how the keyword-file split breaks the
+  next upgrade, and why that entry is a `### Breaking Changes` rather than a
+  `### Features`. Proven on a throwaway clone, not reasoned about.
+- **`skill-support-commit` cannot commit a pure untrack.** `git rm --cached`
+  leaves the file byte-identical on disk, so the skill's `git reset` baseline
+  re-tracks it and `git add` finds no diff; it stopped cleanly and said so. That
+  one commit (`34138b5`) was made by hand. Worth knowing before the next rename.
 - **The three live defects landed in ten commits on `release/v0.2`**
   (2026-09-06): `render.py` (`_day_nav()` takes a prefix, `write()` renders once
   per destination, `_story()` gains `target="_blank"`), `notify/__init__.py`
@@ -679,15 +757,18 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **Cut v0.2.2 and redeploy, or the three fixes stay in the branch.**
-   `python scripts/release.py 0.2.2` on `release/v0.2`, then on the homelab:
-   `git fetch --tags origin` → `git checkout v0.2.2` → `cd docker` →
-   `docker compose --profile tunnel up -d --build`.
-2. **Edit `report.mode` on the homelab by hand.** `~/news-radar/config/config.yaml`
-   is gitignored and still says `incremental`; the template change cannot reach
-   it. Set `mode: daily` before the redeploy, in the same visit. Expect a small
-   burst on the first cycle after it - every story of the current day that the
-   channel has not already been told about goes out at once.
+1. **Cut the next version and deploy it in one visit.** v0.2.2 is tagged and
+   pushed but not deployed, and everything since is untagged. Cut it
+   (`python scripts/release.py 0.2.3`), then on the homelab follow `## Updating`
+   in [[setup-homelab]] - and expect that checkout to delete
+   `config/frequency_words.txt`, because that is the release that splits it.
+   `python scripts/setup.py` (no flags) puts it back from the `.example`.
+2. **Edit `report.mode` on the homelab by hand, in the same visit.**
+   `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
+   no template change can reach it, which is what the new `--check` will tell
+   you. Set `mode: daily`. Expect a small burst on the first cycle after it -
+   every story of the current day the channel has not already been told about
+   goes out at once.
 3. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
    of P6-1 that survives the container being killed is built but not armed. A
    healthchecks.io ping url or an Uptime Kuma push url in `config/config.yaml`
@@ -756,6 +837,15 @@ loader and the design bank - see `progress.md`.
   timestamp spelling - a phone showing the same story differently is a second
   report, and the reader has to reconcile two things that were meant to be one.
   When the page's story row changes, `notify/` changes in the same commit.
+- **A local file is one a release may not overwrite.** `config.yaml`,
+  `frequency_words.txt` and `.env` are the deployment's, not the repository's;
+  each ships as a committed `.example` that `setup.py` copies once. A release can
+  only *tell* you what it added - which is what `setup.py --check` is for, and
+  why there is no config migration and is not going to be one.
+- **A promise in the bank is a promise the code has to keep.** `--check` was
+  documented for months as catching a key added upstream and never did, and a
+  deployment ran a whole release on a stale value because the doc was believed.
+  A doc sentence that describes behaviour is a test that has not been written.
 - **A relative href is a fact about the file, not about the page.** Two output
   files at two depths cannot share one nav. `index.html` and `days/<date>.html`
   differ in exactly that block and nowhere else.
@@ -1023,7 +1113,8 @@ news-radar/
 ├── config/
 │   ├── config.yaml.example     # template, committed
 │   ├── config.yaml             # real, gitignored, created by setup.py
-│   └── frequency_words.txt     # keyword groups, committed
+│   ├── frequency_words.txt.example  # keyword groups, committed
+│   └── frequency_words.txt     # real, gitignored, created by setup.py
 ├── docker/
 │   ├── docker-compose.yml      # crawl service + caddy
 │   ├── Caddyfile               # serves output/ on :8080
@@ -1273,7 +1364,7 @@ Nothing outside the LAN reaches it.
 
 | Host path | Container path | Mode | Holds |
 |-----------|----------------|------|-------|
-| `./config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` |
+| `./config` | `/app/config` | read-only | `config.yaml`, `frequency_words.txt` - both gitignored, both created by `setup.py` from their `.example`. The whole directory is mounted, so a `git checkout` in the host checkout changes what the container reads at its next restart |
 | `./output` | `/app/output` | read-write (crawl) / read-only (caddy, as `/srv`) | `index.html`, `news.db`, per-day snapshots |
 | `./docker/cloudflared.yml` | `/etc/cloudflared/config.yml` | read-only | the tunnel's ingress |
 | `./docker/tunnel-credentials.json` | `/etc/cloudflared/creds.json` | read-only | the connector's credentials |
@@ -1614,7 +1705,7 @@ someone chose it.
 | `search_templates[].format` | str | `rss` | `rss`, `atom`, or `hn_algolia_json` |
 | `search_templates[].enabled` | bool | `true` | `reddit_search` ships **disabled** in the template - it duplicates the fixed Reddit feed heavily |
 | `search_templates[].rank_weight` | float | `1.0` *(template ships `0.8`)* | Search hits rank below front-page hits in the shipped template |
-| `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file |
+| `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file. Gitignored and created by `setup.py` from `frequency_words.txt.example`, so `git checkout <tag>` cannot revert a deployment's tuning |
 | `report.mode` | str | `incremental` **(template ships `daily`)** | `incremental` (this run's new matches), `current` (this run's whole shortlist, every cycle), `daily` (the whole local day minus what the channel already got). The template ships `daily` because it reads the same window the page renders, so a phone and the page agree on which stories exist - and a story missed by one refused cycle is offered again instead of lost |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
 | `report.rank_threshold` | int | `5` | The first N of each group are highlighted on the page |
@@ -1646,6 +1737,15 @@ someone chose it.
 **No secret ever appears in this file.** A leaked `config.yaml` must be harmless.
 
 ## frequency_words.txt
+
+**A local file, like `config.yaml`.** `config/frequency_words.txt.example` is
+what ships; `setup.py` copies it to `config/frequency_words.txt` on a fresh
+checkout and never overwrites it afterwards, and `.gitignore` covers the copy.
+The reason is the upgrade, not secrecy: a tracked file is overwritten by the
+`git checkout <tag>` every deploy runs, and a deployment's tuned keyword groups
+are not something a deploy may quietly revert. Changing the groups **for
+everyone** means editing the `.example` and cutting a version - that is still a
+technical change and still belongs in the changelog.
 
 Plain text, UTF-8. **A blank line separates one group from the next**, and each
 group is counted, capped and displayed independently.
@@ -1714,7 +1814,7 @@ this project most wants to avoid. `scripts/setup.py` checks the same rule before
 the container is ever started - see [[cli-scripts]].
 
 ### [interface] Script CLIs - setup.py and release.py
-*`interface/cli-scripts.md` - The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees. - status: active - source: scripts/setup.py, scripts/release.py - keywords: setup.py, release.py, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI*
+*`interface/cli-scripts.md` - The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees. - status: active - source: scripts/setup.py, scripts/release.py - keywords: setup.py, release.py, missing_config_keys, template_keys, config drift, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI*
 
 # Script CLIs - setup.py and release.py
 
@@ -1739,7 +1839,7 @@ operator to type afterwards.
 | `--dry-run` | **Writes nothing, prompts for nothing, starts nothing.** Prints the checks, the files it would create and the compose command it would run, then exits |
 | `--force` | Overwrite files that already exist. Without it, an existing file is reported and left alone |
 | `--non-interactive` | Never prompt; leave a missing secret blank and report it. For unattended provisioning |
-| `--check` | Verify only: toolchain present, required files exist, **required secrets non-empty**. Creates nothing, starts nothing, exits non-zero on a gap |
+| `--check` | Verify only: toolchain present, required files exist, **required secrets non-empty**, and **no key the template has that the local `config.yaml` lacks**. Creates nothing, starts nothing, exits non-zero on a gap |
 
 Steps, in order:
 
@@ -1749,17 +1849,24 @@ Steps, in order:
 4. Create `docker/.env` from `docker/.env.example` if absent.
 5. For each notification channel enabled in the config, ensure its variables are
    present and non-empty in `docker/.env`; prompt unless `--non-interactive`.
-6. `docker compose -f docker/docker-compose.yml up -d`, with docker's own output
+6. Compare the key paths in `config/config.yaml.example` with those in
+   `config/config.yaml` and name every one the template has and the local file
+   does not. Reported in every mode, **fatal only under `--check`**: a missing
+   key falls back to the code's own default, so the stack starts either way - it
+   simply starts on a decision nobody made. This is the step an upgrade needs
+   and the one nothing offered before v0.2.3, which is how `report.mode` stayed
+   `incremental` through a release that had moved on.
+7. `docker compose -f docker/docker-compose.yml up -d`, with docker's own output
    inherited rather than captured. `--profile tunnel` is inserted before `up`
    when `docker/tunnel-credentials.json` exists, so the `cloudflared` service
    starts on a machine that publishes `news.dtbao.org` and stays out of the way
    on one that does not. While no `Dockerfile` is present in the
    checkout the crawl service cannot build, so only `caddy` is named; the
    narrowing lifts by itself once the file exists.
-7. Print the URL the page is served on, taking `NEWS_RADAR_HTTP_PORT` from
+8. Print the URL the page is served on, taking `NEWS_RADAR_HTTP_PORT` from
    `docker/.env` and falling back to `8088`.
 
-Steps 6 and 7 are skipped by `--dry-run` and by `--check`.
+Steps 7 and 8 are skipped by `--dry-run` and by `--check`.
 
 `--dry-run` and `--check` differ at step 5. A dry run describes a checkout that
 does not exist yet, so it only lists the secrets it would ask for. `--check`
@@ -1769,7 +1876,7 @@ it would call an install ready that cannot start.
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Everything needed is in place (or, under `--dry-run`, would be) |
-| `1` | A prerequisite is missing, a required secret is still empty, or `docker compose up` failed |
+| `1` | A prerequisite is missing, a required secret is still empty, `--check` found a config key the template has and the local config does not, or `docker compose up` failed |
 | `2` | Bad usage - unknown flag, or a template file is missing from the checkout |
 
 ## scripts/release.py
@@ -1823,8 +1930,12 @@ chain it drives.
   external call goes through `subprocess.run` with an argument list.
 - Both print one line per step, prefixed `[ok]`, `[new]`, `[skip]`, `[warn]` or
   `[dry]`, so the output is scannable and greppable.
-- Neither imports anything from `src/news_radar`, and neither needs PyYAML: the
-  config template is copied verbatim, not parsed.
+- Neither imports anything from `src/news_radar`, and neither needs PyYAML. The
+  config template is copied verbatim; `setup.py`'s drift check reads key paths
+  off the indentation with a deliberate non-parser (`template_keys()`), because
+  the script has to run on a bare Python before anything is installed. It knows
+  which keys a file mentions, not what they mean - which is the whole question
+  it is asked.
 
 ### [interface] Notification Channels - Telegram and Discord
 *`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set*
@@ -2445,7 +2556,7 @@ The scoring formula itself, and the two timestamp rules it enforces (unknown
 scores `0`, future is clamped to age `0`), are in [[news-search]] stage 6.
 
 ### [interface] Storage and Render Layer Contracts
-*`interface/storage-layer.md` - Every public signature of the store and render modules - what each writes, what the page is built from, and the row shape that travels between them. - status: active - source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py - keywords: backup, restore, open_db, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot*
+*`interface/storage-layer.md` - Every public signature of the store and render modules - what each writes, what the page is built from, and the row shape that travels between them. - status: active - source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py - keywords: backup, restore, open_db, migration, schema version, user_version, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot*
 
 # Storage and Render Layer Contracts
 
@@ -2461,7 +2572,7 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 
 | Signature | Returns | Notes |
 |-----------|---------|-------|
-| `open_db(data_dir)` | `sqlite3.Connection` | Creates `data_dir`, connects to `news.db`, migrates on `user_version`. `row_factory` is `sqlite3.Row` |
+| `open_db(data_dir)` | `sqlite3.Connection` | Creates `data_dir`, connects to `news.db`, dispatches on `user_version`. `row_factory` is `sqlite3.Row` |
 | `start_run(conn, started_at)` | `run_id: str` | Opens the `runs` row. Id is the UTC start as `%Y%m%dT%H%M%SZ`, with a `-2`, `-3`… suffix if that second is taken |
 | `finish_run(conn, run_id, finished_at, items_fetched, items_matched, errors)` | `None` | Closes the row; `errors` is JSON-encoded as a list of pairs |
 | `save(conn, run_id, ranked, now)` | `int` | `{label: [Story]}` in, number of `matches` rows written out |
@@ -2473,9 +2584,25 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)`. The shipped `config.yaml` sets `90`; the fallback for an **absent** key stays `0` |
 | `to_db(moment)` / `from_db(text)` | `str \| None` / `datetime \| None` | The one serialisation, both ways |
 
-`StoreError` is raised only when the file's `user_version` is **higher** than
-`SCHEMA_VERSION`: the store migrates forward and refuses to downgrade. A missing
-file is not an error - it is the first run.
+**`open_db()` understands four cases, and only two of them open the file.**
+
+| `user_version` | What happens |
+|----------------|--------------|
+| `== SCHEMA_VERSION` | Opened |
+| `0` | No file, or an empty one. The schema is created and the version stamped. Not an error - it is the first run |
+| `> SCHEMA_VERSION` | `StoreError`. Another copy of this store is written by a newer build, and dropping columns it needs is not a recovery |
+| anything in between | `StoreError`, naming both versions. **There is no migration code in this project yet** |
+
+The last row is currently unreachable - `SCHEMA_VERSION` is `1`, so there is no
+integer between `0` and it - and it exists so that the day it becomes reachable
+is a loud one. Until v0.2.3 that case fell through every branch and `open_db()`
+returned a connection to a store whose shape the build did not match, which is
+how a query silently reads a column that means something else now.
+
+**Bumping `SCHEMA_VERSION` means writing the migration in that branch**, in the
+same commit. The cycle survives a refusal either way: every caller is inside a
+guard, so a refused store costs the page and the notifications, logs a
+traceback, withholds the heartbeat ping, and alerts after two cycles.
 
 ### Tables
 
@@ -2532,7 +2659,7 @@ page does not earn a dependency.
 |-----------|---------|-------|
 | `local_tz(name)` | `tzinfo` | Never raises - see the fallback below |
 | `day_bounds(now, tz)` | `(start_utc, end_utc)` | The local day containing `now`, half-open, expressed in UTC |
-| `write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html` with identical bodies. `summary` is the AI summary, one topic per line; falsy renders no block at all, which is the shipped case |
+| `write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html`. Same body except `nav.days`, which is written for the depth of the file carrying it - see [[news-item]]. `summary` is the AI summary, one topic per line; falsy renders no block at all, which is the shipped case |
 
 `labels` fixes the group order **and** is what keeps an empty group on the page:
 a keyword that has gone quiet looks identical to a keyword nobody wrote about,
@@ -2896,7 +3023,7 @@ costs an afternoon to rediscover.
 | **`rank.py` cannot read the config** | The per-source `rank_weight` is in `config.yaml`, which layer 3 may not import | `__main__._source_weights(cfg)` builds `{source_id: rank_weight}` and passes it in; an unknown id scores the neutral `1.0` |
 
 ### [rule] Release Flow
-*`rule/release-flow.md` - How a version is cut - the branch model, running release.py, what CI does with the tag, and what to do when it fails midway. - status: active - source: scripts/release.py, .github/workflows/release.yml, .github/workflows/test.yml, CHANGELOG.md - keywords: release, release.py, Unreleased, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release*
+*`rule/release-flow.md` - How a version is cut - the branch model, running release.py, what CI does with the tag, and what to do when it fails midway. - status: active - source: scripts/release.py, .github/workflows/release.yml, .github/workflows/test.yml, CHANGELOG.md - keywords: deploy, release, release.py, Unreleased, test.yml, CI checks, semver, tag, CHANGELOG.md, VERSION, developing, main, release branch, chore(release), GitHub Release*
 
 # Release Flow
 
@@ -2965,6 +3092,11 @@ CI takes over from the tag: `.github/workflows/release.yml` triggers on a pushed
 the GitHub Release notes. A version with no changelog section still publishes,
 falling back to GitHub-generated notes and logging a warning.
 
+**The release ends at the tag; nothing is deployed by it.** `news.dtbao.org`
+runs a detached checkout of a tag on the homelab and stays on the old one until
+somebody checks the new one out and rebuilds - the four commands are under
+`## Updating` in [[setup-homelab]].
+
 The other half of CI runs before that: `.github/workflows/test.yml` runs every
 `tests/test_*.py` on Python 3.12 on each push and pull request, with no install
 step because the checks are standard library only. It is what keeps a broken
@@ -3004,7 +3136,7 @@ Recovery is ordinary git. Find out which step failed from the output, then:
   reset the release commit; then re-run.
 
 ### [rule] Setting Up on the Homelab
-*`rule/setup-homelab.md` - The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux. - status: active - source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile, docker/cloudflared.yml - keywords: setup, setup.py, docker compose, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088*
+*`rule/setup-homelab.md` - The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux. - status: active - source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile, docker/cloudflared.yml - keywords: upgrade, updating, detached tag, --build, git checkout, config drift, setup, setup.py, docker compose, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088*
 
 # Setting Up on the Homelab
 
@@ -3059,7 +3191,7 @@ it could not start.
 | Flag | Use it when |
 |------|-------------|
 | `--dry-run` | You want to see what it would do. Writes nothing, asks nothing |
-| `--check` | Verifying an existing install - same checks plus the secrets, creates nothing, non-zero on a gap |
+| `--check` | Verifying an existing install - the same checks plus the secrets, a missing destination file, and any key the template has that your `config.yaml` does not. Creates nothing, non-zero on a gap. This is the upgrade's check - see `## Updating` |
 | `--force` | Regenerating a config from the template on purpose |
 | `--non-interactive` | Unattended provisioning; a blank secret is reported, not prompted for |
 
@@ -3124,15 +3256,54 @@ the operator's own remote access. See [[deployment-homelab]].
 
 ## Updating
 
+Production runs a **detached checkout of a release tag**, not a tracking branch,
+so `git pull` has nothing to pull onto. Four commands, from the checkout root:
+
 ```
-git pull
+git fetch --tags origin
+git checkout v<version>
 python scripts/setup.py --check
 docker compose -f docker/docker-compose.yml --profile tunnel up -d --build
 ```
 
-`--check` catches a config key added upstream that the local `config.yaml` does
-not have yet. The crawl container reads its config at startup, so a config change
-needs a restart - see [[deployment-homelab]].
+**`--build` is not optional.** `Dockerfile` copies `VERSION` and `src/` **into
+the image**, so `up -d` without it recreates the container from the image it
+already had and the new code never runs. The giveaway is the log line at
+startup: `news-radar <version> starting`.
+
+**`--check` is the step that reads the upgrade.** It exits `1`, naming the file
+or the key, when either half of the config has fallen behind the release:
+
+- a file `setup.py` is meant to create is **missing** - which is what a checkout
+  does to `config/frequency_words.txt` the first time you upgrade past v0.2.2,
+  because that file stopped being tracked and `git checkout` deletes a path the
+  new commit does not carry;
+- a **key** `config.yaml.example` has that the local `config.yaml` does not. The
+  key is not fatal to the run - the code default fills it - but the default is a
+  decision nobody made. `report.mode` sat at `incremental` through a release
+  that had moved to `daily` exactly this way.
+
+Fix either by running `python scripts/setup.py` with no flags: it creates what
+is missing from the templates, never overwrites what exists, and brings the
+stack up. A key it names has to be copied across by hand - a template is not
+allowed to overwrite your config.
+
+### What a checkout changes, and what it cannot
+
+| Thing | On `git checkout v<version>` |
+|-------|------------------------------|
+| `src/`, `VERSION` | into the image, **only with `--build`** |
+| `config/*.example`, `docker/.env.example` | updated on disk; nothing reads them at runtime |
+| `config/config.yaml`, `config/frequency_words.txt`, `docker/.env` | **never touched** - all three are gitignored and yours |
+| `output/news.db`, `output/days/`, `backups/` | untouched; they are bind mounts, not image content |
+
+There is no config migration and there is not going to be one: the local files
+are yours, and the release can only tell you what it added. That is what
+`--check` is for.
+
+The crawl container reads its config at startup, so any config change needs the
+`up -d` above - see [[deployment-homelab]]. Cutting the version in the first
+place is [[release-flow]].
 
 ### [rule] TrendRadar Is the Reference Repo When You Get Stuck
 *`rule/reference-trendradar.md` - When and how to consult TrendRadar for a problem news-radar hits, and exactly what may not be carried back. - status: active - source: https://github.com/sansan0/TrendRadar, docs/memory-ai/adr/adr-0001-clean-room-from-trendradar.md - keywords: TrendRadar, reference, stuck, GPL-3.0, clean-room, copyleft, prior art, how to consult*

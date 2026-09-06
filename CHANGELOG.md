@@ -61,6 +61,17 @@ one makes the file and the tags disagree.
   image, so a mismatch would have the running container report a version that
   was never published. The image name is spelled out in both the workflow and
   the compose file, and `tests/test_deploy.py` pins that the two agree.
+- **deploy**: the stack can update itself. A `watchtower` service behind the new
+  `autoupdate` compose profile polls GHCR once a day, pulls a newer `:latest`
+  and recreates **only** the crawl container - it is the one carrying
+  `com.centurylinklabs.watchtower.enable`, because caddy is `2-alpine` and
+  cloudflared is pinned to an exact version and neither should upgrade itself
+  unreviewed. The profile is opt-in for the same reason the tunnel one is: on a
+  dev checkout this would pull `:latest` over the image just built. A recreate
+  re-attaches the same bind mounts, so an update still cannot touch anything
+  under `NEWS_RADAR_HOME`. Freezing a deployment means pinning
+  `NEWS_RADAR_VERSION` **and** leaving the profile off - pinning alone loses to
+  the next poll.
 - **setup**: `scripts/setup.py` names every key that `config.yaml.example` has
   and the local `config.yaml` does not, and `--check` exits `1` when there is
   one. The documented contract already claimed this and no code had ever done

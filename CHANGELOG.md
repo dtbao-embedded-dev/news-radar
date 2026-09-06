@@ -20,12 +20,16 @@ one makes the file and the tags disagree.
 
 - **keywords**: `config/frequency_words.txt` is now a local file created from
   `config/frequency_words.txt.example`, exactly like `config.yaml`, and is
-  gitignored. It holds no secret; the reason is the upgrade. A tracked file is
-  overwritten by the `git checkout <tag>` every deploy runs, so a deployment's
-  tuned keyword groups were one deploy away from being silently reverted.
-  **Upgrading deletes the file**, because it was tracked in the old commit and
-  is not in the new one - the radar would then match nothing and every search
-  feed would be skipped. After checking out this version, run
+  gitignored. It holds no secret; the reason is the upgrade. A tracked file that
+  a deployment edits cannot survive the `git checkout <tag>` every deploy runs.
+  **Upgrading goes one of two bad ways**, both measured on a throwaway clone: a
+  file left as the release shipped it is **deleted** by the checkout, because it
+  was tracked in the old commit and is not in the new one - the radar would then
+  match nothing and every search feed would be skipped; a file the deployment
+  **edited** makes git refuse the checkout outright (`error: Your local changes
+  to the following files would be overwritten by checkout ... Aborting`) and the
+  upgrade stops. Untracking it is what removes both. After checking out this
+  version, run
   `python scripts/setup.py` (or copy the `.example` by hand) **before** starting
   the stack; `setup.py --check` now fails while the file is absent rather than
   calling the checkout ready. Changing the groups for everyone still means

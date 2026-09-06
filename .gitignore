@@ -4,9 +4,11 @@
 
 # Real config and secrets - templates are committed, these are not.
 # frequency_words.txt is here for a different reason than the two below it: not
-# because it holds a secret, but because `git checkout <tag>` overwrites a
-# tracked file, and a deployment's tuned keyword groups are not something a
-# deploy may quietly revert.
+# because it holds a secret, but because a tracked file a deployment edits makes
+# every upgrade go one of two bad ways, both measured on a throwaway clone:
+# untouched, `git checkout <tag>` deletes it; edited, git refuses the checkout
+# outright ("Your local changes ... would be overwritten", Aborting) and the
+# whole upgrade stops. Untracking it removes both.
 config/config.yaml
 config/frequency_words.txt
 docker/.env

@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.2 - 2026-09-06
+
 ### Fixes
 
 - **render**: every day link on a day page reaches the day it names. The

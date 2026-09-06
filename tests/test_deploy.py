@@ -21,6 +21,7 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 COMPOSE = ROOT / "docker" / "docker-compose.yml"
 ENV_EXAMPLE = ROOT / "docker" / ".env.example"
+WORKFLOW = ROOT / ".github" / "workflows" / "image.yml"
 
 # The one string that says where a deployment's own files live. Both layouts are
 # driven by it: unset it is `..` (the repo root, which is what a dev checkout
@@ -44,6 +45,8 @@ def check(name, condition, detail=""):
 compose = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
 services = compose.get("services", {})
 env_example = ENV_EXAMPLE.read_text(encoding="utf-8")
+workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+workflow_text = WORKFLOW.read_text(encoding="utf-8")
 
 
 def mounts(service):
@@ -123,6 +126,48 @@ check("the crawl service can still be built locally",
 
 for key in ("NEWS_RADAR_HOME", "NEWS_RADAR_VERSION"):
     check("{} is in .env.example".format(key), key + "=" in env_example)
+
+
+# --------------------------------------------------------------------------
+# the workflow that publishes what the compose file points at
+# --------------------------------------------------------------------------
+
+# `"on"` is quoted in the workflow so YAML keeps it a string; bare `on:` parses
+# as the boolean True, and every tool reading the file then disagrees about the
+# key. release.yml carries the same comment and the same quoting.
+check("the workflow triggers on a version tag, not on a boolean key",
+      (workflow.get("on") or {}).get("push", {}).get("tags") == ["v*"],
+      repr(list(workflow.keys())))
+check('"on" is quoted in the source so it stays a string',
+      '"on":' in workflow_text)
+
+# Without packages: write the push fails at the end of a build nobody watched.
+check("the workflow may write packages",
+      workflow.get("permissions", {}).get("packages") == "write",
+      repr(workflow.get("permissions")))
+
+# The one string that has to agree across two files. A compose file pointing at
+# an image nothing publishes fails at `docker compose pull`, on the machine
+# furthest from anyone who could fix it.
+check("the workflow publishes the image the compose file runs",
+      IMAGE in workflow_text, IMAGE)
+
+# The homelab is x86_64 (measured, not assumed), so a second architecture is
+# build minutes bought for nobody. Read off the parsed step rather than counted
+# in the file text - the first version of this check counted the word in a
+# comment and failed on prose.
+steps = workflow.get("jobs", {}).get("image", {}).get("steps", [])
+build = [s for s in steps if str(s.get("uses", "")).startswith("docker/build-push-action")]
+check("there is exactly one build-push step", len(build) == 1, repr(len(build)))
+if build:
+    with_ = build[0].get("with", {})
+    check("the image is built for linux/amd64 only",
+          with_.get("platforms") == "linux/amd64", repr(with_.get("platforms")))
+    check("the build actually pushes", with_.get("push") is True,
+          repr(with_.get("push")))
+    check("both the version tag and latest are published",
+          len([t for t in str(with_.get("tags", "")).splitlines() if t.strip()]) == 2,
+          repr(with_.get("tags")))
 
 
 # --------------------------------------------------------------------------

@@ -146,6 +146,17 @@ eq("exactly min(threshold, len(group)) stories are highlighted",
 check("the score is not rendered", "0.91" not in html, html[:200])
 check("source ids are not rendered", "lobsters" not in html)
 check("the timestamp is what the meta line carries", "<time datetime=" in html)
+
+# A story leads off this site; the report is what the reader came back to. The
+# `rel` was already there - it is the half of this pair that closes
+# `window.opener`, and it is meaningless without the other half.
+eq("every story link opens in a new tab", html.count('target="_blank"'), 5)
+check("...and carries the rel that makes that safe",
+      html.count('rel="noopener noreferrer"') == 5)
+for nav in ("jump", "days"):
+    block = html.split('<nav class="{}">'.format(nav), 1)[1].split("</nav>", 1)[0]
+    check("the {} nav stays in this tab".format(nav), "target=" not in block,
+          block[:200])
 check("a story with no timestamp renders anyway", "ESP32 undated" in html)
 check("the run's own numbers are on the page",
       "597" in html and "209" in html)

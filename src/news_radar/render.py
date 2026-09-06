@@ -254,9 +254,15 @@ def _story(row, hot, tz):
     `item_sources` still records who carried it - but a reader asked what
     `0.74` meant, and a number nobody can act on is chrome. `hot` survives as
     a heavier title: the order of the list is the ranking.
+
+    `target="_blank"` because a story leads off this site and the report is what
+    the reader came back to; the `rel` beside it is the half that stops the
+    opened page reaching back through `window.opener`. Only story links get it -
+    the group and day navs move around this same report and belong in this tab.
     """
     return (
-        '<li class="{cls}"><a href="{url}" rel="noopener noreferrer">{title}</a>'
+        '<li class="{cls}"><a href="{url}" target="_blank"'
+        ' rel="noopener noreferrer">{title}</a>'
         '<span class="meta">{when}</span></li>').format(
             cls="story hot" if hot else "story",
             url=_e(row.get("url") or row.get("canonical_url") or "#"),

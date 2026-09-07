@@ -1,12 +1,12 @@
 ---
 title: Setting Up on the Homelab
 category: rule
-purpose: The procedure from nothing to a serving deployment running the published image, and to a development checkout.
+purpose: The procedure from nothing to a deployment serving the report on the LAN, and to a development checkout.
 status: active
 updated: 2026-09-07
-source: docker/docker-compose.yml, docker/.env.example, docker/Caddyfile, docker/cloudflared.yml, .github/workflows/image.yml, scripts/setup.py, src/news_radar/__main__.py
+source: docker/docker-compose.yml, docker/.env.example, docker/Caddyfile, .github/workflows/image.yml, scripts/setup.py, src/news_radar/__main__.py
 confidence: confirmed
-keywords: deployment directory, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_TUNNEL_ID, ghcr, image, docker compose pull, watchtower, autoupdate profile, auto-update, migrating, upgrade, updating, --check, config drift, setup, setup.py, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088
+keywords: deployment directory, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, ghcr, image, docker compose pull, ghcr private, package visibility, watchtower, autoupdate profile, --check, setup, setup.py, homelab, LAN only, published nowhere, no tunnel, reverse proxy, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088
 order: 2
 ---
 
@@ -55,9 +55,7 @@ come from the release, everything else is yours and nothing ever overwrites it.
 ~/news-radar/
   docker-compose.yml         from the release
   Caddyfile                  from the release
-  cloudflared.yml            from the release
-  .env                       yours - secrets, NEWS_RADAR_HOME=., tunnel id
-  tunnel-credentials.json    yours
+  .env                       yours - secrets, and NEWS_RADAR_HOME=.
   config/config.yaml         yours
   config/frequency_words.txt yours
   output/                    yours - the store and the published pages
@@ -70,7 +68,6 @@ cd ~/news-radar
 BASE=https://raw.githubusercontent.com/dtbao-embedded-dev/news-radar/v<version>
 curl -fsSLO "$BASE/docker/docker-compose.yml"
 curl -fsSLO "$BASE/docker/Caddyfile"
-curl -fsSLO "$BASE/docker/cloudflared.yml"
 curl -fsSL  "$BASE/docker/.env.example"                  -o .env
 curl -fsSL  "$BASE/config/config.yaml.example"           -o config/config.yaml
 curl -fsSL  "$BASE/config/frequency_words.txt.example"   -o config/frequency_words.txt
@@ -87,9 +84,12 @@ Then edit `.env`. Two things it will not work without:
 
 ```
 docker compose pull
-docker compose --profile tunnel --profile autoupdate up -d
+docker compose --profile autoupdate up -d
 docker compose run --rm news-radar --check
 ```
+
+**The report is now reachable on `http://<host>:8088` and nowhere else.** There
+is no tunnel and no reverse proxy in this stack - see the section below.
 
 **The GHCR package is private until somebody makes it public.** A package
 published by a workflow inherits the repository's *access permissions* but
@@ -144,58 +144,50 @@ are in [[cli-scripts]], which is where that contract lives.
 
 Both live only in `.env`, never in `config.yaml`.
 
-## Exposing news.dtbao.org
+## Reaching it from outside the LAN
 
-Caddy serves the deployment's `output/` inside the docker network on port
-`8080`. The published host port (`8088` by default) is for local debugging only -
-the tunnel never touches it.
+**Nothing in this stack does that, deliberately.** Caddy serves the
+deployment's `output/` on port `8080` inside the docker network, published on the
+host as `NEWS_RADAR_HTTP_PORT` (default `8088`). That port is the whole of the
+project's answer.
 
-The connector runs as the `cloudflared` service in this same compose project,
-behind the `tunnel` profile. Two steps, once per machine:
+There used to be a `cloudflared` service here carrying a public hostname. It was
+removed: a connector is a permanent moving part, with its own credentials, its
+own failure mode (Cloudflare `1033` while every other log line says success) and
+its own upgrade story - all of that inside a project whose actual job is to write
+HTML into a directory. Whatever you put in front of the published port is a
+choice you can change without touching this repository, which is the point.
 
-1. **Have a tunnel.** `cloudflared tunnel create news` if there is none, then
-   `cloudflared tunnel route dns news news.dtbao.org` to point the hostname at
-   it. Both write to the Cloudflare account, not to this repo.
-2. **Give the container its credentials.** Copy the tunnel's credentials JSON
-   (`~/.cloudflared/<tunnel-id>.json`, written by `tunnel create`) to
-   `tunnel-credentials.json` beside the compose file. It is never committed.
-3. **Put the tunnel id in `.env`** as `NEWS_RADAR_TUNNEL_ID`
-   (`cloudflared tunnel list` prints it; the credentials file carries the same
-   one). It is not a secret, but it names one deployment, so it does not live in
-   a committed file - and `cloudflared` will not read it from an environment
-   variable inside its own config, which is why it is the argument to `run` in
-   the compose command instead. Miss this and the connector starts with no
-   tunnel to run: the site answers Cloudflare `1033` while everything else looks
-   healthy.
+If you do front it, three things this project already does are worth keeping:
 
-   `docker/cloudflared.yml` names neither the tunnel nor the hostname. Its
-   ingress is a single catch-all to `caddy:8080`, and only a hostname routed to
-   this tunnel in Cloudflare DNS ever arrives.
-
-**Do not add `news.dtbao.org` to a connector running on the host instead.** A
-host connector cannot resolve `caddy`, so it would have to be pointed at the
-published debug port; and this homelab's host connector (`win-dev`) carries
-`ssh.dtbao.org` and `remote.dtbao.org`, so restarting it for a news route drops
-the operator's own remote access. See [[deployment-homelab]].
+- **`docker/Caddyfile` answers `404` for `/news.db*` and for directory
+  listings.** The store is not part of the report, and serving it hands a
+  stranger the whole archive in one request. Those rules are what a proxy would
+  be relying on - see [[deployment-homelab]].
+- **`ops.site_url` should stay `http://caddy:8080/`**, not the public name. It
+  runs inside the compose network, so it tests the thing this stack is
+  responsible for; a public URL would make somebody else's outage into a failed
+  cycle and withhold the heartbeat ping for it.
+- **The archive is public the moment the port is.** Every
+  `output/days/*.html` ever written is readable by anyone who can reach it, and
+  there is no auth in this stack at all.
 
 ## Verifying it works
 
-1. `docker compose ps` - `news-radar` and `caddy` running, plus `cloudflared`
-   and `watchtower` when their profiles are on. A service missing from the
-   listing without its profile is the profile working, not a fault.
+1. `docker compose ps` - `news-radar` and `caddy` running, plus `watchtower`
+   when its profile is on. A service missing from the listing without its
+   profile is the profile working, not a fault.
 2. `curl http://localhost:8088/` - Caddy answers with the current report. A 200
    from a *different* service means the port is taken; change
    `NEWS_RADAR_HTTP_PORT` rather than guessing.
-3. `curl https://news.dtbao.org/` - `200`, and the same report. This already
-   leaves the LAN: out to the Cloudflare edge and back in through the tunnel.
-   `curl https://news.dtbao.org/news.db` must answer `404`.
-4. Cloudflare error `1033` there means the hostname is routed to a tunnel with
-   no connector - read `docker compose logs cloudflared`, which prints
-   `Registered tunnel connection` once per edge connection when it is healthy.
-5. `docker compose logs news-radar | head` - `news-radar <version> starting`.
+3. `curl http://localhost:8088/news.db` - **`404`**. The store shares the
+   volume with the pages, and this is the Caddyfile rule that keeps it out of
+   reach of anyone who can reach the port. `curl http://localhost:8088/days/`
+   must answer `404` too.
+4. `docker compose logs news-radar | head` - `news-radar <version> starting`.
    That version is the one the image was published as, so it is also how you
    read whether an update actually landed.
-6. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
+5. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
    received exactly one message.
 
 Updating a deployment, freezing or rolling back a version, and turning an

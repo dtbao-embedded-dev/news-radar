@@ -9,6 +9,42 @@ updated: 2026-09-07
 
 ## What works
 
+### The tunnel is gone; the report is served on the LAN (2026-09-07)
+
+Removed rather than fixed: the `cloudflared` service, `docker/cloudflared.yml`,
+`NEWS_RADAR_TUNNEL_ID`, and the credentials-file detection that switched on the
+`tunnel` compose profile in `scripts/setup.py`. **`NEWS_RADAR_HTTP_PORT` (8088)
+is now the only way to reach the report**, and it is no longer described as
+debugging-only.
+
+- **The reason is moving parts, not cost.** A connector carries its own
+  credentials, its own upgrade story, and its own failure mode - Cloudflare
+  `1033` while every log line in the crawl says success. That is a lot of
+  permanent machinery inside a project whose job is to write HTML into a
+  directory. Where the report is readable from is now a decision made in front
+  of the published port, and changing it touches nothing in this repository.
+- **It landed one commit after the tunnel id was parameterised**, which is the
+  honest order: laying out every piece a connector needs - config file,
+  credentials file, profile, env var, detection rule - is what made the question
+  obvious.
+- **The tests pin the absence.** No `cloudflared` service, no service declaring
+  a `tunnel` profile, no `cloudflared.yml` on disk, and only `caddy` publishing
+  a port; `test_setup.py` adds that a leftover credentials file changes nothing,
+  which is the check that would actually catch the detection creeping back.
+- **`--profile tunnel` still parses and starts nothing extra.** An old command
+  in somebody's shell history is harmless rather than confusing - verified:
+  `--profile tunnel config --services` lists `caddy` and `news-radar`, the same
+  two as no profile at all.
+- **`.gitignore` still ignores `docker/tunnel-credentials.json`**, deliberately.
+  The path is dead; a machine that still holds one of those files must not be
+  able to commit it.
+
+**Two loose ends the code cannot close**, both recorded in [[updating-homelab]]:
+the Cloudflare DNS record and the tunnel still exist on the account and will
+answer `1033` until someone deletes them, and `ops.site_url` on the homelab is
+still the public URL - it has to move to `http://caddy:8080/` or every cycle
+fails on a hostname nothing serves.
+
 ### The package is an image, and the data is out of its way (2026-09-06)
 
 The previous entry made the upgrade *checkable*. This one makes the failure it
@@ -564,7 +600,8 @@ the ops layer and the summary - and the whole thing is reachable at
   `release.py`. Until then `docker compose pull` has nothing to fetch, and the
   homelab migration cannot start. Cut the version first, in that order.
 - **v0.2.2 is cut and pushed but not deployed.** The homelab still runs
-  `v0.2.1`; nothing reaches `news.dtbao.org` until it is updated.
+  `v0.2.1`, and still with a tunnel in front of it; nothing changes there until
+  it is updated.
   `~/news-radar/config/config.yaml` is gitignored and still says
   `report.mode: incremental` - a hand edit no release can make for you, and what
   `--check` will name.
@@ -584,18 +621,20 @@ the ops layer and the summary - and the whole thing is reachable at
   rewritten each cycle; a past day keeps whatever nav it was written with. On
   2026-09-06 the homelab held exactly one day file, so this costs nothing now -
   but a page written today and read next month is the shape to remember.
-- **The archive is public now.** Every `output/days/*.html` ever written is
-  readable by anyone with the URL - that is finished-product statement 3, not a
-  defect, but it is worth stating plainly: only `news.db*` and directory
-  listings are withheld, both by the Caddyfile, and there is no Cloudflare
-  Access policy in front of the hostname.
-- **A tunnel restart still takes the site down, but it is no longer silent.**
-  The crawl keeps running and `output/` stays correct, while `news.dtbao.org`
-  answers Cloudflare `1033` until a connector registers again. P6-1 closed the
-  invisible half: `ops.site_url` fetches the published page every cycle, so the
-  connector going away is now a failed cycle, a withheld ping, and - after two
-  of them - a message. Nothing restarts the connector for you; `restart:
-  unless-stopped` covers a crash and not a deregistration.
+- **The archive is readable by anyone who can reach the port.** Every
+  `output/days/*.html` ever written, with no auth anywhere in this stack - only
+  `news.db*` and directory listings are withheld, both by the Caddyfile. That
+  used to mean "public", because a tunnel carried it to the internet. It now
+  means "public to the LAN", and it becomes public again the moment anything is
+  put in front of the published port. Worth deciding on *before* that, not
+  after.
+- **Nothing in the stack carries the report off the LAN any more, and nothing
+  monitors whatever does.** The tunnel was removed (2026-09-07). `ops.site_url`
+  pointed at `http://caddy:8080/` still checks the thing this stack owns - a
+  dead web server withholds the heartbeat ping - but a reverse proxy or tunnel
+  someone puts in front of the port is outside that check by design: making
+  somebody else's outage into a failed cycle would withhold the ping for a
+  problem the crawl cannot fix.
 - **Google News (vi) has almost no recent embedded coverage.** P2's
   relevance-first problem is fixed - `when:7d` on Google News and
   `search_by_date` on HN Algolia mean the freshness term finally fires, and ten

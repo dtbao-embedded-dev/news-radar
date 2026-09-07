@@ -20,6 +20,15 @@ service behind an opt-in `autoupdate` profile scoped by label to the crawl
 container alone, and `python -m news_radar --check` carrying the config-drift
 check into the image where `scripts/setup.py` no longer exists.
 
+**The tunnel is gone (2026-09-07).** The `cloudflared` service,
+`docker/cloudflared.yml`, `NEWS_RADAR_TUNNEL_ID` and the credentials-file
+detection in `setup.py` were all removed one commit after the id was finally
+parameterised - which is the honest sequence, because parameterising it is what
+made it obvious how much machinery a connector was for a project that writes
+HTML into a directory. **The report is served on `NEWS_RADAR_HTTP_PORT` and
+published nowhere**; what fronts that port is a decision outside this
+repository. `--profile tunnel` still parses and is a no-op.
+
 **Three answers to one question.** The package is the **image** - not an app
 binary. The stack is three processes and a binary would package one of them,
 while breaking this project's own rule that a release may never overwrite a
@@ -78,6 +87,27 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **Then the tunnel was removed outright** (2026-09-07), one commit later.
+  `docker/cloudflared.yml` deleted, the `cloudflared` service and the `tunnel`
+  profile gone from compose, `NEWS_RADAR_TUNNEL_ID` gone from `.env.example`,
+  and `TUNNEL_CREDENTIALS` plus the profile detection gone from `scripts/setup.py`.
+  Twelve bank docs and the README followed. The tests now pin the **absence**:
+  no `cloudflared` service, no service declaring a `tunnel` profile, no
+  `cloudflared.yml` on disk, only `caddy` publishing a port - and in
+  `test_setup.py`, that a leftover credentials file changes nothing.
+- **Parameterising a thing is a good way to find out you do not want it.** The
+  work below made the tunnel id a variable; doing that laid out every piece a
+  connector needs - a config file, a credentials file, a profile, an env var, a
+  detection rule in `setup.py` - and the next question was why any of it was in
+  a project whose job is to write HTML into a directory.
+- **`.gitignore` keeps ignoring `docker/tunnel-credentials.json` on purpose.**
+  The path is dead, but a machine that still has one of those files must not be
+  able to commit it by accident. Removing an ignore for a secret is the one
+  direction that has no upside.
+- **History was annotated, not rewritten.** P5 delivered a tunnel and that is
+  true; `delivery-phases.md` and the P5 entries in this file say so and now also
+  say it was undone. The Known issues list is where the *current* state lives,
+  and that is what changed.
 - **The repository stopped naming one deployment** (2026-09-07). `docker/cloudflared.yml`
   carried this homelab's tunnel id and its hostname, so the two files a second
   deployment would need were welded to the first one. The id is now
@@ -338,10 +368,13 @@ loader and the design bank - see `progress.md`.
    then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays
    unset** - the compose file is still in `docker/`, so the default `..` is
    already `~/news-radar`. Do **not** `git checkout v0.2.3` out of habit: that
-   is the command that deletes `config/frequency_words.txt`. **And read the
-   tunnel id out of `docker/cloudflared.yml` before that file is replaced**, then
-   put it in `docker/.env` as `NEWS_RADAR_TUNNEL_ID` - the new compose file takes
-   it from there, and without it the connector has no tunnel to run.
+   is the command that deletes `config/frequency_words.txt`. **This migration
+   also takes the site off the internet**: the tunnel is gone from the stack, so
+   `rm -f docker/cloudflared.yml docker/tunnel-credentials.json` and expect
+   `news.dtbao.org` to stop answering. Point `ops.site_url` at
+   `http://caddy:8080/` in the same edit as `report.mode`, and delete the
+   Cloudflare DNS record and the tunnel on the account when convenient - left
+   alone the hostname answers `1033` forever instead of `NXDOMAIN`.
 4. **Edit `report.mode` on the homelab by hand, in the same visit.**
    `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
    no release can reach it, which is what
@@ -482,14 +515,18 @@ loader and the design bank - see `progress.md`.
   per commit: all of P4 is one `**crawl**` line.
 - **Both scripts stay stdlib-only** so they run on a bare checkout, before
   anything is installed.
-- **Self-hosted, not GitHub Pages.** The crawl and the site both run on the
-  homelab; `news.dtbao.org` is reached through a Cloudflare Tunnel whose
-  connector is a container **in this stack**, not on the host. A host connector
-  cannot resolve `caddy`, and restarting one that carries other hostnames costs
-  those too.
-- **A tunnel id is not a secret, a credentials file is.**
-  `docker/cloudflared.yml` is committed; `docker/tunnel-credentials.json` is
-  gitignored. The `tunnel` compose profile keeps a checkout without that file
-  from ever starting the connector.
+- **Self-hosted, and published nowhere.** The crawl and the site both run on
+  the homelab, and the stack's answer for who can read it is one published port.
+  There was a Cloudflare Tunnel in here; it was removed on 2026-09-07 because a
+  connector is a permanent moving part - its own credentials, its own failure
+  mode (`1033` while every log line says success), its own upgrade story - in a
+  project whose job is to write HTML into a directory. **Reaching the report
+  from outside the LAN is now a decision made in front of the published port,
+  and changing it does not touch this repository.** That is the property being
+  bought; the cost is that nothing here monitors whatever fronts it.
+- **`ops.site_url` points at `http://caddy:8080/`, not at a public name.** It
+  resolves over the compose network, so it tests the web server this stack is
+  responsible for. A public URL there turns an outage nobody here can fix into a
+  failed cycle and a withheld heartbeat ping.
 - **Secrets live only in `docker/.env`.** `config.yaml` is committed as a
   template and a leaked copy must be harmless.

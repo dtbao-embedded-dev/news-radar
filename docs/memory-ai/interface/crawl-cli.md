@@ -3,7 +3,7 @@ title: Crawl CLI - python -m news_radar
 category: interface
 purpose: The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process.
 status: active
-updated: 2026-09-06
+updated: 2026-09-07
 source: src/news_radar/__main__.py, src/news_radar/ops.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile
 confidence: confirmed
 keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --check, --config, --debug, config drift, config-templates, missing_keys, template_path, entrypoint, schedule loop, SIGTERM, exit codes, crawl
@@ -192,7 +192,7 @@ still attempted.
 only then. Measured on 2026-09-05:
 
 ```
-INFO  heartbeat: https://news.dtbao.org/ answered
+INFO  heartbeat: http://caddy:8080/ answered
 INFO  heartbeat: pinged
 ```
 

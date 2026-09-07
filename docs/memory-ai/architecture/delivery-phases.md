@@ -3,7 +3,7 @@ title: Delivery Phases
 category: architecture
 purpose: The finished product news-radar aims at, and the phase-by-phase task breakdown that gets there.
 status: active
-updated: 2026-09-05
+updated: 2026-09-07
 source: conversation, CHANGELOG.md
 confidence: confirmed
 keywords: roadmap, phases, P0, P1, P2, P3, P4, P5, P6, P6-4, ai summary, scope, milestones, definition of done
@@ -13,7 +13,7 @@ order: 1
 # Delivery Phases
 
 > news-radar is a self-hosted news radar: it hunts stories on a schedule, filters
-> them against your own keyword file, publishes them to https://news.dtbao.org,
+> them against your own keyword file, serves them on the LAN,
 > and pushes only the new matches to Telegram and Discord.
 
 ## The finished product
@@ -28,8 +28,12 @@ Six statements define "done". Every phase below exists to make one of them true.
    `+`, excluded words `!`, per-group cap `@`, regex. Duplicates collapse on a
    dedup key; survivors are ranked by source rank + how many sources carried the
    story + freshness.
-3. **Opening https://news.dtbao.org is enough to read it.** Caddy serves
-   `output/`, exposed through a Cloudflare Tunnel. The page groups stories by
+3. **Opening the published port is enough to read it.** Caddy serves
+   `output/` on `NEWS_RADAR_HTTP_PORT`. *(As written this said
+   `https://news.dtbao.org` through a Cloudflare Tunnel; the tunnel was removed
+   later - see [[progress]] - and reaching the report from outside the LAN is
+   now a choice made in front of that port, not a statement this project
+   makes.)* The page groups stories by
    keyword group, has a dark mode, a search box, and per-day history.
 4. **New stories come to you.** Each crawl pushes only the **new** matches to
    Telegram and Discord. Nothing is re-sent.
@@ -56,7 +60,7 @@ Each phase is shippable on its own: it ends in something a human can run and see
 | P2 | Filter and rank: turn raw items into the shortlist | The same command prints grouped, deduped, ranked matches instead of raw items |
 | P3 | Store and render: persist and publish a page | `output/index.html` opens in a browser and shows today's matches; history survives a restart |
 | P4 | Notify: push the new ones | A crawl with new matches lands exactly one message in Telegram and one in Discord; a crawl with none sends nothing |
-| P5 | Deploy: run it for real on the homelab | https://news.dtbao.org serves the current report, refreshed unattended |
+| P5 | Deploy: run it for real on the homelab | The homelab serves the current report, refreshed unattended. *(Met through a Cloudflare Tunnel at `https://news.dtbao.org`; the tunnel was later removed and the report is served on the LAN)* |
 | P6 | Ops: keep it alive without babysitting | Seven days unattended with no manual intervention and no disk growth — **the code is built, the seven days are running** |
 
 ## Task breakdown
@@ -144,8 +148,14 @@ silently dropped story is not. Signatures are in [[notify-channels]].
 
 **The connector runs in the stack, not on the host.** That is what lets the
 origin be `caddy:8080` at all, and it keeps the news route from sharing a
-restart with whatever else a host connector is carrying. The tunnel id lives in
-a committed `docker/cloudflared.yml`; only the credentials file is a secret.
+restart with whatever else a host connector is carrying.
+
+**All of that was undone afterwards.** The `cloudflared` service,
+`docker/cloudflared.yml` and the `tunnel` profile were removed: a connector is a
+permanent moving part with its own credentials, its own failure mode and its own
+upgrade story, inside a project whose job is to write HTML into a directory. P5
+still counts as delivered - it ran, and it was verified from outside the LAN -
+but the shape it delivered is not the shape that ships. See [[setup-homelab]].
 Details in [[deployment-homelab]], the procedure in [[setup-homelab]].
 
 ### P6 — Ops *(built, P6-4 included; the seven unattended days are still running)*

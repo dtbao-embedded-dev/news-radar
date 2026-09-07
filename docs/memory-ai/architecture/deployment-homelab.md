@@ -1,45 +1,49 @@
 ---
 title: Homelab Deployment
 category: architecture
-purpose: How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world.
+purpose: How news-radar runs on the homelab, what serves the report, and why nothing in the stack carries it off the LAN.
 status: active
 updated: 2026-09-07
-source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, docker/.env.example, .github/workflows/image.yml, scripts/setup.py
+source: docker/docker-compose.yml, docker/Caddyfile, docker/.env.example, .github/workflows/image.yml, scripts/setup.py
 confidence: confirmed
-keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, autoupdate profile, watchtower, ghcr, image, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_TUNNEL_ID, WATCHTOWER_POLL_INTERVAL, schedule, volumes, restart policy
+keywords: homelab, LAN only, published nowhere, no tunnel, docker compose, caddy, NEWS_RADAR_HTTP_PORT, 8088, autoupdate profile, watchtower, ghcr, image, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, WATCHTOWER_POLL_INTERVAL, schedule, volumes, restart policy
 order: 3
 ---
 
 # Homelab Deployment
 
-> Three containers on the homelab: one crawls on a loop and writes `output/`,
-> one serves `output/` over HTTP, one carries that to `news.dtbao.org` through a
-> Cloudflare Tunnel. A fourth, off by default, updates the first. The site is
-> served from here; only the image comes from GitHub.
+> Two containers on the homelab: one crawls on a loop and writes `output/`, one
+> serves `output/` over HTTP on the LAN. A third, off by default, updates the
+> first. **Nothing in this stack carries the report off the LAN** - where it is
+> reachable from is a decision made outside the project.
 
 ## Topology
 
 ```
-            internet
+       a reader on the LAN
                |
-        Cloudflare edge          TLS terminates here
-               |
+               |  http://<host>:8088          NEWS_RADAR_HTTP_PORT
    +-----------+-------------------------------------------------------------+
-   |           |                                   docker network (homelab)  |
-   |     cloudflared                 outbound-only, no port forwarding        |
-   |           |  http://caddy:8080                                           |
-   |           v                                                              |
+   |           v                                 docker network (homelab)    |
    |   caddy  :8080  ---- reads ---->  output/  <---- writes ---- news-radar  |
    |   serves static files             (volume)                  (crawl loop) |
    |                                                            reads config/ |
    +--------------------------------------------------------------------------+
+                                                       |
+                                    outbound only ---->+---> feeds, Telegram,
+                                                             Discord, GHCR
 ```
 
-Only Caddy is reachable, and only from inside the network. The crawl container
-exposes no port; it talks outward to the news sources, Telegram and Discord, and
-nothing talks in to it. `cloudflared` exposes no port either - it dials the
-Cloudflare edge outbound and the edge answers the public request over that
-connection.
+Caddy's published port is the only way in, and it reaches no further than the
+LAN. The crawl container exposes no port at all; it talks outward to the news
+sources, Telegram and Discord, and nothing talks in to it.
+
+**Putting the report on the internet is deliberately not this project's job.**
+There was a Cloudflare Tunnel here until it was removed - see [[progress]] - and
+what replaced it is nothing. A reverse proxy, a tunnel, a VPN or no access at
+all are all choices to make in front of the published port, and each of them
+would otherwise be a permanent moving part in a stack whose actual job is to
+write HTML into a directory.
 
 ## Services
 
@@ -47,7 +51,6 @@ connection.
 |---------|-------|------|-------|
 | `news-radar` | `ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}`, or built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
 | `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` inside the network; published on the host as `NEWS_RADAR_HTTP_PORT`, default `8088` |
-| `cloudflared` | `cloudflare/cloudflared:2026.8.3` | Carries `news.dtbao.org` to `http://caddy:8080`. Behind the `tunnel` compose profile | none |
 | `watchtower` | `containrrr/watchtower:1.7.1` | Polls GHCR and recreates `news-radar` on a newer `:latest`. Behind the `autoupdate` compose profile | none |
 
 **The crawl service carries both `image:` and `build:`, deliberately.** Compose
@@ -57,28 +60,31 @@ builds. The cost is one footgun: `up -d` before `pull` on a deployment tries to
 build and dies on the absent `Dockerfile`. The gain is one compose file instead
 of two that can disagree, and `tests/test_deploy.py` pins its shape.
 
-**Two profiles, both opt-in, for the same reason.** `tunnel` needs a credentials
-file that is not in the repo; `autoupdate` would, on a development machine, pull
-`:latest` from GHCR straight over the image the developer just built. Production
-turns both on:
+**One profile, opt-in.** `autoupdate` would, on a development machine, pull
+`:latest` from GHCR straight over the image the developer just built, so
+production is the only place it belongs:
 
 ```
-docker compose --profile tunnel --profile autoupdate up -d
+docker compose --profile autoupdate up -d
 ```
+
+`--profile tunnel` still parses and starts nothing extra - the service it named
+is gone - so an old command in somebody's shell history is harmless rather than
+confusing.
 
 **Watchtower touches exactly one container.** `news-radar` is the only service
 labelled `com.centurylinklabs.watchtower.enable`, and `WATCHTOWER_LABEL_ENABLE`
 makes that label the filter - without it watchtower updates every container on
-the host. caddy is `2-alpine` and cloudflared is pinned to an exact version;
-neither should upgrade itself unreviewed, since they are the two things standing
-between the report and the public internet. The `:ro` on its docker socket mount
+the host. caddy is `2-alpine` rather than a digest, and an unreviewed upgrade of
+the one thing serving the report is not something to find out about from a
+changed page. The `:ro` on its docker socket mount
 is **not** a sandbox - a socket is a socket, and every API call still goes
 through; access to it is root on the host. The narrowing is the label and the
 profile.
 
-**The published host port is `NEWS_RADAR_HTTP_PORT`, default `8088`**, and it
-exists only for local debugging: the tunnel talks to `caddy:8080` over the docker
-network and ignores it entirely.
+**The published host port is `NEWS_RADAR_HTTP_PORT`, default `8088`**, and it is
+now the only way to reach the report at all - it used to be described as
+debugging-only, back when a tunnel carried the real traffic.
 
 `8088` was originally forced - ntfy held `127.0.0.1:8080` on this homelab, so
 binding `8080` failed with `port is already allocated` and a probe of
@@ -105,41 +111,11 @@ The store is not part of the report: serving it hands a stranger the whole
 archive in one request. `404` rather than `403`, because there is no reason to
 confirm the file is there. Directory listing is off for the same reason and
 costs nothing - `index.html` already links every snapshot. Both rules are load
-bearing now that P5 has put this on the public internet: verified 2026-09-05
-against the live hostname, `https://news.dtbao.org/news.db` and
-`https://news.dtbao.org/days/` both answer `404` while `/` answers `200`.
-
-### The tunnel
-
-The published hostname is carried by a dedicated Cloudflare Tunnel whose
-connector runs **as a container in this compose project**. Nothing in the
-repository names either the tunnel or the hostname - that is deliberate, and it
-is what lets a second deployment use these files unchanged:
-
-| Piece | Where | Committed |
-|-------|-------|-----------|
-| Ingress: one catch-all -> `http://caddy:8080` | `docker/cloudflared.yml` | yes - it names no deployment |
-| Tunnel id | `NEWS_RADAR_TUNNEL_ID` in `.env`, passed as the argument to `run` | no |
-| Hostname | Cloudflare DNS, put there by `cloudflared tunnel route dns` | no |
-| Connector credentials | `docker/tunnel-credentials.json`, mounted at `/etc/cloudflared/creds.json` | **no** - gitignored |
-| The service itself | `docker/docker-compose.yml`, `profiles: ["tunnel"]` | yes |
-
-**In the stack rather than on the host, for two reasons.** The origin can only
-be the service name `caddy:8080` from inside the docker network - a connector
-running on the host cannot resolve it, and would have to be pointed at the
-published debug port instead. And a host connector is usually already carrying
-other hostnames: this homelab runs one as a Windows service (`win-dev`) for
-`ssh.dtbao.org` and `remote.dtbao.org`, so restarting it to change the news
-route would drop the operator's own remote access.
-
-**Behind a profile**, so `docker compose up -d` starts the crawl loop and the
-web server and nothing else. The credentials file is not in the repo, and
-without the profile a fresh clone would get a container crash-looping on a
-missing bind mount. `scripts/setup.py` adds `--profile tunnel` on its own once
-the file is there - see [[cli-scripts]].
-
-The published host port therefore remains what it always was: local debugging.
-Nothing outside the LAN reaches it.
+bearing whatever fronts the published port: verified 2026-09-05 against the
+public hostname the project had at the time - `/news.db` and `/days/` both
+answered `404` while `/` answered `200`. That hostname is gone with the tunnel,
+but the Caddyfile rules are unchanged and are what a future reverse proxy would
+be relying on.
 
 ## Volumes
 
@@ -155,8 +131,6 @@ its data beside the compose file, on a machine with no git checkout at all.
 | `${NEWS_RADAR_HOME:-..}/output` | `/app/output` | read-write (crawl) / read-only (caddy, as `/srv`) | `index.html`, `news.db`, per-day snapshots |
 | `${NEWS_RADAR_HOME:-..}/backups` | `/app/backups` | read-write | dated copies of the store. Crawl service only - caddy never sees the path |
 | `./Caddyfile` | `/etc/caddy/Caddyfile` | read-only | the static-file config |
-| `./cloudflared.yml` | `/etc/cloudflared/config.yml` | read-only | the tunnel's ingress |
-| `./tunnel-credentials.json` | `/etc/cloudflared/creds.json` | read-only | the connector's credentials |
 | `/var/run/docker.sock` | same | see above | watchtower's only mount |
 
 **The two prefixes are not interchangeable.** `${NEWS_RADAR_HOME:-..}` is the
@@ -201,7 +175,6 @@ nothing outside the process will kill it.
 | `NEWS_RADAR_CONFIG` | compose, default `/app/config/config.yaml` | `config.py` |
 | `NEWS_RADAR_HOME` | `.env`, default `..` | compose only - the three data bind mounts |
 | `NEWS_RADAR_VERSION` | `.env`, default `latest` | compose only - which published image to run |
-| `NEWS_RADAR_TUNNEL_ID` | `.env`, no default | compose only - the argument to `cloudflared tunnel run`. Unset with the `tunnel` profile on means the connector has no tunnel and the site answers Cloudflare `1033` |
 | `NEWS_RADAR_HTTP_PORT` | `.env`, default `8088` | compose only - caddy's host port |
 | `WATCHTOWER_POLL_INTERVAL` | `.env`, default `86400` | compose only - watchtower, when its profile is on |
 
@@ -215,8 +188,8 @@ Python in this project. See [[config-and-env]] for the full key list.
 | What breaks | Symptom | Where it is handled |
 |-------------|---------|---------------------|
 | One source is down or rate-limits | That source contributes nothing this run | `fetch/` isolates per-source failures (P1-5) |
-| Tunnel drops | `news.dtbao.org` unreachable, crawl keeps working | Cloudflare reconnects; `restart: unless-stopped` covers a connector crash; `output/` is still correct on the host and on `NEWS_RADAR_HTTP_PORT` |
-| Credentials file missing or wrong | `cloudflared` crash-loops, the site answers Cloudflare error `1033` | `docker compose ps` shows it restarting; the profile keeps a checkout without the file from ever starting it |
+| Whatever fronts the published port breaks | The report is unreachable from wherever the reader is, crawl keeps working | **Not handled here, on purpose** - there is nothing in this stack between Caddy and the reader. `output/` stays correct on disk and on `NEWS_RADAR_HTTP_PORT`, and `ops.site_url` pointed at `http://caddy:8080/` still passes, because from inside the network nothing is wrong |
+| Caddy stops serving | The report is unreachable and the crawl cannot tell | `ops.site_url: http://caddy:8080/` fetches it every cycle, so a dead web server withholds the heartbeat ping and counts as a failed cycle |
 | Disk fills with snapshots | Writes fail | Retention window (P3-5, P6) |
 | Crawl crashes on a bad item | Container exits | `restart: unless-stopped` plus a heartbeat so a crash loop is visible (P6-1) |
 | Clock skew | Freshness ranking goes wrong | `TZ` pinned in the container, not inherited from the host |

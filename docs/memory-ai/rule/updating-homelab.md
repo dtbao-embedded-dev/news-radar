@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-07
 source: docker/docker-compose.yml, docker/.env.example, .github/workflows/image.yml, src/news_radar/__main__.py, src/news_radar/ops.py
 confidence: confirmed
-keywords: updating, upgrade, docker compose pull, watchtower, autoupdate profile, auto-update, NEWS_RADAR_VERSION, NEWS_RADAR_TUNNEL_ID, freeze, rollback, pin version, ghcr private, package visibility, --check, config drift, migrating, migration, git checkout, ops.heartbeat_url, dead-man's switch
+keywords: updating, upgrade, docker compose pull, watchtower, autoupdate profile, auto-update, NEWS_RADAR_VERSION, freeze, rollback, pin version, ghcr private, package visibility, --check, config drift, migrating, migration, git checkout, tunnel removal, ops.heartbeat_url, dead-man's switch
 order: 3
 ---
 
@@ -23,7 +23,7 @@ order: 3
 
 ```
 docker compose pull
-docker compose --profile tunnel --profile autoupdate up -d
+docker compose --profile autoupdate up -d
 docker compose run --rm news-radar --check
 ```
 
@@ -31,7 +31,7 @@ docker compose run --rm news-radar --check
 GHCR every `WATCHTOWER_POLL_INTERVAL` seconds (86400 by default), pulls a newer
 `:latest`, and recreates the crawl container. It touches only that one - it is
 the only service carrying `com.centurylinklabs.watchtower.enable`, because caddy
-and cloudflared are version-pinned and should not upgrade themselves unreviewed.
+is the one thing serving the report and should not upgrade itself unreviewed.
 
 **Freezing a version is one change.** Set `NEWS_RADAR_VERSION=<version>` in
 `.env` and `up -d`. Watchtower polls the tag the running container was created
@@ -66,7 +66,7 @@ there is no config migration and is not going to be one.
 | `src/`, `VERSION` | replaced - they are inside the image |
 | `config/config.yaml`, `config/frequency_words.txt`, `.env` | **never touched** - they are yours, and nothing in an update writes to them |
 | `output/news.db`, `output/days/`, `backups/` | **never touched** - bind mounts, re-attached to the new container as they were |
-| `docker-compose.yml`, `Caddyfile`, `cloudflared.yml` | **not updated either** - they came from a release by hand. Re-fetch them when a release says to |
+| `docker-compose.yml`, `Caddyfile` | **not updated either** - they came from a release by hand. Re-fetch them when a release says to |
 
 The last row is the one to remember: a pull updates the code, never the compose
 file that runs it. A release that changes the stack's shape says so in
@@ -96,29 +96,33 @@ after it is tidying.
 cd ~/news-radar
 docker compose -f docker/docker-compose.yml --profile tunnel down
 
-# The tunnel id used to live in docker/cloudflared.yml, which this migration
-# replaces. Read it out before losing it - or from `cloudflared tunnel list`.
-grep '^tunnel:' docker/cloudflared.yml
-
 rm -rf .git .github
 BASE=https://raw.githubusercontent.com/dtbao-embedded-dev/news-radar/v<version>
 curl -fsSL "$BASE/docker/docker-compose.yml" -o docker/docker-compose.yml
-curl -fsSL "$BASE/docker/cloudflared.yml"    -o docker/cloudflared.yml
 
-# The one line this migration cannot skip - see below.
-echo 'NEWS_RADAR_TUNNEL_ID=<the id printed above>' >> docker/.env
+# The tunnel is gone from the stack. Nothing reads these any more, and the
+# credentials file is the one piece of it that was a secret.
+rm -f docker/cloudflared.yml docker/tunnel-credentials.json
 
 docker compose -f docker/docker-compose.yml pull
-docker compose -f docker/docker-compose.yml --profile tunnel --profile autoupdate up -d
+docker compose -f docker/docker-compose.yml --profile autoupdate up -d
 docker compose -f docker/docker-compose.yml run --rm news-radar --check
 ```
 
-**`NEWS_RADAR_TUNNEL_ID` is the step this migration cannot skip.** The new
-`docker/cloudflared.yml` names no tunnel - the id is the argument to `run` now,
-read from `.env` - so a deployment that does not set it starts a connector with
-no tunnel, and the site answers Cloudflare `1033` while every other log line
-looks healthy. `cloudflared` cannot read it from an environment variable inside
-its own config, which is why it is not simply a `${...}` in that file.
+**The public hostname stops answering, and that is the intended outcome.** This
+release removes the tunnel: the report is served on
+`http://<host>:NEWS_RADAR_HTTP_PORT` and nowhere else. Two loose ends the
+commands above do not tidy for you:
+
+- **the Cloudflare DNS record and the tunnel itself still exist** on the
+  Cloudflare account, now pointing at a connector that will never run again.
+  `cloudflared tunnel delete <name>` and removing the DNS record are account
+  operations, outside this repository - but leaving them means the hostname
+  answers Cloudflare `1033` forever rather than `NXDOMAIN`;
+- **`ops.site_url` in `config/config.yaml` may still be the public URL.** Point
+  it at `http://caddy:8080/`, which resolves over the compose network. Left as
+  the public name it would fetch a hostname nothing serves, fail every cycle,
+  and withhold the heartbeat ping for a problem that is not this stack's.
 
 `NEWS_RADAR_HOME` stays **unset** here: the compose file sits in `docker/`, the
 default `..` is `~/news-radar`, and that is already where `config/`, `output/`
@@ -129,13 +133,13 @@ and `scripts/` from looking like something anyone should run.
 
 ```
 cd ~/news-radar
-docker compose -f docker/docker-compose.yml --profile tunnel --profile autoupdate down
-mv docker/.env docker/Caddyfile docker/cloudflared.yml docker/tunnel-credentials.json .
+docker compose -f docker/docker-compose.yml --profile autoupdate down
+mv docker/.env docker/Caddyfile .
 mv docker/docker-compose.yml .
 printf '\nNEWS_RADAR_HOME=.\n' >> .env
 rm -rf docker src scripts tests docs Dockerfile requirements.txt VERSION \
        README.md CHANGELOG.md CLAUDE.md LICENSE .gitignore
-docker compose --profile tunnel --profile autoupdate up -d
+docker compose --profile autoupdate up -d
 ```
 
 `ls` before the `rm -rf` and confirm `config`, `output` and `backups` are not in

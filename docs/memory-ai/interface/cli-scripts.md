@@ -3,7 +3,7 @@ title: Script CLIs - setup.py and release.py
 category: interface
 purpose: The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees.
 status: active
-updated: 2026-09-06
+updated: 2026-09-07
 source: scripts/setup.py, scripts/release.py
 confidence: confirmed
 keywords: setup.py, release.py, checkout only, missing_config_keys, template_keys, config drift, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI
@@ -60,10 +60,10 @@ Steps, in order:
    and the one nothing offered before v0.2.3, which is how `report.mode` stayed
    `incremental` through a release that had moved on.
 7. `docker compose -f docker/docker-compose.yml up -d`, with docker's own output
-   inherited rather than captured. `--profile tunnel` is inserted before `up`
-   when `docker/tunnel-credentials.json` exists, so the `cloudflared` service
-   starts on a machine that publishes `news.dtbao.org` and stays out of the way
-   on one that does not. While no `Dockerfile` is present in the
+   inherited rather than captured. **No compose profile is ever added** - it
+   used to insert `--profile tunnel` when a credentials file was present, and
+   both the tunnel and that detection are gone; `autoupdate` is production's
+   decision to make by hand. While no `Dockerfile` is present in the
    checkout the crawl service cannot build, so only `caddy` is named; the
    narrowing lifts by itself once the file exists.
 8. Print the URL the page is served on, taking `NEWS_RADAR_HTTP_PORT` from

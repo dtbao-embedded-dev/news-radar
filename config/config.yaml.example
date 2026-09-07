@@ -7,7 +7,12 @@ app:
   timezone: Asia/Ho_Chi_Minh
 
 schedule:
-  interval_minutes: 30
+  # 10 is what ships; the code default is 30, so a config that never mentions
+  # this key keeps the half-hour it already had. One cycle costs 35-57s for the
+  # 22 requests the shipped feed list makes, so ten minutes still leaves the
+  # process idle most of the time - but it is three times the traffic at Google
+  # News and HN Algolia, and those are the two that throttle first.
+  interval_minutes: 10
   run_on_start: true
 
 # Fixed feeds: fetched whole every run, then matched locally.

@@ -367,6 +367,14 @@ if example.is_file():
     # because it ships the summary off. That is the check, not the value.
     check("the template ships the summary off, so it needs no API key",
           shipped.get("ai.enabled") is False, repr(shipped.get("ai.enabled")))
+    # Same shape again: the code default stays at the half-hour an upgrade
+    # inherits, because an absent `schedule` section must never triple a
+    # running deployment's request rate on its own. Ten minutes is the value
+    # somebody chose, so it lives in the template - checked above at
+    # "a key absent from the file takes the documented default".
+    check("the shipped template polls every 10 minutes",
+          shipped.get("schedule.interval_minutes") == 10,
+          repr(shipped.get("schedule.interval_minutes")))
 else:
     FAILURES.append("config/config.yaml.example is missing from the checkout")
 

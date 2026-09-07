@@ -48,7 +48,7 @@ news-radar/
 │   ├── filter.py               # DONE - global filter + match against groups
 │   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
 │   ├── store.py                # DONE - SQLite persistence, seen-set, retention, backup
-│   ├── render.py               # DONE - output/index.html + days/<date>.html
+│   ├── render.py               # DONE - write() + remove(); index.html + days/<date>.html
 │   ├── ops.py                  # DONE - P6: heartbeat, Health, ALERT_AFTER
 │   ├── summarize.py            # DONE - P6-4: per-topic AI summary, OpenAI wire format
 │   └── notify/                 # DONE - P4

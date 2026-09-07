@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-07
 source: src/news_radar/__main__.py, src/news_radar/ops.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile
 confidence: confirmed
-keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --check, --config, --debug, config drift, config-templates, missing_keys, template_path, entrypoint, schedule loop, SIGTERM, exit codes, crawl
+keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --check, --config, --debug, config drift, config-templates, missing_keys, template_path, entrypoint, schedule loop, SIGTERM, exit codes, crawl, report.html, render.remove, site_check_url
 order: 4
 ---
 
@@ -164,6 +164,36 @@ what a total would hide, and the page makes the same promise for the same reason
 shortlist; `90 story(ies) today` is what the store holds for the whole local day.
 The page is rendered from the store, never from the run in memory - that is what
 makes a restart at noon still publish what the morning found.
+
+**With `report.html` off, the cycle unpublishes instead of rendering.**
+`_publish()` branches three ways: the page off calls `render.remove()`, groups
+present calls `render.write()`, and no groups leaves the page alone. Off is not
+"skip the write" - the last page this ever wrote would otherwise sit on the web
+server forever, dated and wrong, and a reader cannot tell a frozen report from a
+working one. Only `index.html` and `days/*.html` are unlinked; `news.db` shares
+that directory and is never touched, a `days/` holding anything else keeps both
+the file and the directory, and a cycle that finds nothing to remove logs
+nothing - at ten-minute intervals that line would appear 144 times a day. The
+summaries are still written, because they belong to the messages as much as to
+the page, and the closing count says so honestly:
+
+```
+INFO  the HTML report is off: removed 2 published file(s) from /app/output
+INFO  stored 2 match row(s) as run 20260907T063802Z; 2 story(ies) across
+      1 group(s) today, published nowhere - report.html is off
+```
+
+**And the site check goes with it.** `crawl()` reads `cfg.site_check_url()`
+rather than `ops.site_url` directly: with the page off it is `""`, so nothing is
+GET, and the one line saying so is printed only when a url was actually
+configured. Left running, that check would 404 every cycle - which withholds the
+ping *and* counts as a failed cycle, so `ops.Health` would alert after two of
+them about a radar that is working perfectly.
+
+```
+INFO  heartbeat: site check skipped, the HTML report is off
+INFO  heartbeat: pinged
+```
 
 **An unusable keyword file costs the search feeds, not the run.** The fixed
 feeds do not need it, so `crawl()` logs the `KeywordError` on one line and

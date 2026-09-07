@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-07
 source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py
 confidence: confirmed
-keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
+keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER
 order: 1
 ---
 
@@ -22,7 +22,7 @@ Loaded from `NEWS_RADAR_CONFIG`, default `config/config.yaml`. Any key omitted
 falls back to the default below.
 
 **The Default column is `config.py`'s `DEFAULTS`, not what the template ships**,
-and the two disagree on purpose in five places (marked inline). A default is what
+and the two disagree on purpose in seven places (marked inline). A default is what
 an *absent* key falls back to, so it has to be the harmless value: an upgrade
 that never mentioned `storage.retention_days` must not start deleting rows, and a
 clone with no `feeds` should fail the "nothing to hunt" gate rather than silently
@@ -32,7 +32,7 @@ someone chose it.
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `app.timezone` | str | `Asia/Ho_Chi_Minh` | Timezone used when rendering timestamps; storage stays UTC |
-| `schedule.interval_minutes` | int | `30` | Sleep between crawls in the in-process loop |
+| `schedule.interval_minutes` | int | `30` *(template ships `10`)* | Sleep between crawls in the in-process loop. The default stays at the half-hour an upgrade inherits - an absent `schedule` section must not triple a running deployment's request rate. A cycle costs 35-57 s for the shipped 22 requests, so ten minutes still leaves the process idle most of the interval; what it does change is the traffic at the two hosts that throttle first, Google News and HN Algolia |
 | `schedule.run_on_start` | bool | `true` | Crawl immediately on container start instead of waiting one interval |
 | `feeds[]` | list | `[]` *(template ships 8)* | Fixed feeds - see [[news-sources]] |
 | `feeds[].id` | str | - | Stable id; used in `sources`, in the report, and as the `reported` key |
@@ -50,6 +50,7 @@ someone chose it.
 | `report.mode` | str | `incremental` **(template ships `daily`)** | `incremental` (this run's new matches), `current` (this run's whole shortlist, every cycle), `daily` (the whole local day minus what the channel already got). The template ships `daily` because it reads the same window the page renders, so a phone and the page agree on which stories exist - and a story missed by one refused cycle is offered again instead of lost |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
 | `report.rank_threshold` | int | `5` | The first N of each group are highlighted on the page |
+| `report.html` | bool | `true` **(template ships `false`)** | The HTML report. `false` does not merely stop writing the page: the next cycle **deletes** `<data_dir>/index.html` and `<data_dir>/days/*.html`, so the web server has nothing left to serve - a frozen page reads as "no news" rather than "the page is off". `news.db`, the backups and any non-page file in `days/` are never touched, and `ops.site_url` stops being checked. The default is the disagreement with teeth: `true` is the only value an absent key can safely mean, because the alternative would have an upgrade delete a deployment's published page for saying nothing |
 | `rank.weight_source` | float | `0.5` | Weight of the source term |
 | `rank.weight_frequency` | float | `0.3` | Weight of the cross-source frequency term |
 | `rank.weight_freshness` | float | `0.2` | Weight of the freshness term |
@@ -57,7 +58,7 @@ someone chose it.
 | `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
 | `storage.retention_days` | int | `0` **(template ships `90`)** | `0` = keep everything; otherwise prune rows and day files past the window. The default and the template disagree on purpose - an absent key must never make an upgrade start deleting, while a fresh install should have a ceiling |
 | `ops.heartbeat_url` | str | `""` | Dead-man's switch pinged after every clean cycle (healthchecks.io / Uptime Kuma push). `""` = no ping |
-| `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. **Point it at `http://caddy:8080/`**, which resolves over the compose network: it then tests the web server this stack is responsible for. A public URL here turns somebody else's outage into a failed cycle. `""` = no check |
+| `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. **Point it at `http://caddy:8080/`**, which resolves over the compose network: it then tests the web server this stack is responsible for. A public URL here turns somebody else's outage into a failed cycle. `""` = no check. **Ignored entirely when `report.html` is `false`** - `Config.site_check_url()` returns `""` there, because a 404 on a page nobody publishes would withhold the ping and alert after two cycles. The value in the file is left as written, so turning the page back on restores the check |
 | `ops.backup_dir` | str | `backups` | Where the daily store backup is written. **Never under `storage.data_dir`** - that directory is served to the public web |
 | `ops.backup_keep` | int | `7` | Newest N backups kept; `0` = back nothing up |
 | `ai.enabled` | bool | `false` | The AI summary - one sentence under each story, on the page and in the message. Off is the shipped case: a config that says nothing about `ai` never reaches the network and never sees a bill |

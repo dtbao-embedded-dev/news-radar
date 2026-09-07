@@ -87,12 +87,13 @@ def parse(body, fmt, source_id, keyword_group=None, fetched_at=None):
         raw = _feed_entries(body, source_id)
 
     items = []
-    for title, url, external_id, published_at in raw:
+    for title, url, external_id, published_at, excerpt in raw:
         try:
             items.append(new_item(
                 title=title, url=url, source_id=source_id,
                 external_id=external_id, published_at=published_at,
-                keyword_group=keyword_group, fetched_at=fetched_at))
+                keyword_group=keyword_group, fetched_at=fetched_at,
+                excerpt=excerpt))
         except ValueError:
             # No title: nothing to display and nothing to match on. Counted in
             # debug rather than silently vanishing, so a feed that suddenly
@@ -114,7 +115,27 @@ def _feed_entries(body, source_id):
             url,
             entry.get("id") or entry.get("guid") or "",
             _utc(entry.get("published_parsed") or entry.get("updated_parsed")),
+            _entry_excerpt(entry),
         )
+
+
+def _entry_excerpt(entry):
+    """The entry's own description, as markup. `new_item()` strips and caps it.
+
+    feedparser normalises RSS `<description>`, Atom `<summary>` and Atom
+    `<content>` onto two attributes, and they disagree about which carries the
+    real text: a full-text Atom feed puts the article in `content` and a one-
+    line teaser in `summary`, while most RSS feeds have only `summary`. Longest
+    wins rather than first, because the summary a model is written from should
+    be the fullest text the feed handed over.
+
+    A feed that carries neither yields `""`, which is the normal case for
+    Reddit-style link posts - and the reason nothing downstream may require it.
+    """
+    texts = [entry.get("summary") or ""]
+    for block in entry.get("content") or ():
+        texts.append((block or {}).get("value") or "")
+    return max(texts, key=len)
 
 
 def _algolia_entries(body, source_id):
@@ -134,6 +155,9 @@ def _algolia_entries(body, source_id):
             hit.get("url") or (HN_ITEM_URL.format(object_id) if object_id else ""),
             object_id,
             _iso_utc(hit.get("created_at")),
+            # Only Ask HN / Show HN posts carry one; a plain link submission has
+            # nothing but its title, which is the honest empty case.
+            hit.get("story_text") or "",
         )
 
 

@@ -38,17 +38,28 @@ def _e(text):
 
 
 def _line(row, tz):
-    """One story: a bullet, the linked title, and when it was published.
+    """One story: the linked title, the AI sentence under it, then the time.
 
-    The same two things the page shows, in the same order. The source ids used
-    to sit where the time is now; they left the page in v0.2.1 and left the
-    message with it, because a reader comparing the two should be comparing one
-    report with itself.
+    The same three things the page shows, in the same order, because a reader
+    comparing the two should be comparing one report with itself. The source
+    ids used to sit where the time is; they left the page in v0.2.1 and left
+    the message with it.
+
+    A story with no summary collapses back to the **one-line** shape this
+    channel had before, time and all on the title's line - which is every story
+    when `ai.enabled` is false. The time only moves to its own line when there
+    is a sentence between them to move it, because a bare title and a bare
+    timestamp on two lines is a taller message saying exactly as much.
     """
-    return '• <a href="{url}">{title}</a> <i>{when}</i>'.format(
+    head = '• <a href="{url}">{title}</a>'.format(
         url=_e(row.get("url") or row.get("canonical_url") or "#"),
-        title=_e(clip(row.get("title"))),
-        when=_e(stamp(row.get("published_at"), tz)))
+        title=_e(clip(row.get("title"))))
+    when = "<i>{}</i>".format(_e(stamp(row.get("published_at"), tz)))
+
+    gist = (row.get("ai_summary") or "").strip()
+    if not gist:
+        return "{} {}".format(head, when)
+    return '{}\n<i>“{}”</i>\n{}'.format(head, _e(gist), when)
 
 
 def build(groups, tz=UTC, limit=LIMIT):

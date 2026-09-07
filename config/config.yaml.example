@@ -141,11 +141,18 @@ search_templates:
   # answers relevance-first: without a window it returns hits aged months,
   # which score 0 for freshness and leave the group ordered by source weight
   # alone. Widen it and the page goes stale, not fuller.
+  # Disabled since the keyword file grew to eleven groups. It answers in
+  # Vietnamese, and the Vietnamese press writes about one of those groups: over
+  # the six shipped groups it returned 53 usable stories and 49 of them were the
+  # AI group, 0 for ESP32, RTOS and GitHub Trending. At eleven groups that is
+  # eleven requests a cycle - every ten minutes, at the one host already known
+  # to throttle - for coverage the five new model groups more than replace.
+  # `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news.
   - id: google_news
     name: Google News (vi)
     url: "https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi"
     format: rss
-    enabled: true
+    enabled: false
     rank_weight: 0.8
   # The same engine in English, and it is not a duplicate: the locale decides
   # which press is searched at all. Measured on 2026-09-05 over the six shipped

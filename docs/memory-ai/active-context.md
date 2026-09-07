@@ -9,16 +9,31 @@ updated: 2026-09-07
 
 ## Current focus
 
-**Shipping as an image, with the deployment's data out of reach (2026-09-06,
-unreleased on `release/v0.2`).** The previous work made an upgrade *checkable*;
-this makes the failure it checks for unreachable. Production stops being a git
-checkout, so the machine holding `config/`, `output/` and `backups/` has no
-command that can delete them. Five changes: `${NEWS_RADAR_HOME:-..}` on every
-bind mount including caddy's `/srv`, a GHCR image reference beside the kept
-`build:`, `.github/workflows/image.yml` publishing on a `v*` tag, a `watchtower`
-service behind an opt-in `autoupdate` profile scoped by label to the crawl
-container alone, and `python -m news_radar --check` carrying the config-drift
-check into the image where `scripts/setup.py` no longer exists.
+**The summary moved from the topic to the story (2026-09-07, unreleased on
+`release/v0.2`).** The day used to be described twice: a paragraph per keyword
+group at the top of the page, the same paragraphs as one message a local day,
+and then the list of links the reader was going to read anyway. It is now one
+sentence under each story, in the same position on the page and in both
+channels, and there is no separate summary message at all.
+
+Six changes, all unreleased: `NewsItem.excerpt` carries the feed's own
+`<description>` (parsed in `feeds.py`, thrown away until now); `items.excerpt`
+and `items.ai_summary` are schema **version 2**, with the project's first real
+migration in `open_db()`; `summarize.py` asks about a numbered batch of stories
+and parses the numbers back; `store.unsummarised()` / `save_summaries()` make it
+once per story rather than once per cycle; `render._summary()` and
+`section.summary` are gone, replaced by `p.gist` inside each `li.story`; and
+`ai.max_per_run` replaced `ai.max_per_topic` and `ai.notify_at_hour`.
+
+**The cost shape is the point.** One completion per cycle, capped at
+`ai.max_per_run` new stories, and never re-asked - verified on a three-story
+smoke run with the cap at 2: one completion, then one, then zero.
+
+**What is not yet known:** whether a free model writes a *useful* Vietnamese
+sentence from a headline plus a feed teaser. The per-topic version was judged on
+a real run against OpenRouter; this one has only been run against a stub. The
+first homelab cycle after deploy is the evidence. Also unmeasured: how many more
+messages three-line stories make on Discord's 1900-character budget.
 
 **The tunnel is gone (2026-09-07).** The `cloudflared` service,
 `docker/cloudflared.yml`, `NEWS_RADAR_TUNNEL_ID` and the credentials-file

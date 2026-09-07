@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-06
 source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py
 confidence: confirmed
-keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle
+keywords: NewsItem, dedup key, canonical url, excerpt, EXCERPT_MAX, ai_summary, gist, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle
 order: 2
 ---
 
@@ -31,10 +31,13 @@ mutating the item.
 | `published_at` | datetime \| None | no | Source timestamp, converted to UTC. `None` means the source gave none - never substitute "now" |
 | `fetched_at` | datetime | yes | When this run retrieved it, UTC |
 | `keyword_group` | str \| None | no | For a search-feed item: the group whose term produced the query |
+| `excerpt` | str | no | The feed's own `<description>` / Atom `summary` or `content` (longest wins), HTML stripped and cut to `EXCERPT_MAX` (600). `""` when the source carried none. What the AI summary is written from - see [[ai-summary]] |
 
 Invariants:
 
 - `title` is never empty; an item without a title is dropped at parse time.
+- `excerpt` is never `None` and never markup; an empty one is never a reason
+  to drop a story, and it is not part of the dedup key.
 - `canonical_url` is stable across runs for the same story, or dedup silently stops working.
 - All datetimes are timezone-aware UTC in memory and stored as UTC in SQLite.
   Local time (`TZ`, default `Asia/Ho_Chi_Minh`) is applied only at render time.
@@ -152,7 +155,7 @@ the optional AI summary, then one `<section class="group">` per label in order.
 | `#theme` | the light/dark toggle, remembered in `localStorage` under `news-radar-theme` |
 | `nav.jump` | one link per group to `#g-<slug>`, with its count; an empty group is dimmed, never dropped |
 | `nav.days` | one link per snapshot on disk, newest first, today's included |
-| `li.story` | **the title, and the timestamp only** - two grid cells on one baseline; the title is `target="_blank"` + `rel="noopener noreferrer"` |
+| `li.story` | the title and the timestamp on one baseline (two grid cells), and - when the story has one - `p.gist`, the AI sentence, on a second row spanning both columns. The title is `target="_blank"` + `rel="noopener noreferrer"` |
 
 **Story links open in a new tab, internal links do not.** A story leads off this
 site and the report is what the reader came back to, so `li.story a` carries

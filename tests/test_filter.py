@@ -175,6 +175,7 @@ if SHIPPED.is_file():
     sgroups, sfilter = keywords.parse(SHIPPED)
     picked = mod.select([
         item("ESP32-C6 gets Zephyr support"),
+        item("Anthropic ships Claude Opus 4.5 with a longer context"),
         item("Google races ahead in AI, technology chief says"),
         item("Show HN: Argus, open-source AI agents for testing web apps"),
         item("He said the chain of failures was detailed in an email"),
@@ -182,8 +183,14 @@ if SHIPPED.is_file():
         item("Ranked: the best coffee in Hanoi"),
     ], sgroups, sfilter)
     titles = {i.title: labels for i, labels in picked}
-    eq("the shipped file picks up the ESP32 story in two groups",
-       titles.get("ESP32-C6 gets Zephyr support"), ["ESP32", "RTOS"])
+    eq("the shipped file picks up the ESP32 story",
+       titles.get("ESP32-C6 gets Zephyr support"), ["ESP32"])
+    # A model story matches its own group and the AI group. The order matters
+    # beyond the page: `notify.pick()` sends it once, under the first label
+    # here, so "Claude" has to come before "AI" in the keyword file.
+    eq("a model story is claimed by its own group before the AI group",
+       titles.get("Anthropic ships Claude Opus 4.5 with a longer context"),
+       ["Claude", "AI"])
     eq("the shipped AI group catches a bare AI token",
        titles.get("Google races ahead in AI, technology chief says"), ["AI"])
     eq("an open-source AI project lands in both AI groups",
@@ -201,6 +208,64 @@ if SHIPPED.is_file():
 else:
     FAILURES.append(
         "config/frequency_words.txt.example is missing from the checkout")
+
+
+# --- excerpt matching: opt-in, per source ---------------------------------
+#
+# The GitHub trending feed titles an entry `owner/repo` and puts the whole
+# description in the excerpt, so title-only matching lets 1 of 18 through.
+# Measured 2026-09-07 across 12 live sources: reading the excerpt for
+# *everything* would have added 42% more matches, and the extras were noise -
+# `An Alien Mind` from Hacker News, `Kernel prepatch 7.3-rc2` from LWN. So the
+# widening is per source, and off unless a source asks for it.
+
+EX_GROUPS, EX_GLOBAL = parse("""ESP32
+@10
+=> ESP32
+
+[GLOBAL_FILTER]
+!giveaway
+""")
+
+
+def ex_item(title, excerpt, source_id="hn"):
+    COUNTER[0] += 1
+    return new_item(title, "https://example.com/e{}".format(COUNTER[0]),
+                    source_id, NOW, excerpt=excerpt)
+
+
+buried = ex_item("owner/some-repo", "A tiny ESP32 bootloader written in Rust.")
+
+check("a keyword only in the excerpt does not match by default",
+      not mod.group_matches(buried, EX_GROUPS[0]))
+check("...and does match when the source asked for it",
+      mod.group_matches(buried, EX_GROUPS[0], excerpt=True))
+check("a keyword in the title still matches with excerpt on",
+      mod.group_matches(ex_item("ESP32-S3 released", "no keyword here"),
+                        EX_GROUPS[0], excerpt=True))
+check("an item with no excerpt at all is unaffected",
+      mod.group_matches(ex_item("ESP32 devkit", None), EX_GROUPS[0], excerpt=True))
+
+# The exclusion half has to widen with it, or noise let in through the excerpt
+# could not be filtered back out by the mechanism built for exactly that.
+sneaky = ex_item("owner/free-stuff", "Win an ESP32 in our giveaway!")
+check("a global term buried in the excerpt does not block by default",
+      not mod.blocked(sneaky, EX_GLOBAL))
+check("...and does block when the source asked for it",
+      mod.blocked(sneaky, EX_GLOBAL, excerpt=True))
+
+# select() is where the two meet: one batch, two sources, one opted in.
+mixed = [ex_item("owner/repo-a", "An ESP32 project.", source_id="gh_trending"),
+         ex_item("owner/repo-b", "An ESP32 project.", source_id="hn")]
+eq("select widens only the sources named, not the whole batch",
+   [i.source_id for i, _ in mod.select(mixed, EX_GROUPS, EX_GLOBAL,
+                                       ("gh_trending",))],
+   ["gh_trending"])
+eq("select with no excerpt_sources is the behaviour that shipped",
+   mod.select(mixed, EX_GROUPS, EX_GLOBAL), [])
+eq("a global term in the excerpt drops the opted-in item in select too",
+   mod.select([ex_item("owner/free", "Win an ESP32 giveaway", "gh_trending")],
+              EX_GROUPS, EX_GLOBAL, ("gh_trending",)), [])
 
 
 # --------------------------------------------------------------------------

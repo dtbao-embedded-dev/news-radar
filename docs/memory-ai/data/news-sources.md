@@ -3,10 +3,10 @@ title: News Sources and Search Paths
 category: data
 purpose: Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns.
 status: active
-updated: 2026-09-05
+updated: 2026-09-07
 source: config/config.yaml.example, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py
 confidence: confirmed
-keywords: sources, feeds, RSS, Atom, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent
+keywords: sources, feeds, RSS, Atom, match_excerpt, gh_trending, openai, huggingface, esp_idf_releases, cnx_esp32, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent
 order: 1
 ---
 
@@ -32,6 +32,11 @@ one is a config edit, never a code edit.
 | `vnexpress_sohoa` | VnExpress So hoa | `https://vnexpress.net/rss/so-hoa.rss` | RSS 2.0 | vi | Description carries an `<img>` tag - strip HTML before matching |
 | `genk` | GenK | `https://genk.vn/rss/home.rss` | RSS 2.0 | vi | Mixed tech and consumer news |
 | `tinhte` | Tinh te | `https://tinhte.vn/rss` | RSS 2.0 | vi | Forum-flavoured; heavier duplicate rate than the others |
+| `gh_trending` | GitHub Trending | `https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml` | RSS 2.0 | en | Third-party mirror - GitHub publishes no trending feed. **The only source with `match_excerpt: true`**: every entry is titled `owner/repo` and the description is the only matchable text (1 of 18 matched on the title, 10 with the excerpt). Carries **no dates at all**, so its freshness term is always 0 and `rank_weight` is its whole score. Its own `GitHub Trending` keyword group is what keeps it out of the AI group's way |
+| `openai` | OpenAI News | `https://openai.com/news/rss.xml` | RSS 2.0 | en | The full archive, ~1,170 entries every fetch, ~700 kB. A primary source: weighted 1.0 |
+| `huggingface` | Hugging Face Blog | `https://huggingface.co/blog/feed.xml` | RSS 2.0 | en | ~860 entries every fetch. **Carries no descriptions at all**, so `match_excerpt` would be inert here even if set |
+| `esp_idf_releases` | ESP-IDF Releases | `https://github.com/espressif/esp-idf/releases.atom` | Atom | en | Always the same ten releases, old point releases included, and none of them ages out. At a 12 h half-life anything older than ~2 days scores 0 for freshness, so all ten score identically - weight 1.0 put ten of them in the ESP32 group's twelve slots. Weighted 0.8, only a genuinely fresh release clears the cut, which is the wanted behaviour and means the source shows nothing on a quiet week |
+| `cnx_esp32` | CNX Software (ESP32) | `https://www.cnx-software.com/tag/esp32/feed/` | RSS 2.0 | en | Already narrowed by the source's own tag: 27 of 32 entries matched a shipped group on 2026-09-07 |
 
 Each entry in `config.yaml` carries an `id`, a `name`, a `url`, `enabled`, and an
 optional `rank_weight` (default `1.0`) that feeds the ranking in
@@ -45,8 +50,8 @@ group with three templates enabled produces three requests per run.
 
 | id | Template | Returns | Substitution |
 |----|----------|---------|--------------|
-| `google_news` | `https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:7d` is not optional - without it the engine answers relevance-first and returns hits aged months |
-| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. Both are kept so Vietnamese AI coverage stays on the page |
+| `google_news` | `https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | **Ships disabled since the keyword file reached eleven groups** - see the row below. `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:7d` is not optional - without it the engine answers relevance-first and returns hits aged months |
+| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. A template costs one request **per keyword group**, so at eleven groups `hl=vi` would spend eleven requests a cycle at the host most likely to throttle, for coverage the five model groups replace - it is switched off, and `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news |
 | `hn_algolia` | `https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story&typoTolerance=false` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID`. `search_by_date` orders chronologically, so the window needs no epoch computing; `tags=story` drops comment hits, whose title is not a headline. **`typoTolerance=false` is required, not cosmetic**: with it on, Algolia matches 41,612 stories for `RTOS` and `FreeToken` for `FreeRTOS`, and a date sort then returns the most recent of that noise - `RTOS` yielded 0 usable of 20. Off, it is strictly better on every shipped group: 97 usable a cycle instead of 77 |
 | `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement, and the same resolver requirement |
 

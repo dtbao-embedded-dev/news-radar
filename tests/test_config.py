@@ -75,6 +75,10 @@ check("an absent report.html still publishes the page",
       cfg.get("report.html") is True, repr(cfg.get("report.html")))
 check("a nested default survives when a sibling is overridden",
       cfg.get("rank.weight_freshness") == 0.2)
+# 0 means no age cut at all. An upgrade that never mentioned `rank` must not
+# start dropping stories it was reporting yesterday.
+check("an absent rank.max_age_days keeps every story",
+      cfg.get("rank.max_age_days") == 0, repr(cfg.get("rank.max_age_days")))
 check("dotted lookup of a missing key returns the fallback",
       cfg.get("nope.not.here", "fallback") == "fallback")
 check("the file's own value wins over the default",
@@ -405,6 +409,36 @@ if example.is_file():
     # publishes.
     check("the template ships the HTML report off",
           shipped.get("report.html") is False, repr(shipped.get("report.html")))
+    # Per-source excerpt matching is off unless a feed asks. The template must
+    # not quietly widen matching for a source that did not ask - see
+    # filter._haystack() for the 42% of noise that would follow.
+    check("the template ships the full source list",
+          len(shipped.get("feeds") or []) == 13,
+          "{} feed(s)".format(len(shipped.get("feeds") or [])))
+    # Kept in the list and switched off, so the reason travels with it: GenK
+    # ships no pubDate, which caps it at 0.5 x 0.6 = 0.30 against a lowest
+    # measured group cut of 0.40. Deleting the entry would lose the comment
+    # explaining why, and someone would add the feed back next year.
+    # The eighth deliberate disagreement: the code default keeps everything,
+    # the template chooses a fortnight. A radar reporting a three-year-old blog
+    # post is what this number exists to stop.
+    check("the shipped template cuts stories older than a fortnight",
+          shipped.get("rank.max_age_days") == 14,
+          repr(shipped.get("rank.max_age_days")))
+    check("genk ships disabled - it dates nothing, so it can never place",
+          [f.get("enabled") for f in shipped.get("feeds") or []
+           if f.get("id") == "genk"] == [False])
+    check("gh_trending is the one feed that reads its excerpt",
+          [f.get("id") for f in shipped.get("feeds") or []
+           if f.get("match_excerpt")] == ["gh_trending"],
+          repr([f.get("id") for f in shipped.get("feeds") or []
+                if f.get("match_excerpt")]))
+    check("no shipped feed reads the excerpt unless it says so",
+          all(f.get("match_excerpt", False) is False
+              for f in shipped.get("feeds") or []
+              if f.get("id") != "gh_trending"),
+          repr([f.get("id") for f in shipped.get("feeds") or []
+                if f.get("match_excerpt")]))
 else:
     FAILURES.append("config/config.yaml.example is missing from the checkout")
 

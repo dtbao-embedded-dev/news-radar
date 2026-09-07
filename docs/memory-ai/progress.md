@@ -9,6 +9,108 @@ updated: 2026-09-07
 
 ## What works
 
+### Five model groups replace RTOS (2026-09-07, unreleased)
+
+`Claude`, `ChatGPT`, `GLM`, `Qwen`, `DeepSeek`, `@6` apiece, sitting ahead of
+the `AI` group; the `RTOS` group is gone. Measured on a real cycle: **90
+stories across 11 groups**, and all five new groups filled their cap.
+
+Three measurements shaped it, and two of them overturned the obvious answer:
+
+- **Five groups, not one.** A group's first plain term is its only search
+  query, so one group would have searched for `Claude` and nothing else. On the
+  fixed feeds alone `GLM` appeared once, `Qwen` twice, `DeepSeek` seven times in
+  2,239 items; with a query each they return 8, 20 and 67.
+- **A broad query does not substitute.** One regex-only group behind a wide
+  query was the cheap idea and it failed the test: `"chatbot"` surfaced 36
+  vendor mentions but only ChatGPT and Claude, `"LLM"` six, `"AI model"` three.
+  GLM, Qwen and DeepSeek never appeared.
+- **Plain terms beat regexes here, against expectation.** `Claude` (Monet,
+  Shannon) and `GLM` (the OpenGL maths library, the generalized linear model)
+  looked like the RTOS trap all over again. Across 2,655 live items: 135 Claude
+  hits and 11 GLM hits, **every one about the model**, and a word-boundary regex
+  matched exactly the same set. The corpus is tech news, not the whole web.
+
+**The budget was held, not blown.** Eleven groups x three templates would have
+been 45 requests a cycle against 33. Disabling the `google_news` (hl=vi)
+template - which had returned 49 of its 53 usable stories into the AI group and
+0 for ESP32, RTOS and GitHub Trending - brings it to **34**. Group order is
+load-bearing: `notify.pick()` sends a story under the first group that claims
+it, so `Claude` ahead of `AI` is what makes a message say `Claude`.
+
+### The report has an absolute age floor (2026-09-07, unreleased)
+
+`rank.max_age_days` drops a story past the limit before anything is scored.
+The audit that produced it: **12 of 68 shortlisted stories were over 30 days
+old**, five of them Hugging Face blog posts holding half of `AI Repos`, the
+oldest **27,466 hours - 3.1 years**.
+
+The score could not have caught it. Freshness is `0.5 ** (age / 12h)`, which
+reaches 0 after about two days, so beyond that point a three-day-old story and
+a three-year-old one are literally the same number; when a group runs short of
+fresh matches, the archive a feed happens to ship fills the rest of its cap.
+`huggingface` carries 859 entries and `openai` 1,173, all of them fetched every
+cycle.
+
+Measured end to end on a real `--once` cycle at 14 days:
+
+| | Before | After |
+|---|---|---|
+| Oldest story reaching the store | 27,466 h | **284 h** (11.8 d) |
+| Stories over 336 h | 17 | **0** |
+| Shortlist size | 68 | 64 |
+| Groups at their cap | 7 of 7 | 6 of 7 |
+
+Only `RTOS` shrank, 8 stories to 4 - four of its eight really were over a
+fortnight old. Everything else refilled from fresher candidates, which is the
+property worth remembering: **the cut changes which stories fill a section, not
+how many, until a keyword genuinely has nothing recent.**
+
+Two decisions inside it, both load-bearing:
+
+- **An undated story is kept at every threshold.** Same rule `score()` follows
+  from the other end - a missing date is not evidence of age. It is also what
+  keeps the `GitHub Trending` group alive: `gh_trending` dates not one entry,
+  and the group still holds its full 8 after the cut.
+- **The code default is `0`, no cut.** An upgrade that never mentioned `rank`
+  must report exactly what it did yesterday. Eighth deliberate disagreement
+  between `DEFAULTS` and the template.
+
+What this does **not** fix: bandwidth. Both archive feeds are still fetched and
+parsed in full every cycle; the cut only stops them reaching the report.
+
+### Matching can read an excerpt, one source at a time (2026-09-07, unreleased)
+
+Four numbers carry this whole change, all measured against live sources rather
+than reasoned about:
+
+- **1 of 18 -> 10 of 18.** GitHub trending titles every entry `owner/repo` and
+  puts the description in the excerpt, so title-only matching passed one entry.
+  `feeds[].match_excerpt` is the switch; `filter._haystack()` does the joining.
+- **1031 -> 1460 matches, and the extras were noise.** Reading the excerpt for
+  every source was tried across twelve live sources before the design was
+  chosen: `An Alien Mind` from Hacker News, `Kernel prepatch 7.3-rc2` from LWN.
+  That measurement is why the switch is per source rather than global.
+- **18 of 18, and 0 of 2,300.** The regex-only `GitHub Trending` group matches a
+  bare `owner/repo` and nothing across the other eleven sources. It exists
+  because a dateless feed scores `0.5 x weight` at best, and 9 of the 10
+  trending repos landed in the `AI` group only to be cut at its 0.55 line. On
+  their own they fill their `@8`.
+- **34 requests, ~59 s a cycle**, up from 26 and ~48 s: five new feeds plus
+  three more search requests for the new group.
+
+Two things this cost, both worth remembering. An anchored regex breaks under
+`match_excerpt` - `/^owner/repo$/` matched the title alone and nothing once the
+description was appended, and the group ran empty until it became `(?=
+|$)`.
+And `arxiv_cs_ai` was dropped after being added: 93 of 298 entries matched, but
+its ceiling was `0.5 x 0.5 + 0.2 x freshness = 0.45` against the AI group's 0.55
+cut, so it could never place a story while costing 298 parsed items a cycle.
+
+`esp_idf_releases` shows nothing on a quiet week **by design**: the feed always
+holds the same ten releases and none of them is fresh, so at weight 0.8 only a
+genuinely new release clears the cut.
+
 ### The page can be turned off, and turning it off unpublishes it (2026-09-07, unreleased)
 
 `report.html` is the switch that did not exist. Three facts worth keeping:

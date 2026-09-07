@@ -16,6 +16,17 @@ schedule:
   run_on_start: true
 
 # Fixed feeds: fetched whole every run, then matched locally.
+#
+# Per-entry keys: id, name, url, enabled (default true), rank_weight
+# (default 1.0) and match_excerpt (default false).
+#
+# match_excerpt: true makes the keyword match - and the group's own ! terms and
+# [GLOBAL_FILTER] with it - read the entry's description as well as its title.
+# Leave it off. It exists for one shape of source: a feed whose titles carry no
+# words, like GitHub trending, where every entry is titled `owner/repo` and the
+# description holds the only text worth matching. Measured across twelve live
+# sources, switching it on everywhere found 42% more matches and the extras
+# were stories that merely mention a keyword once in the body.
 feeds:
   - id: hn
     name: Hacker News
@@ -52,16 +63,74 @@ feeds:
     url: https://vnexpress.net/rss/so-hoa.rss
     enabled: true
     rank_weight: 0.7
+  # Off, and the reason is the feed's own, not a judgement on the site: GenK
+  # ships **no pubDate at all** - 0 of 61 entries carried one on 2026-09-07.
+  # `published_at = None` scores 0 for freshness, never a guess, so this source
+  # tops out at `0.5 x 0.6 = 0.30` while the lowest group cut measured in a full
+  # cycle was 0.40. It matched 11 items a cycle and placed none of them. Raising
+  # rank_weight to compensate would be the guess `rank.py` refuses to make, in a
+  # different key. Turn it back on the day GenK dates its entries - the other two
+  # Vietnamese feeds do (`vnexpress_sohoa` 60/60, `tinhte` 20/20) and both place.
   - id: genk
     name: GenK
     url: https://genk.vn/rss/home.rss
-    enabled: true
+    enabled: false
     rank_weight: 0.6
   - id: tinhte
     name: Tinh te
     url: https://tinhte.vn/rss
     enabled: true
     rank_weight: 0.6
+
+  # GitHub trending, via a third-party RSS mirror - GitHub publishes no feed of
+  # its own for it. The only feed here that needs match_excerpt: every entry is
+  # titled `owner/repo` and the description carries the only matchable text.
+  # Measured 2026-09-07: 1 of 18 entries matched on the title, 10 with the
+  # excerpt. It also ships **no dates**, so its freshness term is always 0 and
+  # rank_weight is its entire score: 0.5 x weight, nothing else. Measured at
+  # 0.7 it scored 0.35 and did not make a single group; 1.0 scores 0.50, which
+  # is what it takes to sit among dated stories at all.
+  - id: gh_trending
+    name: GitHub Trending
+    url: https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml
+    enabled: true
+    rank_weight: 1.0
+    match_excerpt: true
+
+  # OpenAI's own announcements. A primary source - when it says something, it is
+  # the thing every other AI feed is about to report second-hand.
+  - id: openai
+    name: OpenAI News
+    url: https://openai.com/news/rss.xml
+    enabled: true
+    rank_weight: 1.0
+
+  # Hugging Face's blog: releases, model cards and write-ups. Note it carries no
+  # descriptions at all, so match_excerpt would do nothing here even if set.
+  - id: huggingface
+    name: Hugging Face Blog
+    url: https://huggingface.co/blog/feed.xml
+    enabled: true
+    rank_weight: 0.9
+
+  # ESP-IDF releases, straight from the tag. Weighted below the news sources on
+  # purpose: the feed always holds the same ten releases, old point releases
+  # included, and a release from five days ago has no freshness left at a 12 h
+  # half-life - so at 1.0 all ten scored 0.50 and took ten of the ESP32 group's
+  # twelve slots, turning a news section into a changelog.
+  - id: esp_idf_releases
+    name: ESP-IDF Releases
+    url: https://github.com/espressif/esp-idf/releases.atom
+    enabled: true
+    rank_weight: 0.8
+
+  # CNX Software's ESP32 tag - single-board and microcontroller news, already
+  # narrowed by the source. Measured 27 of 32 entries matching a shipped group.
+  - id: cnx_esp32
+    name: CNX Software (ESP32)
+    url: https://www.cnx-software.com/tag/esp32/feed/
+    enabled: true
+    rank_weight: 0.9
 
 # Search feeds: {kw} is replaced by each keyword group's primary term.
 # Cost per run is len(groups) x len(enabled templates) - six groups and the
@@ -72,11 +141,18 @@ search_templates:
   # answers relevance-first: without a window it returns hits aged months,
   # which score 0 for freshness and leave the group ordered by source weight
   # alone. Widen it and the page goes stale, not fuller.
+  # Disabled since the keyword file grew to eleven groups. It answers in
+  # Vietnamese, and the Vietnamese press writes about one of those groups: over
+  # the six shipped groups it returned 53 usable stories and 49 of them were the
+  # AI group, 0 for ESP32, RTOS and GitHub Trending. At eleven groups that is
+  # eleven requests a cycle - every ten minutes, at the one host already known
+  # to throttle - for coverage the five new model groups more than replace.
+  # `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news.
   - id: google_news
     name: Google News (vi)
     url: "https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi"
     format: rss
-    enabled: true
+    enabled: false
     rank_weight: 0.8
   # The same engine in English, and it is not a duplicate: the locale decides
   # which press is searched at all. Measured on 2026-09-05 over the six shipped
@@ -136,6 +212,17 @@ rank:
   weight_frequency: 0.3
   weight_freshness: 0.2
   freshness_half_life_hours: 12
+
+  # Stories older than this are dropped before anything is ranked. 0 = no cut,
+  # which is the code default so an upgrade never starts discarding on its own;
+  # 14 is what ships. The half-life above cannot do this job: freshness reaches
+  # 0 after about two days, so past that a three-day-old story and a
+  # three-year-old one score the same, and a group short of fresh matches fills
+  # its cap from whatever archive a feed happens to carry. Measured before this
+  # existed: 12 of 68 shortlisted stories were over 30 days old, five of them
+  # Hugging Face posts taking half of AI Repos, the oldest 27,466 hours.
+  # An entry with no date is always kept - gh_trending dates nothing at all.
+  max_age_days: 14
 
 storage:
   data_dir: output

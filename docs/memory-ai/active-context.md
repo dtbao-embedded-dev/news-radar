@@ -87,6 +87,24 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The AI summary is live on OpenRouter** (2026-09-07), and P6-4's open
+  question is answered: two sentences a topic reads as a summary, not a
+  horoscope. `minimax/minimax-m3:free` was picked by POSTing today's real
+  3085-character prompt to two free models and comparing the Vietnamese -
+  `gemma-4-31b:free` answered `429` upstream. First cycle: `summary: 1576
+  character(s) over 5 topic(s)`, page block rendered, `sent to 2 of 2
+  channel(s)`, heartbeat clean.
+- **A new environment variable needs `up -d`, not `restart`.** The plan on file
+  said restart, which is correct for `config.yaml` (a bind mount read at process
+  start) and wrong for `.env`: Compose bakes environment into a container when
+  it creates it, so a restart reuses the old set and the key never arrives. The
+  general shape: bind mounts follow the file, `environment:` follows the
+  container.
+- **The model omitted a topic and was right to.** `RTOS` matched `RTOs` -
+  Indian Regional Transport Offices - so three of that group's five stories were
+  about e-rickshaw enforcement, and the prompt's "omit an unremarkable topic"
+  rule dropped the line. A model routing around a keyword problem is not a fix
+  for it; the page still shows the group.
 - **And then it was torn down for real, the same day** (2026-09-07). Not just
   removed from the repository: the connector container stopped and removed
   (`news.dtbao.org` `200` -> `502`, LAN copy still `200`, crawl and Caddy

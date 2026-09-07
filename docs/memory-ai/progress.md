@@ -9,6 +9,46 @@ updated: 2026-09-07
 
 ## What works
 
+### The AI summary runs for real, on OpenRouter (2026-09-07)
+
+`ai.*` had been built, tested against a local stub, and never pointed at a real
+model. The homelab now runs it: `api_url:
+https://openrouter.ai/api/v1/chat/completions`, `model:
+minimax/minimax-m3:free`, `OPENAI_API_KEY` in `docker/.env`. First cycle after
+the change, no retries:
+
+```
+INFO  summary: 1576 character(s) over 5 topic(s)
+INFO  rendered output/index.html (6 group(s), 76 story(ies))
+INFO  summary: sent to 2 of 2 channel(s) [telegram, discord]
+INFO  heartbeat: http://caddy:8080/ answered
+```
+
+- **Two sentences a topic reads as a summary, not a horoscope.** That was the
+  open question this file carried. The model picked the notable story out of
+  each group and said why it mattered rather than restating the headline, in
+  Vietnamese as `INSTRUCTION` asks. The page carries five `<p>` blocks in the
+  keyword file's own group order.
+- **Five topics, not six - and the sixth was the right one to drop.** The
+  prompt tells the model to omit an unremarkable topic entirely, and it omitted
+  `RTOS`. Three of that group's five stories were about Indian Regional
+  Transport Offices, because the keyword `RTOS` matches `RTOs` after folding.
+  The model routing around a keyword-quality problem is not a fix for it - see
+  Known issues.
+- **The model was chosen by running the real prompt, not by reading a
+  leaderboard.** Today's actual 3085-character prompt was POSTed to two free
+  models and the answers compared. `google/gemma-4-31b-it:free` answered
+  `429 - temporarily rate-limited upstream`; `minimax/minimax-m3:free` answered
+  in 16 s with usable Vietnamese.
+- **The once-a-day guard works on the real path too.** `reported` carries
+  `summary:2026-09-07` for both channels, so the next cycle sends nothing and
+  logs `already sent today`. Verified in the store, not inferred.
+- **`.env` needs a container recreate, not a restart.** The plan on file said
+  `docker compose restart news-radar`, which is right for `config.yaml` - a bind
+  mount read at process start - and wrong for a **new** environment variable:
+  Compose bakes those in at container create time, so `restart` reuses the old
+  environment and the key never arrives. `up -d` recreates.
+
 ### The tunnel is gone; the report is served on the LAN (2026-09-07)
 
 Removed rather than fixed: the `cloudflared` service, `docker/cloudflared.yml`,
@@ -576,12 +616,12 @@ the ops layer and the summary - and the whole thing is reachable at
   expecting a ping yet. Until a healthchecks.io or Uptime Kuma url goes into
   `config/config.yaml`, the half of P6-1 that survives the container being killed
   is built but not armed. The site check and the alerting work without it.
-- **P6-4, the AI summary, is built after all** - see [[ai-summary]] for the
-  contract and [[delivery-phases]] for why the decision to drop it was
-  reversed. It ships `ai.enabled: false` and has never run against a real
-  endpoint: everything below was measured against a local stub, so the open
-  question is what a real model writes when handed a real day's headlines, and
-  whether two sentences a topic reads as a summary or as a horoscope.
+- **P6-4, the AI summary, has now run against a real endpoint** (2026-09-07) -
+  see [[ai-summary]] for the contract. It still *ships* `ai.enabled: false`;
+  what changed is the homelab, which now points at OpenRouter. The open question
+  recorded here - whether two sentences a topic reads as a summary or as a
+  horoscope - is answered, and the answer is that it reads as a summary. See
+  What works.
 - **Nobody has yet watched a real outage they did not cause.** Every alert so far
   came from a `site_url` pointed at a 404 on purpose. Whether `ALERT_AFTER = 2` is
   the right chattiness against real feed flakiness is a question only the seven
@@ -589,6 +629,19 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **The OpenRouter key is on the free tier, so the model can 429 at any time.**
+  `is_free_tier: true`, no credits, and only `:free` models resolve at all -
+  a paid model id would answer `402`. A rate-limited cycle is already the
+  designed failure mode (`summarize()` returns `None`, one WARNING, the page is
+  written without the block, the cycle still counts as healthy), so nothing
+  breaks - but the summary is best-effort until the account has credit.
+- **The `RTOS` keyword group is polluted by Indian transport offices.** `RTOS`
+  matches `RTOs` after folding, so three of the group's five top stories on
+  2026-09-07 were about Regional Transport Offices and e-rickshaw enforcement.
+  The AI summary routed around it by omitting the topic; the page does not. The
+  fix is a case-sensitive regex in `frequency_words.txt` - a `/RTOS/` term runs
+  against the **original** title, not the folded one - but that is a local file
+  on the deployment, so it is an operator edit rather than a release.
 - **Auto-update has no safety net, and this is the one to weigh before turning
   it on.** A release whose *cycles* fail is reported - `ops.Health` sends one
   message on the second consecutive failure. A release that **will not start**

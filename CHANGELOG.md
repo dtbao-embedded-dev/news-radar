@@ -16,6 +16,20 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Features
+
+- **filter**: matching can now read an item's **excerpt** as well as its title,
+  **per source**. `group_matches()`, `blocked()` and `select()` take the switch;
+  it is off everywhere unless a source asks for it, so nothing about an existing
+  config changes. It exists because the GitHub trending feed titles every entry
+  `owner/repo` and puts the description in the excerpt: title-only matching
+  passed **1 of 18** entries, with the excerpt **10**. Blanket widening was
+  measured and rejected - across twelve live sources it found 42% more matches
+  and the extras were noise (`An Alien Mind` from Hacker News, `Kernel prepatch
+  7.3-rc2` from LWN). The exclusion half widens with it: a source whose matching
+  reads the excerpt but whose `!` terms and `[GLOBAL_FILTER]` do not could not
+  filter back out what the wider reading let in.
+
 ## v0.2.7 - 2026-09-07
 
 ### Features

@@ -16,6 +16,17 @@ schedule:
   run_on_start: true
 
 # Fixed feeds: fetched whole every run, then matched locally.
+#
+# Per-entry keys: id, name, url, enabled (default true), rank_weight
+# (default 1.0) and match_excerpt (default false).
+#
+# match_excerpt: true makes the keyword match - and the group's own ! terms and
+# [GLOBAL_FILTER] with it - read the entry's description as well as its title.
+# Leave it off. It exists for one shape of source: a feed whose titles carry no
+# words, like GitHub trending, where every entry is titled `owner/repo` and the
+# description holds the only text worth matching. Measured across twelve live
+# sources, switching it on everywhere found 42% more matches and the extras
+# were stories that merely mention a keyword once in the body.
 feeds:
   - id: hn
     name: Hacker News

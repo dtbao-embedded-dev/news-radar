@@ -29,6 +29,12 @@ one makes the file and the tags disagree.
   7.3-rc2` from LWN). The exclusion half widens with it: a source whose matching
   reads the excerpt but whose `!` terms and `[GLOBAL_FILTER]` do not could not
   filter back out what the wider reading let in.
+- **config**: `feeds[].match_excerpt` and `search_templates[].match_excerpt`
+  (bool, default `false`) switch the above on for one source.
+  `__main__._excerpt_sources()` collects the ids and hands them to
+  `filter.select()`, the same way `_source_weights()` already hands down
+  `rank_weight` - layer 3 does not import `config`. A config that never
+  mentions the key matches exactly as it did before.
 
 ## v0.2.7 - 2026-09-07
 

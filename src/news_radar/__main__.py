@@ -101,6 +101,24 @@ def _source_weights(cfg):
     return weights
 
 
+def _excerpt_sources(cfg):
+    """The `source_id`s whose excerpt counts as matchable text.
+
+    Same shape and same reason as `_source_weights()`: layer 3 does not import
+    `config`, so the answer is built here and handed down. A set rather than the
+    config itself, because `filter.select()` asks one question per item and has
+    no business knowing what a feed entry looks like.
+
+    Absent means `False` everywhere, which is what the whole feature rests on -
+    reading the excerpt for every source was measured at 42% more matches, and
+    the extras were noise. See `filter._haystack()`.
+    """
+    return frozenset(
+        entry.get("id")
+        for entry in (cfg.get("feeds") or []) + (cfg.get("search_templates") or [])
+        if isinstance(entry.get("id"), str) and entry.get("match_excerpt", False))
+
+
 def _report_groups(ranked):
     """The shortlist itself: one line per group, then the stories it kept.
 
@@ -474,7 +492,7 @@ def crawl(cfg):
     log.info("fetched %d raw item(s) in %.1fs, %d source(s) failed",
              len(items), time.monotonic() - started, len(errors))
 
-    matched = select(items, groups, global_filter)
+    matched = select(items, groups, global_filter, _excerpt_sources(cfg))
     stories = collapse(matched)
     ranked = rank_groups(stories, groups, cfg.get("rank") or {},
                          _source_weights(cfg), fetched_at,

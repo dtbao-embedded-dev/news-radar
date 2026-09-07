@@ -405,6 +405,15 @@ if example.is_file():
     # publishes.
     check("the template ships the HTML report off",
           shipped.get("report.html") is False, repr(shipped.get("report.html")))
+    # Per-source excerpt matching is off unless a feed asks. The template must
+    # not quietly widen matching for a source that did not ask - see
+    # filter._haystack() for the 42% of noise that would follow.
+    check("no shipped feed reads the excerpt unless it says so",
+          all(f.get("match_excerpt", False) is False
+              for f in shipped.get("feeds") or []
+              if f.get("id") != "gh_trending"),
+          repr([f.get("id") for f in shipped.get("feeds") or []
+                if f.get("match_excerpt")]))
 else:
     FAILURES.append("config/config.yaml.example is missing from the checkout")
 

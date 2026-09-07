@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.8 - 2026-09-07
+
 ### Changed
 
 - **keywords**: the `RTOS` group is **removed** from

@@ -18,6 +18,22 @@ one makes the file and the tags disagree.
 
 ### Breaking Changes
 
+- **deploy**: `docker/cloudflared.yml` no longer names this deployment. The
+  tunnel id moved to `NEWS_RADAR_TUNNEL_ID` in `.env` and is passed as the
+  argument to `run`, and the ingress hostname is gone entirely - a single
+  catch-all rule sends everything arriving on the tunnel to `caddy:8080`, and
+  which hostname that is already lives in Cloudflare DNS. The id could not stay
+  in the file as a variable because **cloudflared does not expand environment
+  variables inside its own config**, while Compose does expand them in
+  `command:`. **An existing deployment must set `NEWS_RADAR_TUNNEL_ID` before
+  starting `--profile tunnel`**, or the connector starts with no tunnel to run
+  and the site goes back to Cloudflare `1033`. `cloudflared tunnel list` prints
+  the id; the credentials file already carries the same one. What this gives up
+  is the `http_status:404` rule that used to sit behind the named one, which
+  only ever guarded against the account owner routing a stray hostname here.
+  Verified with cloudflared itself: `tunnel ingress validate` answers `OK` and
+  `tunnel ingress rule <url>` matches rule #0 to `http://caddy:8080`.
+
 - **keywords**: `config/frequency_words.txt` is now a local file created from
   `config/frequency_words.txt.example`, exactly like `config.yaml`, and is
   gitignored. It holds no secret; the reason is the upgrade. A tracked file that

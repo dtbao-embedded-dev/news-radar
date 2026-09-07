@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.3 - 2026-09-07
+
 ### Breaking Changes
 
 - **deploy**: the Cloudflare Tunnel is gone. The `cloudflared` service,

@@ -74,6 +74,56 @@ feeds:
     enabled: true
     rank_weight: 0.6
 
+  # GitHub trending, via a third-party RSS mirror - GitHub publishes no feed of
+  # its own for it. The only feed here that needs match_excerpt: every entry is
+  # titled `owner/repo` and the description carries the only matchable text.
+  # Measured 2026-09-07: 1 of 18 entries matched on the title, 10 with the
+  # excerpt. It also ships **no dates**, so its freshness term is always 0 and
+  # rank_weight is its entire score: 0.5 x weight, nothing else. Measured at
+  # 0.7 it scored 0.35 and did not make a single group; 1.0 scores 0.50, which
+  # is what it takes to sit among dated stories at all.
+  - id: gh_trending
+    name: GitHub Trending
+    url: https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml
+    enabled: true
+    rank_weight: 1.0
+    match_excerpt: true
+
+  # OpenAI's own announcements. A primary source - when it says something, it is
+  # the thing every other AI feed is about to report second-hand.
+  - id: openai
+    name: OpenAI News
+    url: https://openai.com/news/rss.xml
+    enabled: true
+    rank_weight: 1.0
+
+  # Hugging Face's blog: releases, model cards and write-ups. Note it carries no
+  # descriptions at all, so match_excerpt would do nothing here even if set.
+  - id: huggingface
+    name: Hugging Face Blog
+    url: https://huggingface.co/blog/feed.xml
+    enabled: true
+    rank_weight: 0.9
+
+  # ESP-IDF releases, straight from the tag. Weighted below the news sources on
+  # purpose: the feed always holds the same ten releases, old point releases
+  # included, and a release from five days ago has no freshness left at a 12 h
+  # half-life - so at 1.0 all ten scored 0.50 and took ten of the ESP32 group's
+  # twelve slots, turning a news section into a changelog.
+  - id: esp_idf_releases
+    name: ESP-IDF Releases
+    url: https://github.com/espressif/esp-idf/releases.atom
+    enabled: true
+    rank_weight: 0.8
+
+  # CNX Software's ESP32 tag - single-board and microcontroller news, already
+  # narrowed by the source. Measured 27 of 32 entries matching a shipped group.
+  - id: cnx_esp32
+    name: CNX Software (ESP32)
+    url: https://www.cnx-software.com/tag/esp32/feed/
+    enabled: true
+    rank_weight: 0.9
+
 # Search feeds: {kw} is replaced by each keyword group's primary term.
 # Cost per run is len(groups) x len(enabled templates) - six groups and the
 # three enabled below is 18 requests, on top of the eight fixed feeds. Keep

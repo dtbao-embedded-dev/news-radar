@@ -408,6 +408,14 @@ if example.is_file():
     # Per-source excerpt matching is off unless a feed asks. The template must
     # not quietly widen matching for a source that did not ask - see
     # filter._haystack() for the 42% of noise that would follow.
+    check("the template ships the full source list",
+          len(shipped.get("feeds") or []) == 13,
+          "{} feed(s)".format(len(shipped.get("feeds") or [])))
+    check("gh_trending is the one feed that reads its excerpt",
+          [f.get("id") for f in shipped.get("feeds") or []
+           if f.get("match_excerpt")] == ["gh_trending"],
+          repr([f.get("id") for f in shipped.get("feeds") or []
+                if f.get("match_excerpt")]))
     check("no shipped feed reads the excerpt unless it says so",
           all(f.get("match_excerpt", False) is False
               for f in shipped.get("feeds") or []

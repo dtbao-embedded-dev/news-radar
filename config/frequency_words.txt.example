@@ -27,7 +27,7 @@ ESP32
 ESP-IDF
 ESP32-S3
 ESP32-C6
-@10
+@12
 => ESP32
 
 firmware
@@ -92,7 +92,7 @@ chatbot
 /(\bAI\b|\bA\.I\.|\bLLMs?\b|\bGPT\b|\bAGI\b|\bRAG\b)/
 !tuyen dung
 !hiring
-@10
+@12
 => AI
 
 # Projects, not commentary. "open source AI" as a phrase query returned 6 of 6
@@ -109,10 +109,33 @@ awesome-llm
 /^Show HN:.*(\bAI\b|\bLLMs?\b|\bGPT\b|\bRAG\b|\bagents?\b)/
 !tuyen dung
 !hiring
-@8
+@10
 => AI Repos
 
 # Applied to every item from every source, before any group is considered.
+# GitHub trending repositories, from the gh_trending feed, which titles every
+# entry `owner/repo` and is the only feed whose match_excerpt is on. This group
+# is regex-only on purpose: the repo NAME is all the title holds, and the
+# description that the excerpt carries is matched by the AI group anyway - 9 of
+# 10 trending repos landed there and were then cut, because a feed with no
+# dates scores 0.50 at best and the AI group cuts at 0.55. Given its own group
+# they compete only with each other.
+#
+# The regex matches a bare `owner/repo` and nothing else: measured
+# 2026-09-07 it caught 18 of 18 trending entries and 0 of 2,300 items across
+# the other eleven sources. It ends in a lookahead rather than a plain `$`
+# because this feed sets match_excerpt, so the text a regex is shown is the
+# title, a newline, then the description - a `$` anchor matched the title on
+# its own and nothing at all once the description was appended, which cost
+# this group every one of its entries the first time it ran.
+#
+# The label is the search query, so the templates ask for "GitHub Trending":
+# three requests a cycle whose answers this same regex then throws away, and
+# that is the price of giving the feed a group of its own.
+/^[\w.-]+\/[\w.-]+(?=\n|$)/
+@8
+=> GitHub Trending
+
 [GLOBAL_FILTER]
 !giveaway
 !coupon

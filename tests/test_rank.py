@@ -187,6 +187,56 @@ eq("an explicit @0 means unlimited, like the config default",
                        default_cap=1)["ESP32"]), 3)
 
 
+# --- rank_groups: the maximum age cut -------------------------------------
+#
+# Freshness is 0.5 ** (age / half_life), which reaches 0 after about two days -
+# so a three-day-old story and a three-year-old one score identically, and when
+# a group runs short of fresh matches an archive feed fills the rest. Measured
+# on the shipped template 2026-09-07: 12 of 68 shortlisted stories were over 30
+# days old, five of them Hugging Face blog posts filling half of AI Repos, the
+# oldest 27,466 hours. The cut is an absolute floor the score cannot express.
+
+DAY = 24 * HOUR
+aged = [
+    story(["hn"], NOW - 13 * DAY, ("ESP32",), "thirteen days"),
+    story(["hn"], NOW - 15 * DAY, ("ESP32",), "fifteen days"),
+    story(["hn"], None, ("ESP32",), "no date at all"),
+]
+
+eq("max_age_days=0 is the same call as not passing it",
+   [s.item.title for s in mod.rank_groups(aged, zero, WEIGHTS, SOURCE_WEIGHTS,
+                                          NOW, max_age_days=0)["ESP32"]],
+   [s.item.title for s in mod.rank_groups(aged, zero, WEIGHTS, SOURCE_WEIGHTS,
+                                          NOW)["ESP32"]])
+
+cut = mod.rank_groups(aged, zero, WEIGHTS, SOURCE_WEIGHTS, NOW, max_age_days=14)
+titles = [s.item.title for s in cut["ESP32"]]
+check("a story younger than the cut is kept", "thirteen days" in titles, repr(titles))
+check("a story older than the cut is dropped", "fifteen days" not in titles, repr(titles))
+# The rule score() already follows, applied to the other end of the scale: a
+# missing date is not evidence of age. Dropping these would empty the shipped
+# GitHub Trending group, whose feed dates nothing at all.
+check("a story with no date is kept, never guessed old",
+      "no date at all" in titles, repr(titles))
+
+eq("an undated story survives even a one-day cut",
+   [s.item.title for s in mod.rank_groups(
+       [aged[2]], zero, WEIGHTS, SOURCE_WEIGHTS, NOW, max_age_days=1)["ESP32"]],
+   ["no date at all"])
+
+# A group emptied by the cut still reports itself - the section going quiet is
+# the signal, and a missing key would hide it.
+all_stale = mod.rank_groups([aged[1]], zero, WEIGHTS, SOURCE_WEIGHTS, NOW,
+                            max_age_days=14)
+eq("a group whose every candidate is too old is empty, not absent",
+   all_stale.get("ESP32"), [])
+
+# The boundary itself: exactly the cut is still inside it.
+edge = mod.rank_groups([story(["hn"], NOW - 14 * DAY, ("ESP32",), "exactly")],
+                       zero, WEIGHTS, SOURCE_WEIGHTS, NOW, max_age_days=14)
+eq("a story exactly at the cut is kept", len(edge["ESP32"]), 1)
+
+
 # --------------------------------------------------------------------------
 
 if FAILURES:

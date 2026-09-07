@@ -18,6 +18,21 @@ one makes the file and the tags disagree.
 
 ### Features
 
+- **rank**: `rank_groups()` takes a `max_age_days` cut and drops stories past it
+  **before** anything is scored, with `fresh_enough()` deciding one story at a
+  time. It is the floor the score cannot express: freshness decays as
+  `0.5 ** (age / half_life)` and reaches 0 after about two days, so past that a
+  three-day-old story and a three-year-old one are the same number, and a group
+  short of fresh matches fills its cap from whatever archive a feed ships.
+  Measured on the shipped template: 12 of 68 shortlisted stories were over 30
+  days old, five of them Hugging Face posts taking half of `AI Repos`, the
+  oldest **27,466 hours**. **A story with no `published_at` is kept at every
+  threshold** - the same rule `score()` follows from the other end, and
+  load-bearing besides, since `gh_trending` dates not one of its entries. The
+  cut runs on the whole pool before groups are filled, so a section stays at its
+  cap while fresh candidates remain and only empties when a keyword really has
+  nothing recent.
+
 - **filter**: matching can now read an item's **excerpt** as well as its title,
   **per source**. `group_matches()`, `blocked()` and `select()` take the switch;
   it is off everywhere unless a source asks for it, so nothing about an existing

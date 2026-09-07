@@ -3862,9 +3862,38 @@ What the real run does, in order:
    `chore(release): v0.1.0`, on the current `release/*` branch.
 5. **Merge chain** - `release/*` into `developing`, then `developing` into
    `main`, both `--no-ff` so the release is visible as a merge commit.
-6. **Tag** - an annotated tag `v0.1.0` created while on `main`.
+6. **Tag** - an annotated tag `v0.1.0`, created last but pointing at the
+   `chore(release): v0.1.0` commit from step 4, because `git tag` names
+   `release/*` explicitly. See below for why both halves of that matter.
 7. **Back and push** - returns to the `release/*` branch, then pushes the three
    branches and the tag.
+
+### Why the tag names the release branch
+
+`git tag` with no target tags `HEAD`, and at step 6 `HEAD` is `main` - so the
+tag landed on a commit whose subject is `chore(release): merge developing into
+main`. Its tree is identical to the release commit's, which is why the mistake
+shipped in **v0.1.0 through v0.2.4** without anything breaking: `git describe`,
+the GitHub Release page and `git log --decorate` on the release branch all named
+a merge instead of the release.
+
+Fixed by naming the target: `git tag -a v0.1.0 -m v0.1.0 release/v0.2`. Two
+constraints meet there, and only that satisfies both:
+
+- **The target must be the release commit.** The merges do not move
+  `release/*`, so its tip is still the `chore(release): vX.Y.Z` commit when the
+  tag is cut.
+- **The tag must still be created last.** It is the one step whose failure the
+  preflight refuses to re-run - a tag left behind by a merge that broke halfway
+  makes the retry fail on "tag already exists" for a release that never
+  happened.
+
+Naming the branch instead of a SHA is also what keeps `release_commands()` pure,
+so `--dry-run` can print the whole chain without running any of it.
+
+**The tags cut before this are left alone.** Moving a published tag would
+republish the image under a version somebody may already be running; the tags
+point at the right *tree* either way. `v0.2.5` onward is where this starts.
 
 CI takes over from the tag: `.github/workflows/release.yml` triggers on a pushed
 `v*` tag, cuts that version's section out of `CHANGELOG.md` (using

@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.7 - 2026-09-07
+
 ### Features
 
 - **report**: new `report.html` key turns the HTML report off, and the shipped

@@ -5,8 +5,8 @@
 
 Covers only the pure logic: which `docker compose` argv the script would run
 for a given checkout. Nothing here runs docker, and nothing here reads the
-repository's own docker/ directory - every case builds a throwaway tree so the
-answer does not depend on whether this machine happens to have a tunnel.
+repository's own docker/ directory - every case builds a throwaway tree, so the
+answer does not depend on what this machine happens to have in it.
 """
 
 from __future__ import annotations
@@ -28,49 +28,43 @@ def check(name, condition, detail=""):
     FAILURES.append("{}{}".format(name, ": " + detail if detail else ""))
 
 
-def checkout(tmp, dockerfile=True, credentials=False):
+def checkout(tmp, dockerfile=True):
     """Build a fake checkout root and return it."""
     root = pathlib.Path(tmp)
     (root / "docker").mkdir(exist_ok=True)
     if dockerfile:
         (root / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
-    if credentials:
-        (root / "docker" / "tunnel-credentials.json").write_text("{}", encoding="utf-8")
     return root
 
 
 # --------------------------------------------------------------------------
-# the tunnel profile
+# the Dockerfile narrowing, and that no profile is ever added
 # --------------------------------------------------------------------------
 
 with tempfile.TemporaryDirectory() as tmp:
-    argv = setup.compose_argv(checkout(tmp, credentials=False))
-    check("no credentials file means no tunnel profile",
-          "--profile" not in argv, " ".join(argv))
-    check("without the profile the stack is still started",
+    argv = setup.compose_argv(checkout(tmp))
+    check("a full checkout starts the whole stack",
           argv[-2:] == ["up", "-d"], " ".join(argv))
+    # There is no `--profile` left to add. `autoupdate` is production's choice
+    # to make by hand, and the tunnel it used to detect no longer exists.
+    check("setup.py adds no compose profile",
+          "--profile" not in argv, " ".join(argv))
 
 with tempfile.TemporaryDirectory() as tmp:
-    argv = setup.compose_argv(checkout(tmp, credentials=True))
-    check("a credentials file turns the tunnel profile on",
-          "--profile" in argv and "tunnel" in argv, " ".join(argv))
-    check("the profile is declared before the up subcommand",
-          argv.index("--profile") < argv.index("up"), " ".join(argv))
-
-# --------------------------------------------------------------------------
-# the Dockerfile narrowing, and that the two rules do not collide
-# --------------------------------------------------------------------------
+    # The real regression guard: a leftover credentials file used to be the
+    # signal that turned `--profile tunnel` on. Nothing may read it any more, or
+    # a machine that still has one would start a connector that no longer
+    # exists in the compose file.
+    root = checkout(tmp)
+    (root / "docker" / "tunnel-credentials.json").write_text("{}", encoding="utf-8")
+    argv = setup.compose_argv(root)
+    check("a leftover credentials file changes nothing",
+          "--profile" not in argv and "tunnel" not in argv, " ".join(argv))
 
 with tempfile.TemporaryDirectory() as tmp:
     argv = setup.compose_argv(checkout(tmp, dockerfile=False))
     check("no Dockerfile still narrows to caddy", argv[-1] == "caddy", " ".join(argv))
 
-with tempfile.TemporaryDirectory() as tmp:
-    argv = setup.compose_argv(checkout(tmp, dockerfile=False, credentials=True))
-    check("the caddy sentinel start_stack() reads survives the profile flag",
-          argv[-1] == "caddy", " ".join(argv))
-    check("both narrowings can apply at once",
-          "--profile" in argv and argv[-1] == "caddy", " ".join(argv))
 
 # --------------------------------------------------------------------------
 # config drift: keys the template gained that the local config never got

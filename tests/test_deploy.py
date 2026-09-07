@@ -92,15 +92,12 @@ for service in ("news-radar", "caddy"):
     check("{} has no mount left pointing into the checkout".format(service),
           not stale, repr(stale))
 
-# The opposite rule, and it is not symmetric: Caddyfile, cloudflared.yml and the
-# tunnel credentials sit *beside the compose file*, in both layouts. Giving them
-# the variable would send a flat deployment looking for ./config/Caddyfile.
-beside = [host_side(m) for m in mounts("caddy") + mounts("cloudflared")
-          if host_side(m).startswith("./")]
+# The opposite rule, and it is not symmetric: the Caddyfile sits *beside the
+# compose file*, in both layouts. Giving it the variable would send a flat
+# deployment looking for ./config/Caddyfile.
+beside = [host_side(m) for m in mounts("caddy") if host_side(m).startswith("./")]
 check("the files shipped beside the compose file stay relative to it",
-      sorted(beside) == ["./Caddyfile", "./cloudflared.yml",
-                         "./tunnel-credentials.json"],
-      repr(sorted(beside)))
+      sorted(beside) == ["./Caddyfile"], repr(sorted(beside)))
 
 
 # --------------------------------------------------------------------------
@@ -124,9 +121,13 @@ check("the crawl service can still be built locally",
 # .env.example documents both new variables
 # --------------------------------------------------------------------------
 
-for key in ("NEWS_RADAR_HOME", "NEWS_RADAR_VERSION", "WATCHTOWER_POLL_INTERVAL",
-            "NEWS_RADAR_TUNNEL_ID"):
+for key in ("NEWS_RADAR_HOME", "NEWS_RADAR_VERSION", "WATCHTOWER_POLL_INTERVAL"):
     check("{} is in .env.example".format(key), key + "=" in env_example)
+
+# Removed with the cloudflared service, and pinned so it does not drift back in
+# as a variable nothing reads.
+check("no tunnel variable is left in .env.example",
+      "NEWS_RADAR_TUNNEL_ID" not in env_example)
 
 
 # --------------------------------------------------------------------------
@@ -218,37 +219,25 @@ if build:
 
 
 # --------------------------------------------------------------------------
-# the tunnel config names no deployment
+# nothing in this stack reaches the public internet
 # --------------------------------------------------------------------------
 
-# The whole point: docker/cloudflared.yml is committed, so anything in it is a
-# fact about *one* homelab welded into the repository. The tunnel id moves to
-# the compose command (Compose substitutes there; cloudflared does **not**
-# substitute inside its own config file), and the hostname disappears entirely -
-# it already lives in Cloudflare DNS, put there by `cloudflared tunnel route
-# dns`.
-TUNNEL_CFG = ROOT / "docker" / "cloudflared.yml"
-tunnel_cfg = yaml.safe_load(TUNNEL_CFG.read_text(encoding="utf-8"))
+# The Cloudflare Tunnel was removed deliberately: the report is served on the
+# LAN and published nowhere. These pin the removal rather than the feature, so
+# a connector cannot come back by accident and start answering from the
+# internet without anybody deciding to.
+check("there is no cloudflared service", "cloudflared" not in services,
+      repr(sorted(services)))
+check("no service declares a tunnel profile",
+      not [n for n, s in services.items() if "tunnel" in (s.get("profiles") or [])],
+      repr({n: s.get("profiles") for n, s in services.items()}))
+check("the tunnel config file is gone",
+      not (ROOT / "docker" / "cloudflared.yml").exists())
 
-check("the tunnel config pins no tunnel id",
-      "tunnel" not in tunnel_cfg, repr(tunnel_cfg.get("tunnel")))
-check("the tunnel config still points at its credentials",
-      tunnel_cfg.get("credentials-file") == "/etc/cloudflared/creds.json",
-      repr(tunnel_cfg.get("credentials-file")))
-
-rules = tunnel_cfg.get("ingress") or []
-named = [r for r in rules if "hostname" in r]
-check("no ingress rule names a hostname", not named, repr(named))
-check("the ingress is a single catch-all to the web server",
-      [r.get("service") for r in rules] == ["http://caddy:8080"], repr(rules))
-
-# The id has to arrive from somewhere, and `command` is the one place Compose
-# will expand it.
-cmd = str(services.get("cloudflared", {}).get("command", ""))
-check("the compose command carries the tunnel id variable",
-      "${NEWS_RADAR_TUNNEL_ID}" in cmd, repr(cmd))
-check("the id is the argument to `run`",
-      cmd.rstrip().endswith("run ${NEWS_RADAR_TUNNEL_ID}"), repr(cmd))
+# Caddy is the only service with a published port, and it is the only way in.
+published = {n: s.get("ports") for n, s in services.items() if s.get("ports")}
+check("only caddy publishes a port", sorted(published) == ["caddy"],
+      repr(published))
 
 
 # --------------------------------------------------------------------------

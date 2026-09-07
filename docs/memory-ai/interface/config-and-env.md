@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-07
 source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py
 confidence: confirmed
-keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER
+keywords: config.yaml, match_excerpt, max_age_days, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER
 order: 1
 ---
 
@@ -34,18 +34,21 @@ someone chose it.
 | `app.timezone` | str | `Asia/Ho_Chi_Minh` | Timezone used when rendering timestamps; storage stays UTC |
 | `schedule.interval_minutes` | int | `30` *(template ships `10`)* | Sleep between crawls in the in-process loop. The default stays at the half-hour an upgrade inherits - an absent `schedule` section must not triple a running deployment's request rate. A cycle costs 35-57 s for the shipped 22 requests, so ten minutes still leaves the process idle most of the interval; what it does change is the traffic at the two hosts that throttle first, Google News and HN Algolia |
 | `schedule.run_on_start` | bool | `true` | Crawl immediately on container start instead of waiting one interval |
-| `feeds[]` | list | `[]` *(template ships 8)* | Fixed feeds - see [[news-sources]] |
+| `feeds[]` | list | `[]` *(template ships 13)* | Fixed feeds - see [[news-sources]] |
 | `feeds[].id` | str | - | Stable id; used in `sources`, in the report, and as the `reported` key |
 | `feeds[].name` | str | - | Display name on the page |
 | `feeds[].url` | str | - | Feed URL |
 | `feeds[].enabled` | bool | `true` | Skip without deleting the entry |
 | `feeds[].rank_weight` | float | `1.0` | Per-source multiplier in the source term of the score |
+| `feeds[].match_excerpt` | bool | `false` | Match this source on `title + excerpt` instead of the title alone - the group's `!` terms and `[GLOBAL_FILTER]` widen with it. Opt-in per source because reading the excerpt everywhere was measured at **42% more matches, all noise** (1031 -> 1460 across twelve live sources). One shipped feed sets it, `gh_trending`, whose titles are bare `owner/repo`. An anchored regex in a group that sees such a source needs `(?=
+|$)` rather than `$` - see [[news-search]] |
 | `search_templates[]` | list | `[]` *(template ships 3)* | Keyword-driven searches - see [[news-sources]] |
 | `search_templates[].id` | str | - | Stable id |
 | `search_templates[].url` | str | - | Must contain `{kw}`; the only substitution performed |
 | `search_templates[].format` | str | `rss` | `rss`, `atom`, or `hn_algolia_json` |
 | `search_templates[].enabled` | bool | `true` | `reddit_search` ships **disabled** in the template - it duplicates the fixed Reddit feed heavily |
 | `search_templates[].rank_weight` | float | `1.0` *(template ships `0.8`)* | Search hits rank below front-page hits in the shipped template |
+| `search_templates[].match_excerpt` | bool | `false` | The same switch as `feeds[].match_excerpt`; no shipped template sets it |
 | `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file. Gitignored and created by `setup.py` from `frequency_words.txt.example`, so `git checkout <tag>` cannot revert a deployment's tuning |
 | `report.mode` | str | `incremental` **(template ships `daily`)** | `incremental` (this run's new matches), `current` (this run's whole shortlist, every cycle), `daily` (the whole local day minus what the channel already got). The template ships `daily` because it reads the same window the page renders, so a phone and the page agree on which stories exist - and a story missed by one refused cycle is offered again instead of lost |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
@@ -55,6 +58,7 @@ someone chose it.
 | `rank.weight_frequency` | float | `0.3` | Weight of the cross-source frequency term |
 | `rank.weight_freshness` | float | `0.2` | Weight of the freshness term |
 | `rank.freshness_half_life_hours` | float | `12` | Age at which the freshness term halves |
+| `rank.max_age_days` | int | `0` **(template ships `14`)** | Stories older than this are dropped **before** ranking; `0` = no cut. The half-life above cannot do this: freshness reaches 0 after ~2 days, so a three-day-old and a three-year-old story score alike and an archive feed fills a thin group's cap. An entry with **no date is always kept**. The default and the template disagree on purpose - an upgrade must not start discarding what it reported yesterday |
 | `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
 | `storage.retention_days` | int | `0` **(template ships `90`)** | `0` = keep everything; otherwise prune rows and day files past the window. The default and the template disagree on purpose - an absent key must never make an upgrade start deleting, while a fresh install should have a ceiling |
 | `ops.heartbeat_url` | str | `""` | Dead-man's switch pinged after every clean cycle (healthchecks.io / Uptime Kuma push). `""` = no ping |

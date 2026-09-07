@@ -16,6 +16,92 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.8 - 2026-09-07
+
+### Changed
+
+- **keywords**: the `RTOS` group is **removed** from
+  `config/frequency_words.txt.example`, and five model groups take its place -
+  `Claude`, `ChatGPT`, `GLM`, `Qwen`, `DeepSeek`, `@6` apiece. Not a breaking
+  change: a deployment's own `config/frequency_words.txt` is gitignored and
+  untouched, so an existing radar keeps hunting exactly what it hunted
+  yesterday. Only a fresh install, or a deployment that copies the new template
+  by hand, sees the difference.
+
+- **sources**: the `google_news` (hl=vi) template ships **disabled**. It pays a
+  request per keyword group, and the keyword file now has eleven of them: over
+  the six shipped groups it had returned 53 usable stories of which 49 were the
+  AI group, and 0 for ESP32, RTOS and GitHub Trending. Eleven requests every ten
+  minutes at the host already known to throttle first, for coverage the five new
+  model groups replace. The budget holds at **34 requests a cycle** against 33
+  before. `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news.
+
+### Features
+
+- **keywords**: five model groups - `Claude`, `ChatGPT`, `GLM`, `Qwen`,
+  `DeepSeek` - each one its own group rather than five terms in one, because a
+  group's first plain term is its only search query. Measured: on the fixed
+  feeds alone GLM appeared once, Qwen twice and DeepSeek seven times in 2,239
+  items; with a query each they return 8, 20 and 67. A single group with a broad
+  query was tried and rejected - `"chatbot"` surfaced 36 vendor mentions but
+  only ChatGPT and Claude, `"LLM"` six. Plain terms, no regexes: `Claude` and
+  `GLM` were the ambiguity worry (Monet, the OpenGL maths library) and across
+  2,655 live items all 135 Claude hits and all 11 GLM hits were about the model.
+  The groups sit **ahead of the AI group** on purpose, so `notify.pick()` sends
+  a story labelled `Claude` rather than `AI`.
+
+- **rank**: `rank_groups()` takes a `max_age_days` cut and drops stories past it
+  **before** anything is scored, with `fresh_enough()` deciding one story at a
+  time. It is the floor the score cannot express: freshness decays as
+  `0.5 ** (age / half_life)` and reaches 0 after about two days, so past that a
+  three-day-old story and a three-year-old one are the same number, and a group
+  short of fresh matches fills its cap from whatever archive a feed ships.
+  Measured on the shipped template: 12 of 68 shortlisted stories were over 30
+  days old, five of them Hugging Face posts taking half of `AI Repos`, the
+  oldest **27,466 hours**. **A story with no `published_at` is kept at every
+  threshold** - the same rule `score()` follows from the other end, and
+  load-bearing besides, since `gh_trending` dates not one of its entries. The
+  cut runs on the whole pool before groups are filled, so a section stays at its
+  cap while fresh candidates remain and only empties when a keyword really has
+  nothing recent.
+- **config**: `rank.max_age_days` switches the above on. The code default is
+  `0`, no cut, so an upgrade that never mentioned `rank` reports exactly what it
+  did before; the template ships **14**. Measured end to end on a real cycle:
+  the oldest story reaching the store went from **27,466 h to 284 h** and
+  nothing over 336 h survived, while `AI`, `AI Repos`, `ESP32`, `Firmware`,
+  `RISC-V` and `GitHub Trending` all stayed at their caps - only `RTOS` shrank,
+  8 stories to 4, because four of its eight really were over a fortnight old.
+  That is the section going quiet, which the report has always been built to
+  show.
+
+- **filter**: matching can now read an item's **excerpt** as well as its title,
+  **per source**. `group_matches()`, `blocked()` and `select()` take the switch;
+  it is off everywhere unless a source asks for it, so nothing about an existing
+  config changes. It exists because the GitHub trending feed titles every entry
+  `owner/repo` and puts the description in the excerpt: title-only matching
+  passed **1 of 18** entries, with the excerpt **10**. Blanket widening was
+  measured and rejected - across twelve live sources it found 42% more matches
+  and the extras were noise (`An Alien Mind` from Hacker News, `Kernel prepatch
+  7.3-rc2` from LWN). The exclusion half widens with it: a source whose matching
+  reads the excerpt but whose `!` terms and `[GLOBAL_FILTER]` do not could not
+  filter back out what the wider reading let in.
+- **sources**: the shipped template gains five feeds - `gh_trending` (GitHub
+  trending, the one feed with `match_excerpt: true`), `openai`, `huggingface`,
+  `esp_idf_releases` and `cnx_esp32` - and `frequency_words.txt.example` gains a
+  regex-only **GitHub Trending** group that matches a bare `owner/repo` title
+  and nothing else (18 of 18 trending entries, 0 of 2,300 items across the other
+  eleven sources). The group exists because a dateless feed scores at most
+  `0.5 x weight` and the AI group cuts at 0.55, so trending repos matched there
+  and were then dropped every cycle; on their own they now fill their `@8`. Caps
+  widened with the supply: `ESP32` and `AI` to 12, `AI Repos` to 10. Cost is
+  measured: 34 requests and ~59s a cycle, up from 26 and ~48s.
+- **config**: `feeds[].match_excerpt` and `search_templates[].match_excerpt`
+  (bool, default `false`) switch the above on for one source.
+  `__main__._excerpt_sources()` collects the ids and hands them to
+  `filter.select()`, the same way `_source_weights()` already hands down
+  `rank_weight` - layer 3 does not import `config`. A config that never
+  mentions the key matches exactly as it did before.
+
 ## v0.2.7 - 2026-09-07
 
 ### Features
@@ -44,6 +130,17 @@ one makes the file and the tags disagree.
   says once per cycle that the check was skipped.
 
 ### Changed
+
+- **sources**: `genk` ships **disabled**. It carries no `pubDate` - 0 of 61
+  entries had one on 2026-09-07 - and `published_at = None` scores 0 for
+  freshness by design, so the source tops out at `0.5 x 0.6 = 0.30` against a
+  lowest measured group cut of 0.40. It matched 11 items a cycle and placed
+  none: disabling it removed 61 fetched items and left the shortlist **byte for
+  byte the same**, 68 stories across the same seven groups. The entry stays in
+  the file, switched off, so the reason travels with it; raising `rank_weight`
+  to compensate was rejected as the same guess `rank.py` refuses to make about a
+  missing date. `vnexpress_sohoa` and `tinhte` are unaffected - both date every
+  entry and both place.
 
 - **schedule**: the shipped `config.yaml.example` now polls every **10
   minutes** instead of 30. The code default stays 30, so a config that never

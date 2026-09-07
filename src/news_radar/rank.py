@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from .item import dedup_key
 
-__all__ = ["Story", "collapse", "score", "rank_groups"]
+__all__ = ["Story", "collapse", "score", "fresh_enough", "rank_groups"]
 
 # Past this many sources, another copy of the same story says nothing new. The
 # frequency term is (n - 1) / SATURATION_SPAN, clamped at 1.0.
@@ -101,7 +101,30 @@ def score(story, weights, source_weights, now):
             + weights.get("weight_freshness", 0.2) * freshness)
 
 
-def rank_groups(stories, groups, weights, source_weights, now, default_cap=0):
+def fresh_enough(story, now, max_age_days):
+    """Is this story inside the absolute age limit? `0` days switches it off.
+
+    The floor `score()` cannot express. Freshness decays as
+    `0.5 ** (age / half_life)` and reaches 0 after about two days, so past that
+    point a three-day-old story and a three-year-old one are the same number -
+    and a group short of fresh matches fills the rest of its cap from whatever
+    archive a feed happens to ship. Measured on the shipped template
+    2026-09-07: 12 of 68 shortlisted stories were over 30 days old, five of them
+    Hugging Face posts taking half of `AI Repos`, the oldest 27,466 hours.
+
+    **A story with no `published_at` is kept**, at every threshold. That is the
+    same rule `score()` follows from the other end - a missing date is not
+    evidence, and guessing "old" here would be as wrong as guessing "now"
+    there. It is also load-bearing: the shipped `gh_trending` feed dates not one
+    of its entries, so dropping the undated would empty its group entirely.
+    """
+    if max_age_days <= 0 or story.published_at is None:
+        return True
+    return (now - story.published_at).total_seconds() <= max_age_days * 86400.0
+
+
+def rank_groups(stories, groups, weights, source_weights, now, default_cap=0,
+                max_age_days=0):
     """{label: [Story, ...]} - each group sorted best first, then capped.
 
     Every group gets a key even when nothing matched it. An empty section is
@@ -110,7 +133,14 @@ def rank_groups(stories, groups, weights, source_weights, now, default_cap=0):
 
     The cap is the group's own `@n`, falling back to `default_cap`
     (`report.max_per_group`). `0` means unlimited in both.
+
+    `max_age_days` is applied to the whole pool **before** any group is filled,
+    so a group at its cap stays at its cap as long as fresh candidates remain
+    below the line - the cut changes *which* stories fill a section, not how
+    many, until a keyword genuinely has nothing recent.
     """
+    stories = [s for s in stories if fresh_enough(s, now, max_age_days)]
+
     for story in stories:
         story.score = score(story, weights, source_weights, now)
 

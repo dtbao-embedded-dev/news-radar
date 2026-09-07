@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-05
 source: src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py
 confidence: confirmed
-keywords: blocked, group_matches, select, Story, collapse, score, rank_groups, source_weights, weights, default_cap, SATURATION_SPAN, DEFAULT_SOURCE_WEIGHT, global filter, cap
+keywords: blocked, group_matches, select, max_age_days, fresh_enough, excerpt_sources, match_excerpt, Story, collapse, score, rank_groups, source_weights, weights, default_cap, SATURATION_SPAN, DEFAULT_SOURCE_WEIGHT, global filter, cap
 order: 6
 ---
 
@@ -22,9 +22,9 @@ order: 6
 
 | Signature | Returns |
 |-----------|---------|
-| `blocked(item, global_terms)` | `True` when a `[GLOBAL_FILTER]` exclusion matches the folded title. An empty `global_terms` blocks nothing |
-| `group_matches(item, group)` | `True` when the item belongs to this `KeywordGroup`: any-of, then required, then excluded |
-| `select(items, groups, global_terms)` | `[(NewsItem, [label, ...])]` - input order preserved. Items that are blocked, or that match no group, are **dropped** rather than carried with an empty label list |
+| `blocked(item, global_terms, excerpt=False)` | `True` when a `[GLOBAL_FILTER]` exclusion matches the folded title - and the excerpt too when `excerpt`. An empty `global_terms` blocks nothing |
+| `group_matches(item, group, excerpt=False)` | `True` when the item belongs to this `KeywordGroup`: any-of, then required, then excluded. `excerpt` extends all three rules, and the regexes, to `title + excerpt` |
+| `select(items, groups, global_terms, excerpt_sources=())` | `[(NewsItem, [label, ...])]` - input order preserved. Items that are blocked, or that match no group, are **dropped** rather than carried with an empty label list |
 
 Plain terms and `+`/`!` terms are compared on `fold(item.title)`; a `/regex/` is
 run with `re.search` against the **original** title. Labels come back in the
@@ -38,7 +38,8 @@ in.
 | `Story` | Mutable dataclass: `item`, `source_ids` (tuple), `labels` (tuple), `published_at`, `score=0.0` |
 | `collapse(pairs)` | `[Story]`, one per `dedup_key()`, in first-seen order |
 | `score(story, weights, source_weights, now)` | The weighted sum as a float. Does not mutate the story |
-| `rank_groups(stories, groups, weights, source_weights, now, default_cap=0)` | `{label: [Story, ...]}` - sorted best first, then capped. **Writes `story.score` back** onto every story it is given |
+| `rank_groups(stories, groups, weights, source_weights, now, default_cap=0, max_age_days=0)` | `{label: [Story, ...]}` - every group keyed even when empty. `max_age_days` drops stories past the cut **before** anything is scored, so a group stays at its cap while fresh candidates remain; `0` is no cut |
+| `fresh_enough(story, now, max_age_days)` | `True` when the story is inside the absolute age limit. `0` days switches it off, and a story with **no `published_at` is always kept** - the same "never a guess" rule `score()` follows, and load-bearing: `gh_trending` dates none of its entries |
 
 `Story.item` is the first copy seen and the one displayed; `Story.published_at`
 is the *earliest* of every copy and is not necessarily `item.published_at`. The

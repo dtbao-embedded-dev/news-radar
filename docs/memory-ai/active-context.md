@@ -9,6 +9,53 @@ updated: 2026-09-07
 
 ## Current focus
 
+**Topics reshaped to what the user actually reads (2026-09-07, unreleased
+after v0.2.7).** `RTOS` out, five model groups in - `Claude`, `ChatGPT`, `GLM`,
+`Qwen`, `DeepSeek` - and the `google_news` (hl=vi) template disabled to keep the
+cycle at 34 requests. Numbers in [[progress]].
+
+**Next:** cut a release. Then the homelab needs **both** of its gitignored files
+edited by hand or none of this reaches production: `config.yaml` for the new
+feeds, `rank.max_age_days`, the disabled `genk`/`google_news`, and
+`config/frequency_words.txt` for the five model groups plus `GitHub Trending`.
+That file is the one the deployment tunes, so it will not merge on its own.
+
+**Report quality, measured rather than argued (2026-09-07, unreleased after
+v0.2.7).** Auditing the shipped sources end to end turned up three defects and
+all three are fixed: `genk` disabled (0 of 61 entries carry a date, so it could
+never place), a config comment corrected, and an absolute age floor added -
+`rank.max_age_days`, template 14. Numbers in [[progress]].
+
+**The pattern across this whole session is worth keeping.** Four separate
+things looked obviously right and were wrong until measured: blanket excerpt
+matching (+42% noise), `arxiv_cs_ai` (ceiling below every group's cut),
+`esp_idf_releases` at weight 0.8 (looked broken, was correct), and `r_embedded`
+(looked dead, works on the homelab). Every one was settled by running the real
+pipeline against live sources, not by reading the code.
+
+**Next:** cut a release, then the homelab needs both of its gitignored files
+edited by hand - `config.yaml` for the new feeds and `rank.max_age_days`, and
+`config/frequency_words.txt` for the `GitHub Trending` group. Nothing here
+reaches production on its own.
+
+**Sources widened for AI, GitHub trending and Espressif (2026-09-07,
+unreleased after v0.2.7).** A survey of 44 candidate feeds, each verified with
+the project's own `read_source()`, ended in three changes: per-source excerpt
+matching (`feeds[].match_excerpt`), five new shipped feeds, and a regex-only
+`GitHub Trending` keyword group. Every number behind them is in [[progress]].
+
+**What the survey settled that guesswork would not have.** Blanket excerpt
+matching looked obvious and was wrong - 42% more matches, all noise. `arxiv_cs_ai`
+looked valuable and could never place a story. `esp_idf_releases` looked broken
+at weight 0.8 and was correct. `r_embedded` looked dead from the Windows box and
+returns 25 items on the homelab.
+
+**Next:** cut a release, then edit the homelab's own `config.yaml` **and**
+`config/frequency_words.txt` by hand - both are gitignored there, so neither the
+new feeds nor the new group reach production on their own. Then watch whether
+Google News starts throttling: the cycle now makes 34 requests every ten
+minutes.
+
 **The page is off and the radar polls three times an hour (2026-09-07,
 unreleased after v0.2.6).** Three changes, all on `release/v0.2`:
 

@@ -143,6 +143,30 @@ except ValueError:
     pass
 
 
+# --- the excerpt: same treatment as the title, plus a cap ------------------
+
+# It is written from somebody else's CMS and read by a prompt, so it is
+# stripped on the way in exactly like a title is - and capped, because a feed
+# that ships the whole article would otherwise be paid for in full.
+ex = mod.new_item("A title", "https://e.invalid/a", "hn", NOW,
+                  excerpt="  <p>Two <b>words</b></p>  &amp; more  ")
+eq("tags out, entities in, whitespace collapsed",
+   ex.excerpt, "Two words & more")
+eq("a source with no description carries an empty string, never None",
+   mod.new_item("A title", "https://e.invalid/a", "hn", NOW).excerpt, "")
+check("a full-article feed is capped",
+      len(mod.new_item("T", "https://e.invalid/a", "hn", NOW,
+                       excerpt="x " * 5000).excerpt) <= mod.EXCERPT_MAX)
+check("an empty description is not a reason to drop the story",
+      mod.new_item("T", "https://e.invalid/a", "hn", NOW, excerpt="   ").title
+      == "T")
+eq("the excerpt is not part of the dedup key",
+   mod.dedup_key(mod.new_item("T", "https://e.invalid/a", "hn", NOW,
+                              excerpt="one")),
+   mod.dedup_key(mod.new_item("T", "https://e.invalid/a", "hn", NOW,
+                              excerpt="two")))
+
+
 # --------------------------------------------------------------------------
 
 if FAILURES:

@@ -115,12 +115,25 @@ def _report_groups(ranked):
                      ", ".join(story.source_ids))
 
 
-def _summarize(cfg, day, labels):
-    """Today's AI summary, or None. Never a reason the cycle failed.
+def _summarize(cfg, conn, day, labels):
+    """Summarise the day's not-yet-summarised stories, in place and in the store.
 
     Off is the shipped case, and the whole point of P6-4's reversal: `ai.enabled`
     defaults to false, so a config that says nothing about `ai` never reaches
     the network and never sees a bill.
+
+    **One completion for the whole cycle, and each story in it exactly once.**
+    `day` is the whole local day - seventy-odd rows by evening - and the page is
+    rebuilt from it every thirty minutes. Asking about a row the store already
+    answered would be the same sentence bought forty-eight times, so the batch
+    is `store.unsummarised()` and the answers go straight back to the store.
+    `ai.max_per_run` caps what one cycle will pay for; the rest are picked up
+    next cycle, in page order, so a first run on an empty store spreads its
+    backlog over an hour instead of sending one enormous prompt.
+
+    The rows in `day` are mutated with what came back, because the caller
+    renders from them a few lines later and a summary written to disk but not
+    to the page would be a cycle behind for no reason.
 
     Guarded even though `summarize.summarize()` already swallows every failure
     of its own: the Fetcher constructor refuses an empty User-Agent, and the one
@@ -129,26 +142,44 @@ def _summarize(cfg, day, labels):
     afternoon is not a news-radar outage, and it must not withhold the ping.
     """
     if not cfg.get("ai.enabled"):
-        return None
+        return
     try:
-        return summarize.summarize(
+        # Page order, so the backlog is worked through the way it is read.
+        rows = {row["dedup_key"]: row
+                for label in labels for row in day.get(label) or []}
+        todo = [rows[key] for key in store.unsummarised(conn, list(rows))]
+        if not todo:
+            return
+
+        cap = cfg.get("ai.max_per_run", 20)
+        held = len(todo) - cap
+        todo = todo[:cap]
+        if held > 0:
+            log.info("summary: %d story(ies) held for the next cycle", held)
+
+        summaries = summarize.summarize(
             _fetcher(cfg, cfg.get("ai.timeout_s", 60)),
             cfg.get("ai.api_url"), os.environ.get("OPENAI_API_KEY"),
-            cfg.get("ai.model"), day, labels,
-            cfg.get("ai.max_per_topic", 5))
+            cfg.get("ai.model"), todo)
+        if not summaries:
+            return
+
+        store.save_summaries(conn, summaries)
+        for key, text in summaries.items():
+            rows[key]["ai_summary"] = text
     except Exception:
         log.exception("the summary failed; the page is written without one")
-        return None
 
 
 def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
-    """Persist the run and rewrite the page. Returns `(run_id, summary)`.
+    """Persist the run and rewrite the page. Returns the run id, or `None`.
 
     The id is what the senders read the run back by, so a cycle whose storage
     failed notifies nothing rather than notifying a run that was never written.
-    The summary is produced here rather than in `crawl()` because it is built
-    from the same `day` rows the page renders - one read of the store, and the
-    paragraph at the top of the page describes exactly what is under it.
+    The summaries are written here rather than in `crawl()` because they belong
+    to the same `day` rows the page renders and the messages are built from -
+    one read of the store, and the sentence under a headline on the page is the
+    same sentence under the same headline on a phone.
 
     Guarded as a whole, for the same reason the keyword file is: a full disk, a
     locked database or a read-only volume must not throw away the 597 items that
@@ -157,7 +188,6 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
     """
     data_dir = cfg.get("storage.data_dir", "output")
     conn = None
-    summary = None
     try:
         conn = store.open_db(data_dir)
         run_id = store.start_run(conn, fetched_at)
@@ -171,15 +201,14 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
         day = store.day_matches(conn, start, end)
 
         if groups:
-            summary = _summarize(cfg, day, [g.label for g in groups])
+            _summarize(cfg, conn, day, [g.label for g in groups])
             render.write(
                 data_dir, [g.label for g in groups], day,
                 {"run_id": run_id, "fetched": fetched, "matched": matched,
                  "sources": len(cfg.enabled_feeds())
                             + len(cfg.enabled_search_templates()),
                  "errors": len(errors), "generated_at": fetched_at},
-                tz, threshold=cfg.get("report.rank_threshold", 5),
-                summary=summary)
+                tz, threshold=cfg.get("report.rank_threshold", 5))
         else:
             # No keyword file means no group order to render in, and a page with
             # no sections at all is worse than yesterday's page: it reads as "no
@@ -209,10 +238,10 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
                  "story(ies) across %d group(s) today", rows, run_id,
                  sum(len(day.get(label) or []) for label in labels),
                  len(labels))
-        return run_id, summary
+        return run_id
     except Exception:
         log.exception("storing or rendering failed, the fetched items are kept")
-        return None, None
+        return None
     finally:
         if conn is not None:
             conn.close()
@@ -360,76 +389,6 @@ def _notify(cfg, fetcher, run_id, labels, fetched_at):
             conn.close()
 
 
-def _send_summary(cfg, summary, fetched_at):
-    """Push the day's summary to every enabled channel, once per local day.
-
-    The page gets a fresh summary every cycle; a phone gets one a day. That
-    asymmetry is the whole design: the page is somewhere you go and the message
-    is something that interrupts you, and forty-eight interruptions a day
-    saying roughly the same thing is how a channel gets muted - taking the
-    outage alerts with it.
-
-    "Once" survives a restart because it is not remembered in memory. The
-    `reported` table already answers *"has this channel been told about X"* per
-    channel and idempotently, so the summary rides in it under
-    `summarize.daily_key()` - no schema, no second mechanism, and a container
-    that came back at noon still knows this morning's went out.
-
-    Sent through the channels' `alert()` rather than `send()`: a summary is
-    sentences, not a list of links, which is exactly the payload `alert()` was
-    shaped for - and on Telegram that means no `parse_mode`, so an em dash or a
-    stray `<` from a model cannot cost the message.
-
-    Guarded throughout. Nothing here may end the cycle: the page is already
-    written by the time it runs.
-    """
-    if not summary:
-        return
-
-    tz = render.local_tz(cfg.get("app.timezone") or "UTC")
-    local = fetched_at.astimezone(tz)
-    hour = cfg.get("ai.notify_at_hour", 8)
-    if local.hour < hour:
-        log.info("summary: holding until %02d:00 local", hour)
-        return
-
-    channels = [c for c in cfg.enabled_channels() if c in ALERTERS]
-    if not channels:
-        return
-
-    key = summarize.daily_key(local.date())
-    conn = None
-    try:
-        conn = store.open_db(cfg.get("storage.data_dir", "output"))
-        todo = [c for c in channels if store.unreported(conn, [key], c)]
-        if not todo:
-            log.info("summary: already sent today")
-            return
-
-        fetcher = _fetcher(cfg)
-        taken = []
-        for name in todo:
-            try:
-                if ALERTERS[name](fetcher, summary, os.environ):
-                    # Marked per channel and only on acceptance, the same rule
-                    # the stories follow: a refused message is retried next
-                    # cycle rather than counted as delivered.
-                    store.mark_reported(conn, [key], name, fetched_at)
-                    taken.append(name)
-            except Exception:
-                log.exception("could not send the summary on %s; the other "
-                              "channels and the cycle are unaffected", name)
-
-        log.info("summary: sent to %d of %d channel(s) [%s]",
-                 len(taken), len(todo), ", ".join(taken) or "none")
-    except Exception:
-        log.exception("sending the summary failed; the page and the run are "
-                      "unaffected")
-    finally:
-        if conn is not None:
-            conn.close()
-
-
 def _dead_sources(cfg, errors):
     """A problem when *every* enabled source failed, and nothing otherwise.
 
@@ -512,20 +471,14 @@ def crawl(cfg):
     _report_groups(ranked)
     problems += _dead_sources(cfg, errors)
 
-    run_id, summary = _publish(cfg, ranked, groups, fetched_at, len(items),
-                               len(matched), errors)
+    run_id = _publish(cfg, ranked, groups, fetched_at, len(items),
+                      len(matched), errors)
     if run_id:
-        # The summary goes first, and the order is the whole point: a cycle can
-        # push dozens of story messages, and a summary sent after them is a
-        # summary nobody scrolls back up to find. Observed on 2026-09-05, when
-        # a keyword change made 43 stories newly unsent and buried the day's
-        # summary under eighteen messages of links.
-        #
-        # Outside the problem list either way: the summary is optional, so a
-        # failed one is a page without a paragraph and never a cycle that
-        # withholds its heartbeat ping. Guarded separately too, so a refused
-        # summary cannot cost the stories their turn.
-        _send_summary(cfg, summary, fetched_at)
+        # The summaries are already in the store by the time this runs, written
+        # inside `_publish`, so the sentence a phone shows under a headline is
+        # the one the page shows under the same headline. There is no separate
+        # summary message any more: one a day plus the list of links was the
+        # same day described twice, and the list is where the reader already is.
         _notify(cfg, fetcher, run_id, [g.label for g in groups], fetched_at)
     else:
         # `_publish` already logged the traceback. Without this line the cycle

@@ -53,7 +53,7 @@ def _url(url):
 
 
 def _line(row, tz):
-    """One story: a bullet, the masked link, and when it was published.
+    """One story: the masked link, the AI sentence under it, then the time.
 
     A masked link rather than a bare url on two counts - the raw address would
     widen every line past the phone's width, and Discord does not auto-embed a
@@ -62,11 +62,24 @@ def _line(row, tz):
     The time goes in a code span, where the source ids used to be: it is
     monospaced, so a column of them lines up the way the page's tabular figures
     do. The sources themselves left with v0.2.1's page.
+
+    A story with no summary collapses back to the one-line shape this channel
+    had before, time and all on the title's line - which is every story when
+    `ai.enabled` is false. The time only moves to its own line when there is a
+    sentence between them to move it.
     """
-    return "• [{title}]({url}) `{when}`".format(
+    head = "• [{title}]({url})".format(
         title=_e(clip(row.get("title"))),
-        url=_url(row.get("url") or row.get("canonical_url")),
-        when=stamp(row.get("published_at"), tz))
+        url=_url(row.get("url") or row.get("canonical_url")))
+    when = "`{}`".format(stamp(row.get("published_at"), tz))
+
+    gist = (row.get("ai_summary") or "").strip()
+    if not gist:
+        return "{} {}".format(head, when)
+    # `-#` is Discord's own subtext: small and grey, which is what a secondary
+    # line under a headline should look like. It only works at the start of a
+    # line, which is where the newline puts it.
+    return "{}\n-# “{}”\n{}".format(head, _e(gist), when)
 
 
 def build(groups, tz=UTC, limit=LIMIT):

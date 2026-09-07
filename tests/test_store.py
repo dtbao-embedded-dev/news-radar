@@ -374,6 +374,110 @@ eq("reopening a current store still works",
 conn.close()
 
 
+# -- v1 -> v2: the two summary columns, added without touching a row --------
+
+# A homelab that has been collecting since P4 has a v1 store full of stories,
+# and there is nothing in it worth throwing away for two nullable columns.
+old = data_dir()
+old.mkdir(parents=True, exist_ok=True)
+raw = sqlite3.connect(str(old / mod.DB_NAME))
+raw.executescript("""
+CREATE TABLE items (
+    dedup_key     TEXT PRIMARY KEY,
+    title         TEXT NOT NULL,
+    url           TEXT NOT NULL,
+    canonical_url TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    published_at  TEXT
+);
+CREATE TABLE item_sources (dedup_key TEXT, source_id TEXT,
+                           PRIMARY KEY (dedup_key, source_id));
+CREATE TABLE matches (dedup_key TEXT, group_name TEXT, score REAL,
+                      run_id TEXT, PRIMARY KEY (dedup_key, group_name, run_id));
+CREATE TABLE reported (dedup_key TEXT, channel TEXT, reported_at TEXT,
+                       PRIMARY KEY (dedup_key, channel));
+CREATE TABLE runs (run_id TEXT PRIMARY KEY, started_at TEXT, finished_at TEXT,
+                   items_fetched INTEGER, items_matched INTEGER, errors TEXT);
+""")
+raw.execute("INSERT INTO items (dedup_key, title, url, canonical_url,"
+            " first_seen_at, published_at) VALUES ('old', 'Yesterday',"
+            " 'https://e.invalid/o', 'https://e.invalid/o', ?, NULL)",
+            (mod.to_db(NOW - DAY),))
+raw.execute("PRAGMA user_version = 1")
+raw.commit()
+raw.close()
+
+conn = mod.open_db(old)
+eq("a v1 store is migrated rather than refused",
+   conn.execute("PRAGMA user_version").fetchone()[0], mod.SCHEMA_VERSION)
+eq("...and the rows it held are still there",
+   conn.execute("SELECT title FROM items").fetchone()[0], "Yesterday")
+eq("...with no summary yet, which is what 'not asked' means",
+   conn.execute("SELECT ai_summary FROM items").fetchone()[0], None)
+conn.close()
+conn = mod.open_db(old)
+eq("reopening a migrated store is a no-op",
+   conn.execute("PRAGMA user_version").fetchone()[0], mod.SCHEMA_VERSION)
+conn.close()
+
+
+# -- the excerpt, and the summary written once per story --------------------
+
+root = data_dir()
+conn = mod.open_db(root)
+run = mod.start_run(conn, NOW)
+
+with_text = new_item("With a teaser", "https://e.invalid/1", "hn", NOW,
+                     excerpt="The source's own description.")
+without = new_item("No teaser", "https://e.invalid/2", "hn", NOW)
+mod.save(conn, run, {"ESP32": [story(with_text, ["ESP32"], score=0.9),
+                               story(without, ["ESP32"], score=0.8)]}, NOW)
+
+rows = {r["dedup_key"]: r for r in mod.run_matches(conn, run)["ESP32"]}
+k1, k2 = dedup_key(with_text), dedup_key(without)
+eq("the feed's description survives into the row",
+   rows[k1]["excerpt"], "The source's own description.")
+eq("a story without one carries an empty string, never None",
+   rows[k2]["excerpt"], "")
+eq("no summary yet reads as an empty string on the row",
+   rows[k1]["ai_summary"], "")
+
+# A second source carrying the same story may be the one with a description.
+later = new_item("No teaser", "https://e.invalid/2", "lobsters", NOW,
+                 excerpt="Found on the second sighting.")
+mod.save(conn, run, {"ESP32": [story(later, ["ESP32"], score=0.8)]}, NOW)
+rows = {r["dedup_key"]: r for r in mod.run_matches(conn, run)["ESP32"]}
+eq("an excerpt arriving late fills an empty one",
+   rows[k2]["excerpt"], "Found on the second sighting.")
+
+blank = new_item("With a teaser", "https://e.invalid/1", "lobsters", NOW)
+mod.save(conn, run, {"ESP32": [story(blank, ["ESP32"], score=0.9)]}, NOW)
+rows = {r["dedup_key"]: r for r in mod.run_matches(conn, run)["ESP32"]}
+eq("...but an empty one never overwrites a real one",
+   rows[k1]["excerpt"], "The source's own description.")
+
+eq("every story starts unsummarised, in the caller's order",
+   mod.unsummarised(conn, [k1, k2]), [k1, k2])
+eq("no keys is no query", mod.unsummarised(conn, []), [])
+
+eq("save_summaries reports what it wrote",
+   mod.save_summaries(conn, {k1: "Câu tóm tắt.", k2: ""}), 2)
+eq("a summarised story is not asked about again",
+   mod.unsummarised(conn, [k1, k2]), [])
+
+rows = {r["dedup_key"]: r for r in mod.run_matches(conn, run)["ESP32"]}
+eq("the sentence is on the row the page and the senders read",
+   rows[k1]["ai_summary"], "Câu tóm tắt.")
+eq("a story the model said nothing about reads as empty, not None",
+   rows[k2]["ai_summary"], "")
+
+# The one that would otherwise cost a completion every thirty minutes forever.
+eq("an empty answer still counts as asked",
+   mod.unsummarised(conn, [k2]), [])
+eq("writing nothing writes nothing", mod.save_summaries(conn, {}), 0)
+conn.close()
+
+
 # --------------------------------------------------------------------------
 
 if FAILURES:

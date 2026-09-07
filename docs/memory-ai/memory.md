@@ -19,7 +19,48 @@ _Generated 2026-09-07 - 20 durable doc(s)._
 
 ## What works
 
+### The summary is per story, and paid for once (2026-09-07, unreleased)
+
+`ai.*` wrote one paragraph per keyword group, rendered at the top of the page
+and pushed as one message a local day. The reader got that **and** the list of
+links - the same day described twice, and the message that arrived second was
+the one nobody read. Now every story carries its own sentence, in the same place
+on the page and in both channels.
+
+- **The model is shown the source's own words, not just a headline.**
+  `feeds.py` parsed `entry.summary` and Atom `content` all along and threw them
+  away; they now land on `NewsItem.excerpt`, stripped and capped at 600
+  characters, and on `items.excerpt`. A source that carries none - a Reddit link
+  post - is summarised from its title alone rather than dropped.
+- **One completion per cycle, and one per story in its life.** The batch is
+  numbered into a single prompt; the answers are matched back by number and
+  written to `items.ai_summary`, which `store.unsummarised()` then excludes
+  forever. Measured on a three-story smoke run with `ai.max_per_run: 2`: cycle 1
+  sent one completion covering two stories, cycle 2 one covering the third,
+  cycle 3 none at all. Without the cache the page - rebuilt from the whole local
+  day every thirty minutes - would have bought the same sentence 48 times.
+- **A skipped line costs nothing twice.** A row the model did not answer is
+  written as `""`, which counts as asked. `{}` is reserved for a failed
+  *request*, which leaves those stories for the next cycle. That distinction is
+  the difference between one unsummarisable headline and a completion every half
+  hour forever.
+- **The parser assumes the model will misbehave.** `- **1.** ...`, `3)`, a
+  preamble, a skipped number and a number belonging to no story are all in
+  `tests/test_summarize.py`. A number outside the batch is dropped rather than
+  clamped: a wrong summary under a real headline is worse than none.
+- **Schema version 2, with the project's first real migration.** `open_db()`
+  ALTERs the two nullable columns onto a v1 store and stamps the version. A
+  homelab collecting since P4 opens and carries on; `tests/test_store.py` builds
+  a genuine v1 file by hand and checks the rows survive.
+- **The whole suite is green**, 16 files, including new coverage for the
+  migration, the excerpt's re-sighting rule, the three-line message shape on
+  both channels, and the chunk budget under three-line stories.
+
 ### The AI summary runs for real, on OpenRouter (2026-09-07)
+
+> Superseded by the section above on the same day - the per-topic prompt and the
+> once-a-day message are gone. Kept because what it establishes still holds: the
+> endpoint, the model choice, and the `.env` recreate rule.
 
 `ai.*` had been built, tested against a local stub, and never pointed at a real
 model. The homelab now runs it: `api_url:
@@ -105,12 +146,20 @@ each step:
   a non-problem. The cycle after the restart logged
   `heartbeat: http://caddy:8080/ answered`.
 
-**One loose end is left, and it needs the Cloudflare dashboard.** The
-`news.dtbao.org` CNAME still exists and now points at a tunnel that is gone, so
-the hostname answers **530** instead of not resolving. `cloudflared tunnel
-route` can only *create* DNS records - there is no delete subcommand - so
-removing it is a dashboard or API operation, not something this repository can
-do.
+**Finished off the same day.** The `news.dtbao.org` CNAME is deleted:
+`cloudflared` has no delete for DNS records, but the token that writes them is
+already on the box - `~/.cloudflared/cert.pem` carries an `ARGO TUNNEL TOKEN`
+block whose `apiToken` is a zone credential, and one `DELETE
+/zones/<id>/dns_records/<id>` removed it. Guarded to an exact name match and
+listed before it was touched: one `CNAME news.dtbao.org ->
+94fedb96-...cfargotunnel.com`, the tunnel that had already been deleted.
+Afterwards the hostname does not resolve at all (`Name or service not known`),
+the zone holds **9 records** and none of them is `news`, and `git.dtbao.org`,
+`photos.dtbao.org` and `www.dtbao.org` all still answer through Cloudflare.
+
+**That makes `~/.cloudflared/cert.pem` a zone-wide DNS-write credential**, which
+is a stronger secret than the per-tunnel credentials file the bank has always
+called out. Worth knowing before that file is ever copied somewhere.
 
 ### The package is an image, and the data is out of its way (2026-09-06)
 
@@ -784,16 +833,31 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Current focus
 
-**Shipping as an image, with the deployment's data out of reach (2026-09-06,
-unreleased on `release/v0.2`).** The previous work made an upgrade *checkable*;
-this makes the failure it checks for unreachable. Production stops being a git
-checkout, so the machine holding `config/`, `output/` and `backups/` has no
-command that can delete them. Five changes: `${NEWS_RADAR_HOME:-..}` on every
-bind mount including caddy's `/srv`, a GHCR image reference beside the kept
-`build:`, `.github/workflows/image.yml` publishing on a `v*` tag, a `watchtower`
-service behind an opt-in `autoupdate` profile scoped by label to the crawl
-container alone, and `python -m news_radar --check` carrying the config-drift
-check into the image where `scripts/setup.py` no longer exists.
+**The summary moved from the topic to the story (2026-09-07, unreleased on
+`release/v0.2`).** The day used to be described twice: a paragraph per keyword
+group at the top of the page, the same paragraphs as one message a local day,
+and then the list of links the reader was going to read anyway. It is now one
+sentence under each story, in the same position on the page and in both
+channels, and there is no separate summary message at all.
+
+Six changes, all unreleased: `NewsItem.excerpt` carries the feed's own
+`<description>` (parsed in `feeds.py`, thrown away until now); `items.excerpt`
+and `items.ai_summary` are schema **version 2**, with the project's first real
+migration in `open_db()`; `summarize.py` asks about a numbered batch of stories
+and parses the numbers back; `store.unsummarised()` / `save_summaries()` make it
+once per story rather than once per cycle; `render._summary()` and
+`section.summary` are gone, replaced by `p.gist` inside each `li.story`; and
+`ai.max_per_run` replaced `ai.max_per_topic` and `ai.notify_at_hour`.
+
+**The cost shape is the point.** One completion per cycle, capped at
+`ai.max_per_run` new stories, and never re-asked - verified on a three-story
+smoke run with the cap at 2: one completion, then one, then zero.
+
+**What is not yet known:** whether a free model writes a *useful* Vietnamese
+sentence from a headline plus a feed teaser. The per-topic version was judged on
+a real run against OpenRouter; this one has only been run against a stub. The
+first homelab cycle after deploy is the evidence. Also unmeasured: how many more
+messages three-line stories make on Discord's 1900-character budget.
 
 **The tunnel is gone (2026-09-07).** The `cloudflared` service,
 `docker/cloudflared.yml`, `NEWS_RADAR_TUNNEL_ID` and the credentials-file
@@ -862,6 +926,21 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **Both tunnel loose ends are closed, and v0.2.4 removed the last drift**
+  (2026-09-07). The `news.dtbao.org` CNAME is deleted - `cloudflared` has no DNS
+  delete, but `~/.cloudflared/cert.pem` carries an `ARGO TUNNEL TOKEN` block
+  whose `apiToken` is a zone credential, which is what `tunnel route dns` writes
+  with, so one `DELETE /zones/<id>/dns_records/<id>` did it. The hostname does
+  not resolve at all now; the zone holds 9 records and none is `news`. **That
+  file is a zone-wide DNS-write credential**, worth knowing before it is copied.
+  And 0.2.4 was cut so the *released* compose file carries the watchtower fix -
+  the homelab's copy is byte-identical to it again (`52656984a84bcd72` both
+  sides), which is how the hand-patch stopped being drift.
+- **The deployment compose file is only ever fixed by a release.** A `pull`
+  updates the image, never the file that runs it. So a hand-patch on the
+  deployment is drift until a version carries the same change and the file is
+  re-fetched - which is the argument for cutting a patch release over a one-line
+  compose fix rather than leaving it edited in place.
 - **v0.2.3 is cut, published and deployed** (2026-09-07) - the first release to
   go out as an image, and the first time the whole pipeline ran for real.
   `Release`, `Test` and `Publish image` all green on the tag; the homelab pulled
@@ -2023,7 +2102,7 @@ id - `hn` and `hn_algolia` are different hosts, the two Reddit entries are not.
 3. Record it in the table above and restamp `updated`.
 
 ### [data] News Item, Dedup Key and Output Layout
-*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py - keywords: NewsItem, dedup key, canonical url, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle*
+*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py - keywords: NewsItem, dedup key, canonical url, excerpt, EXCERPT_MAX, ai_summary, gist, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle*
 
 # News Item, Dedup Key and Output Layout
 
@@ -2046,10 +2125,13 @@ mutating the item.
 | `published_at` | datetime \| None | no | Source timestamp, converted to UTC. `None` means the source gave none - never substitute "now" |
 | `fetched_at` | datetime | yes | When this run retrieved it, UTC |
 | `keyword_group` | str \| None | no | For a search-feed item: the group whose term produced the query |
+| `excerpt` | str | no | The feed's own `<description>` / Atom `summary` or `content` (longest wins), HTML stripped and cut to `EXCERPT_MAX` (600). `""` when the source carried none. What the AI summary is written from - see [[ai-summary]] |
 
 Invariants:
 
 - `title` is never empty; an item without a title is dropped at parse time.
+- `excerpt` is never `None` and never markup; an empty one is never a reason
+  to drop a story, and it is not part of the dedup key.
 - `canonical_url` is stable across runs for the same story, or dedup silently stops working.
 - All datetimes are timezone-aware UTC in memory and stored as UTC in SQLite.
   Local time (`TZ`, default `Asia/Ho_Chi_Minh`) is applied only at render time.
@@ -2167,7 +2249,7 @@ the optional AI summary, then one `<section class="group">` per label in order.
 | `#theme` | the light/dark toggle, remembered in `localStorage` under `news-radar-theme` |
 | `nav.jump` | one link per group to `#g-<slug>`, with its count; an empty group is dimmed, never dropped |
 | `nav.days` | one link per snapshot on disk, newest first, today's included |
-| `li.story` | **the title, and the timestamp only** - two grid cells on one baseline; the title is `target="_blank"` + `rel="noopener noreferrer"` |
+| `li.story` | the title and the timestamp on one baseline (two grid cells), and - when the story has one - `p.gist`, the AI sentence, on a second row spanning both columns. The title is `target="_blank"` + `rel="noopener noreferrer"` |
 
 **Story links open in a new tab, internal links do not.** A story leads off this
 site and the report is what the reader came back to, so `li.story a` carries
@@ -2192,7 +2274,7 @@ Two consequences worth knowing before changing this:
   asserts the rule is on the page.
 
 ### [interface] Config Keys, Keyword File and Environment
-*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
 
 # Config Keys, Keyword File and Environment
 
@@ -2244,12 +2326,11 @@ someone chose it.
 | `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. **Point it at `http://caddy:8080/`**, which resolves over the compose network: it then tests the web server this stack is responsible for. A public URL here turns somebody else's outage into a failed cycle. `""` = no check |
 | `ops.backup_dir` | str | `backups` | Where the daily store backup is written. **Never under `storage.data_dir`** - that directory is served to the public web |
 | `ops.backup_keep` | int | `7` | Newest N backups kept; `0` = back nothing up |
-| `ai.enabled` | bool | `false` | The AI summary. Off is the shipped case: a config that says nothing about `ai` never reaches the network and never sees a bill |
+| `ai.enabled` | bool | `false` | The AI summary - one sentence under each story, on the page and in the message. Off is the shipped case: a config that says nothing about `ai` never reaches the network and never sees a bill |
 | `ai.api_url` | str | `https://api.openai.com/v1/chat/completions` | Any endpoint speaking the OpenAI chat-completions wire format - OpenRouter, DeepSeek, Groq, a local Ollama. Must be an http(s) url, and non-empty when `ai.enabled` |
 | `ai.model` | str | `gpt-4o-mini` | Model id, passed through verbatim |
-| `ai.max_per_topic` | int | `5` | Top-scored stories per keyword group that reach the prompt. Must be >= 1: zero is a prompt with nothing in it and a bill for asking |
+| `ai.max_per_run` | int | `20` | Stories one cycle will pay to summarise. The rest wait for the next cycle, so a first run against a full store does not send one enormous prompt. Must be >= 1: zero is a prompt with nothing in it, and a cap of zero would silently disable a feature `ai.enabled` says is on |
 | `ai.timeout_s` | int | `60` | Per-request timeout for the completion only. `advanced.request_timeout_s` stays the feeds' budget; fifteen seconds would time out every summary while looking like an outage |
-| `ai.notify_at_hour` | int | `8` | Local hour (0-23) at or after which the once-a-day summary message goes out. The page is rewritten every cycle regardless |
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |
@@ -2571,12 +2652,12 @@ buzz to say nothing happened.
 
 The same row `store.day_matches()` and `store.run_matches()` return - see
 [[storage-layer]]. A channel reads `dedup_key`, `title`, `url`,
-`canonical_url` and `published_at`, and ignores the rest - `sources` included,
-since v0.2.2.
+`canonical_url`, `published_at` and `ai_summary`, and ignores the rest -
+`sources` included, since v0.2.2.
 
-**A message line is the page's line.** The page shows a title and a local time
-and nothing else ([[news-item]]); a message that shows the same story with a
-source id and no time is a second report, not the same one. `notify.stamp(moment,
+**A message line is the page's line.** The page shows a title, the AI sentence
+when there is one, and a local time ([[news-item]]); a message that shows the
+same story with a source id and no time is a second report, not the same one. `notify.stamp(moment,
 tz)` renders `published_at` as `%H:%M %d/%m`, or `--` when the source gave no
 timestamp - the page's own honest dash. The format is duplicated from
 `render._when()` rather than imported: `render` and `notify` are the two halves
@@ -2607,7 +2688,10 @@ all.
 | `alert(fetcher, text, token, chat_id)` | `bool` - one operational message, **no `parse_mode`** |
 
 Formatting: `<b>label</b>` per group, then
-`• <a href="url">title</a> <i>HH:MM dd/mm</i>` per story.
+`• <a href="url">title</a>` ⏎ `<i>“gist”</i>` ⏎ `<i>HH:MM dd/mm</i>` per
+story **when it has a summary**, and the one-line
+`• <a href="url">title</a> <i>HH:MM dd/mm</i>` when it does not - which is every
+story under the shipped `ai.enabled: false`.
 
 - **HTML, not Markdown.** Telegram's Markdown refuses a message over any
   unbalanced `*` or `_` in a headline and the whole message is lost; HTML has one
@@ -2640,7 +2724,10 @@ Formatting: `<b>label</b>` per group, then
 | `send(fetcher, groups, webhook_url, tz=UTC)` | `SendResult` |
 | `alert(fetcher, text, webhook_url)` | `bool` - one operational message, Markdown-escaped |
 
-Formatting: `**label**` per group, then ``• [title](url) `HH:MM dd/mm` `` per story.
+Formatting: `**label**` per group, then ``• [title](url)`` ⏎ `-# “gist”` ⏎
+``` `HH:MM dd/mm` ``` per story **when it has a summary**, and the one-line
+``• [title](url) `HH:MM dd/mm` `` when it does not. `-#` is Discord's subtext
+and only works at the start of a line.
 
 - **Plain `content`, no embeds.** The 6000-character total across embeds is
   easier to overrun than any per-embed limit, and it buys nothing here.
@@ -3205,6 +3292,8 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `run_matches(conn, run_id)` | `{label: [row]}` | The same row shape for one run - what a notification is built from |
 | `unreported(conn, dedup_keys, channel)` | `[dedup_key]` | The seen-set diff, in the caller's order. `[]` for an empty input |
 | `mark_reported(conn, dedup_keys, channel, when)` | `None` | Idempotent - `INSERT OR IGNORE` |
+| `unsummarised(conn, dedup_keys)` | `[dedup_key]` | Those with `ai_summary IS NULL`, in the caller's order. `""` counts as summarised - see [[ai-summary]] |
+| `save_summaries(conn, summaries)` | `int` | `{dedup_key: text}` onto `items.ai_summary`. Writes `""` too: that is the record of having asked |
 | `backup(conn, backup_dir, now, keep)` | `(path \| None, removed)` | One `news-<UTC date>.db` per day via `conn.backup()`. A second call the same day returns `(None, 0)`. `keep <= 0` writes nothing and creates no directory |
 | `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)`. The shipped `config.yaml` sets `90`; the fallback for an **absent** key stays `0` |
 | `to_db(moment)` / `from_db(text)` | `str \| None` / `datetime \| None` | The one serialisation, both ways |
@@ -3216,16 +3305,18 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `== SCHEMA_VERSION` | Opened |
 | `0` | No file, or an empty one. The schema is created and the version stamped. Not an error - it is the first run |
 | `> SCHEMA_VERSION` | `StoreError`. Another copy of this store is written by a newer build, and dropping columns it needs is not a recovery |
-| anything in between | `StoreError`, naming both versions. **There is no migration code in this project yet** |
+| `1` | **Migrated in place**: `ALTER TABLE items ADD COLUMN excerpt TEXT` and `ai_summary TEXT`, then the version is stamped. A v1 store is a homelab collecting since P4, and two nullable columns are not a reason to throw it away |
+| anything in between | `StoreError`, naming both versions |
 
-The last row is currently unreachable - `SCHEMA_VERSION` is `1`, so there is no
-integer between `0` and it - and it exists so that the day it becomes reachable
-is a loud one. Until v0.2.3 that case fell through every branch and `open_db()`
-returned a connection to a store whose shape the build did not match, which is
-how a query silently reads a column that means something else now.
+`SCHEMA_VERSION` is `2`, so the last row is again the empty set - `0 < v < 2`
+holds for nothing once `1` has its own branch - and it exists so that the day it
+becomes reachable is a loud one. Until v0.2.3 that case fell through every
+branch and `open_db()` returned a connection to a store whose shape the build
+did not match, which is how a query silently reads a column that means something
+else now.
 
-**Bumping `SCHEMA_VERSION` means writing the migration in that branch**, in the
-same commit. The cycle survives a refusal either way: every caller is inside a
+**Bumping `SCHEMA_VERSION` means writing the migration in a branch of its own**,
+above the one that raises, in the same commit. `1 -> 2` is the worked example. The cycle survives a refusal either way: every caller is inside a
 guard, so a refused store costs the page and the notifications, logs a
 traceback, withholds the heartbeat ping, and alerts after two cycles.
 
@@ -3233,7 +3324,7 @@ traceback, withholds the heartbeat ping, and alerts after two cycles.
 
 | Table | Columns | Purpose |
 |-------|---------|---------|
-| `items` | `dedup_key` PK, `title`, `url`, `canonical_url`, `first_seen_at`, `published_at` | Every story ever shortlisted, one row per dedup key |
+| `items` | `dedup_key` PK, `title`, `url`, `canonical_url`, `first_seen_at`, `published_at`, `excerpt`, `ai_summary` | Every story ever shortlisted, one row per dedup key. `excerpt` is the feed's own description; `ai_summary` is NULL until asked |
 | `item_sources` | `(dedup_key, source_id)` PK | Which sources carried it - accumulating, one row per pair |
 | `matches` | `(dedup_key, group_name, run_id)` PK, `score` | Which groups it matched in a given run, and the score that run gave it |
 | `reported` | `(dedup_key, channel)` PK, `reported_at` | The seen-set: what has already gone out, per channel |
@@ -3253,6 +3344,9 @@ holds all three in one UPSERT:
 2. **`published_at` keeps the earliest non-null** anyone reported. A source that
    gives no timestamp must not erase one that did, so a `NULL` never wins.
 3. **The source set accumulates**, because `item_sources` ignores a duplicate.
+4. **`excerpt` keeps the first non-empty** anyone carried. The second source to
+   report a story may be the one with a description, and an empty string must
+   never overwrite real text - the same shape as rule 2, for the same reason.
 
 ### The row both readers return
 
@@ -3274,6 +3368,8 @@ between the two functions.
 | `published_at` | `datetime \| None` | Aware UTC, parsed back |
 | `first_seen_at` | `datetime` | Aware UTC |
 | `sources` | `tuple[str, ...]` | The accumulated source ids |
+| `excerpt` | str | The feed's own description, stripped and capped. `""` when the source gave none |
+| `ai_summary` | str | The model's sentence. `""` for both "not asked" and "asked, nothing useful" - the NULL/`""` distinction lives in SQL, not on the row |
 
 ## `render.py` - layer 5
 
@@ -3284,7 +3380,7 @@ page does not earn a dependency.
 |-----------|---------|-------|
 | `local_tz(name)` | `tzinfo` | Never raises - see the fallback below |
 | `day_bounds(now, tz)` | `(start_utc, end_utc)` | The local day containing `now`, half-open, expressed in UTC |
-| `write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html`. Same body except `nav.days`, which is written for the depth of the file carrying it - see [[news-item]]. `summary` is the AI summary, one topic per line; falsy renders no block at all, which is the shipped case |
+| `write(data_dir, labels, day_rows, meta, tz, threshold=5)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html`. Same body except `nav.days`, which is written for the depth of the file carrying it - see [[news-item]]. The AI sentences ride in the rows' own `ai_summary`, not as an argument |
 
 `labels` fixes the group order **and** is what keeps an empty group on the page:
 a keyword that has gone quiet looks identical to a keyword nobody wrote about,
@@ -3375,32 +3471,47 @@ The next cycle rewrites `index.html` from the restored store. Day snapshots unde
 of them is reproducible from the rows that are.
 
 ### [interface] The AI Summary - summarize.py
-*`interface/ai-summary.md` - Every public signature of the AI summary layer, the OpenAI-compatible contract it speaks, and the rules that keep an optional feature from ever costing a cycle. - status: active - source: src/news_radar/summarize.py, src/news_radar/__main__.py, src/news_radar/render.py, src/news_radar/fetch/http.py - keywords: summarize, build_prompt, daily_key, SENTENCES_MAX, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, chat completions, OpenAI-compatible, Ollama, per-topic summary, P6-4*
+*`interface/ai-summary.md` - Every public signature of the AI summary layer, the OpenAI-compatible contract it speaks, and the rules that keep an optional feature from ever costing a cycle or paying for the same sentence twice. - status: active - source: src/news_radar/summarize.py, src/news_radar/__main__.py, src/news_radar/store.py, src/news_radar/render.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py - keywords: summarize, build_prompt, parse_answer, SENTENCES_MAX, SUMMARY_MAX, ai_summary, excerpt, unsummarised, save_summaries, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, chat completions, OpenAI-compatible, Ollama, per-story summary, P6-4*
 
 # The AI Summary - `summarize.py`
 
-> One line per keyword group, in Vietnamese, from any endpoint speaking the
-> OpenAI chat-completions wire format. Off by default, and constitutionally
-> unable to fail a cycle.
+> One sentence under each story, in Vietnamese, from any endpoint speaking the
+> OpenAI chat-completions wire format. Written once per story and stored. Off by
+> default, and constitutionally unable to fail a cycle.
 
 ## Signatures
 
 ```
-SENTENCES_MAX = 2
+SENTENCES_MAX = 1
+SUMMARY_MAX = 220
+EXCERPT_IN_PROMPT = 320
 
-daily_key(local_date)                                  -> str
-build_prompt(rows_by_label, labels, max_per_topic)     -> str
-summarize(fetcher, api_url, api_key, model,
-          rows_by_label, labels, max_per_topic)        -> str | None
+build_prompt(rows)                                     -> str
+parse_answer(text, rows)                               -> {dedup_key: str}
+summarize(fetcher, api_url, api_key, model, rows)      -> {dedup_key: str}
 ```
 
-`rows_by_label` is the shape `store.day_matches()` returns; `labels` is the
-keyword file's group order, the same list the page renders in.
+`rows` is a **list** of the row shape `store.day_matches()` returns - the
+caller's order is the prompt's numbering, and the only thing mapping an answer
+back onto a story. See [[storage-layer]] for the row's fields, `excerpt` and
+`ai_summary` included.
 
 Layer 5, importing **layer 1** only - the same widening `notify/*` and `ops.py`
 already take. No config, no clock, no store: everything arrives as an argument,
 which is why `tests/test_summarize.py` exercises every path against a local
 `http.server` with nothing installed. See [[module-layout]].
+
+## Why per story, not per topic
+
+Until 2026-09-07 this file wrote one paragraph per keyword group, rendered at
+the top of the page and pushed to the channels as one message a local day. A
+reader then got that message **and** the list of links - the same day described
+twice, and the message that arrived second was the one nobody read. The sentence
+now rides with the story it describes, on the page and in the notification, and
+there is no separate summary message at all.
+
+What went with it: `daily_key()`, `ai.notify_at_hour`, `ai.max_per_topic`,
+`__main__._send_summary()`, `render._summary()` and `section.summary`.
 
 ## No third dependency
 
@@ -3422,6 +3533,10 @@ not the vendor: OpenRouter, DeepSeek, Groq and a local Ollama all answer
 | Read back | `choices[0].message.content`, stripped |
 | Timeout | `ai.timeout_s` (default 60) - a dedicated `Fetcher`, because `advanced.request_timeout_s` is the feeds' 15 s |
 
+**One request per cycle, not one per story.** The whole batch is numbered into a
+single prompt; a per-story call would be twenty requests every thirty minutes
+against a free tier that rate-limits well below that.
+
 `temperature` is low but not zero: a summary read every day should not be the
 same four sentences with the nouns swapped, and nothing here needs
 reproducibility.
@@ -3439,41 +3554,66 @@ operator their own server does not exist. The visibility the fatal check was
 protecting survives anyway: a hosted endpoint with no key answers 401, logged at
 WARNING every cycle.
 
-## The prompt is per topic, and a quiet topic is not in it
+## The prompt: numbered stories, headline plus the source's own words
 
-`build_prompt()` walks `labels` in order, takes the first `max_per_topic` rows
-of each group - already `score DESC` from `store._matches()`, so "the notable
-ones" is a slice and not a second ranking pass - and emits one block per topic.
-**A group with no rows contributes no block**, so the model is never handed a
-topic it would have to fill with "nothing today".
+`build_prompt(rows)` emits one numbered block per row - the headline, and on the
+next line the story's `excerpt` (the feed's own `<description>`, stripped and
+capped by `item.new_item()`, cut again to `EXCERPT_IN_PROMPT` here). A story
+whose source carried no description goes in on its title alone; that is the
+normal case for a Reddit-style link post and never a reason to drop it.
 
 The instruction is written in English (everything in this repository is) and
 asks for a Vietnamese answer in one shape:
 
 ```
-<topic name> — <at most SENTENCES_MAX sentences>
+<number>. <at most SENTENCES_MAX sentence>
 ```
 
-No links, no numbering, no heading, no preamble, and a topic whose stories are
-unremarkable omitted entirely. That bound is the whole reason the daily message
-stays a glance rather than a wall of text.
+No links, no numbering beyond that, no heading, no preamble, and no skipped
+number. `build_prompt()` is pure and returns `""` for no rows, which
+short-circuits `summarize()` before any request.
 
-`build_prompt()` is pure - no clock, no network, no config - and returns `""`
-when nothing is notable, which short-circuits `summarize()` before any request.
+## Reading the answer back
 
-## One failure mode: `None`
+`parse_answer(text, rows)` matches `^\W*(\d{1,3})\s*[.):\-–—]\s*[*_]*\s*(.+)$`
+per line. Models agree about the number and disagree about everything around
+it - `- **1.** ...` is why the `[*_]*` after the separator is there, not
+decoration.
 
-`summarize()` never raises. Each of these is a page without a paragraph and a
-message that does not go out:
+| Case | Handling |
+|------|----------|
+| Number in `1..len(rows)` | Mapped onto that row; **first line wins** if repeated |
+| Number outside the range | Dropped, never clamped - a wrong summary under a real headline is worse than none |
+| A row the model skipped | Comes back `""` |
+| A model that wrote a paragraph | Clipped to `SUMMARY_MAX`, on a word boundary |
+
+`SUMMARY_MAX` is not cosmetic: every channel splits on a size budget, so an
+unbounded sentence would not make one long line, it would make three times as
+many messages.
+
+**Every row asked about comes back with an entry.** `""` is the record that this
+story *was* asked about - `store.save_summaries()` writes it, and
+`store.unsummarised()` selects on `ai_summary IS NULL`, so a headline no model
+can say anything about is never re-asked.
+
+## One failure mode: `{}`
+
+`summarize()` never raises. Each of these is a page whose stories carry no
+sentence and messages that go out exactly as they did before the feature:
 
 | Cause | Handling |
 |-------|----------|
 | Empty `api_url` | Returns before any request |
-| No story in any group | Returns before any request; logs at INFO |
-| `HttpError` - refused, timed out, 4xx, 5xx | WARNING, `None` |
-| A 200 that is not JSON (a proxy's HTML error page) | WARNING, `None` |
-| A body missing `choices` / `message` / `content` | WARNING, `None` - every provider claims this shape and one will be wrong |
-| An empty summary | WARNING, `None` |
+| No rows | Returns before any request |
+| `HttpError` - refused, timed out, 4xx, 5xx | WARNING, `{}` |
+| A 200 that is not JSON (a proxy's HTML error page) | WARNING, `{}` |
+| A body missing `choices` / `message` / `content` | WARNING, `{}` |
+| An empty answer | WARNING, `{}` |
+
+`{}` rather than a mapping of empty strings, and the distinction matters: a
+failed **request** must leave those stories unasked so the next cycle retries
+them, while a request that was answered and skipped a line marks that story
+done.
 
 **And the caller adds nothing to `problems`.** An endpoint having a bad
 afternoon is not a news-radar outage: it must never withhold the heartbeat ping
@@ -3481,43 +3621,58 @@ or trip an ops alert. The optional thing may not speak for the thing that is
 not - the mirror of the asymmetry in [[delivery-phases]] where a refused ping is
 a warning and a dead site is a problem.
 
-## Page every cycle, phone once a local day
+## Once per story, in its life
 
-`__main__._summarize()` runs inside `_publish()`, on the same `day` rows the page
-renders, so the paragraph at the top describes exactly what is under it.
-`_publish()` returns `(run_id, summary)`.
+`__main__._summarize(cfg, conn, day, labels)` runs inside `_publish()`, on the
+same `day` rows the page renders and the messages are built from. It is the only
+caller, and it does four things:
 
-`__main__._send_summary()` then pushes it - **before `_notify()`, not after**. A cycle can push dozens of story messages, and a summary sent behind them is one nobody scrolls back up to find: observed on 2026-09-05, when a keyword change made 43 stories newly unsent and buried the day's summary under eighteen messages of links. It holds back two ways:
+1. Flattens `day` into page order and asks `store.unsummarised()` which of those
+   keys have `ai_summary IS NULL`.
+2. Takes the first `ai.max_per_run` (default 20) of them and logs how many were
+   held for the next cycle.
+3. Calls `summarize()` once.
+4. Writes the answers with `store.save_summaries()` **and** mutates the rows in
+   `day`, so the page rendered a few lines later is not a cycle behind.
 
-- **Before `ai.notify_at_hour` local**, it logs `summary: holding until HH:00
-  local` and sends nothing.
-- **Once a day, per channel.** `daily_key(local_date)` -> `"summary:<ISO date>"`
-  rides in the existing `reported` table via `store.unreported()` /
-  `store.mark_reported()`, so "already sent today" survives a container restart
-  - the same mechanism that keeps a story from being sent twice. The `summary:`
-  prefix is what keeps it from colliding with a dedup key, and `store.prune()`
-  deletes keys by joining against `items`, so these rows are never pruned: one
-  per day per channel, ~730 a year, cheaper than a second mechanism.
+The cap is what stops a first run against a store full of yesterday's stories
+sending one enormous prompt; the backlog drains over the following cycles, in
+page order.
 
-Sent through each channel's `alert()` rather than `send()` - a summary is
-sentences, not a list of links, which is the payload `alert()` was shaped for.
-On Telegram that means no `parse_mode`, so an em dash or a stray `<` from a
-model cannot cost the message. See [[notify-channels]].
+**The store is the cache.** The page is rebuilt from the whole local day every
+thirty minutes, so without `ai_summary` on `items` a story that stays on the
+page all day would be paid for forty-eight times. Measured on a three-story
+smoke run with `max_per_run: 2`: cycle 1 sent one completion for two stories,
+cycle 2 one for the third, cycle 3 none at all.
 
-The page is rewritten with a fresh summary every cycle regardless. That
-asymmetry is the design: a page is somewhere you go, a message is something that
-interrupts you, and forty-eight interruptions a day saying roughly the same
-thing is how a channel gets muted - taking P6-2's outage alerts with it.
+`_publish()` returns the `run_id` alone.
 
-## On the page
+## On the page and in the message
 
-`render.write(..., summary=None)` renders `<section class="summary">` above the
-groups: one `<p>` per non-empty line, the half before the first em dash in
-`<strong>`. A line carrying no separator is rendered whole rather than dropped -
-a model that ignored the format still wrote a sentence. Everything goes through
-`html.escape`: this text came off somebody else's endpoint, answering every
-thirty minutes, and it is the same trust boundary a feed title crosses. A falsy
-summary renders nothing at all, which is the shipped case.
+The same sentence in the same position in all three renderers - a reader
+comparing the page with their phone should be comparing one report with itself:
+
+| Renderer | Shape |
+|----------|-------|
+| `render._story()` | `<p class="gist">` inside the story's `<li>`, spanning both grid columns under the title |
+| `notify/telegram._line()` | `• <a>title</a>` ⏎ `<i>“gist”</i>` ⏎ `<i>time</i>`, or `• <a>title</a> <i>time</i>` on one line with no gist |
+| `notify/discord._line()` | `• [title](url)` ⏎ `-# “gist”` ⏎ `` `time` ``, or ``• [title](url) `time` `` on one line with no gist (`-#` is Discord's subtext, and only works at the start of a line) |
+
+Everything goes through each channel's own escaper - `html.escape` for the page
+and Telegram, the Markdown backslash rule for Discord. This text came off
+somebody else's endpoint answering every thirty minutes: the same trust boundary
+a feed title crosses, reached from a new direction. See [[notify-channels]].
+
+**An empty `ai_summary` renders no element at all** - no blank paragraph, no
+empty quotes, no stray `-#`, and the timestamp stays on the title's line rather
+than dropping to one of its own. That is the shipped case (`ai.enabled: false`),
+and the message is then byte-for-byte the one this project sent before. The time
+only moves down when there is a sentence between them to move it: a bare title
+and a bare timestamp on two lines is a taller message saying exactly as much.
+
+A summarised story is three lines instead of one, so a chunk holds roughly a
+third as many stories and a run makes more messages than it used to.
+`notify.chunk()` still guarantees the budget and still never splits a story.
 
 ## Config
 
@@ -3707,9 +3862,38 @@ What the real run does, in order:
    `chore(release): v0.1.0`, on the current `release/*` branch.
 5. **Merge chain** - `release/*` into `developing`, then `developing` into
    `main`, both `--no-ff` so the release is visible as a merge commit.
-6. **Tag** - an annotated tag `v0.1.0` created while on `main`.
+6. **Tag** - an annotated tag `v0.1.0`, created last but pointing at the
+   `chore(release): v0.1.0` commit from step 4, because `git tag` names
+   `release/*` explicitly. See below for why both halves of that matter.
 7. **Back and push** - returns to the `release/*` branch, then pushes the three
    branches and the tag.
+
+### Why the tag names the release branch
+
+`git tag` with no target tags `HEAD`, and at step 6 `HEAD` is `main` - so the
+tag landed on a commit whose subject is `chore(release): merge developing into
+main`. Its tree is identical to the release commit's, which is why the mistake
+shipped in **v0.1.0 through v0.2.4** without anything breaking: `git describe`,
+the GitHub Release page and `git log --decorate` on the release branch all named
+a merge instead of the release.
+
+Fixed by naming the target: `git tag -a v0.1.0 -m v0.1.0 release/v0.2`. Two
+constraints meet there, and only that satisfies both:
+
+- **The target must be the release commit.** The merges do not move
+  `release/*`, so its tip is still the `chore(release): vX.Y.Z` commit when the
+  tag is cut.
+- **The tag must still be created last.** It is the one step whose failure the
+  preflight refuses to re-run - a tag left behind by a merge that broke halfway
+  makes the retry fail on "tag already exists" for a release that never
+  happened.
+
+Naming the branch instead of a SHA is also what keeps `release_commands()` pure,
+so `--dry-run` can print the whole chain without running any of it.
+
+**The tags cut before this are left alone.** Moving a published tag would
+republish the image under a version somebody may already be running; the tags
+point at the right *tree* either way. `v0.2.5` onward is where this starts.
 
 CI takes over from the tag: `.github/workflows/release.yml` triggers on a pushed
 `v*` tag, cuts that version's section out of `CHANGELOG.md` (using
@@ -4065,12 +4249,21 @@ commands above do not tidy for you:
   the public name it fetches a hostname nothing serves, fails every cycle, and
   two failures in a row is a genuine alert about a non-problem. Do it **before**
   the next cycle, not after;
-- **the tunnel and its DNS record are account operations.**
-  `cloudflared tunnel delete <name>` removes the tunnel and needs
-  `~/.cloudflared/cert.pem`, not the credentials file. The CNAME is the part no
-  CLI can do: `cloudflared tunnel route` only *creates* records, so deleting it
-  is a dashboard or API job. Until it goes, the hostname answers **530** - it
-  still resolves, and points at a tunnel that no longer exists.
+- **the tunnel and its DNS record are account operations**, and both can be
+  done from the deployment. `cloudflared tunnel delete <name>` removes the
+  tunnel; it needs `~/.cloudflared/cert.pem`, not the per-tunnel credentials
+  file. The CNAME is the part `cloudflared` cannot do - `tunnel route` only
+  *creates* records - but the API can, and the token for it is already on the
+  box: `cert.pem` carries a base64 `ARGO TUNNEL TOKEN` block holding
+  `{accountID, zoneID, apiToken}`, and that `apiToken` is what
+  `tunnel route dns` writes records with. `DELETE
+  /client/v4/zones/<zoneID>/dns_records/<id>` with it as a bearer token removes
+  the record. Until it goes the hostname answers **530**: still resolving, and
+  pointing at a tunnel that is not there.
+
+  **`~/.cloudflared/cert.pem` is therefore a zone-wide DNS-write credential**,
+  not just a login artifact - a stronger secret than any per-tunnel credentials
+  file, and worth knowing before it is copied anywhere.
 
 `NEWS_RADAR_HOME` stays **unset** here: the compose file sits in `docker/`, the
 default `..` is `~/news-radar`, and that is already where `config/`, `output/`

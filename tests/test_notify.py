@@ -42,11 +42,12 @@ def eq(name, got, want):
 
 
 def row(title, key, url="https://example.com/a", sources=("hn",),
-        published_at=None):
+        published_at=None, ai_summary=""):
     """The shape `store.run_matches()` hands back, and nothing more."""
     return {"dedup_key": key, "title": title, "url": url,
             "canonical_url": url, "score": 0.9, "published_at": published_at,
-            "first_seen_at": None, "sources": sources}
+            "first_seen_at": None, "sources": sources, "excerpt": "",
+            "ai_summary": ai_summary}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -346,6 +347,74 @@ eq("a refused discord alert is reported too", bad, False)
 
 
 server.shutdown()
+
+# -- the AI sentence, under the headline on both channels -------------------
+
+# The page shows title, sentence, time in that order, and a message that spells
+# the same story differently from the page is a second report, not the same one.
+GIST = "Bản SDK mới vá lỗi USB trên S3."
+tg = telegram.build([("ESP32", [row("SDK 5.5", "k1", published_at=WHEN,
+                                    ai_summary=GIST)])], VN)[0][0]
+check("telegram carries the sentence", GIST in tg, tg)
+check("...on its own line, between the title and the time",
+      tg.index("SDK 5.5") < tg.index(GIST) < tg.index("09:30 06/09"), tg)
+eq("...so one story is three lines", tg.count("\n"), 3)
+
+dc = discord.build([("ESP32", [row("SDK 5.5", "k1", published_at=WHEN,
+                                   ai_summary=GIST)])], VN)[0][0]
+check("discord carries the same sentence", GIST in dc, dc)
+check("...as subtext, which only works at the start of a line",
+      "\n-# " in dc, dc)
+check("...still before the time", dc.index(GIST) < dc.index("09:30 06/09"), dc)
+
+# `ai.enabled` is false by default, so this is what almost every deployment
+# sends and it must be exactly the message this project sent before.
+plain_tg = telegram.build([("ESP32", [row("SDK 5.5", "k1",
+                                          published_at=WHEN)])], VN)[0][0]
+# One newline in the whole chunk, and it is the one after the group header:
+# the story is a single line with its time on it, exactly as before P6-4.
+eq("no summary means the one-line shape telegram had before",
+   plain_tg.count("\n"), 1)
+check("...with the time still on the title's line",
+      plain_tg.endswith("</a> <i>09:30 06/09</i>"), plain_tg)
+check("...and no empty quotes left behind", "“" not in plain_tg, plain_tg)
+
+plain_dc = discord.build([("ESP32", [row("SDK 5.5", "k1",
+                                         published_at=WHEN)])], VN)[0][0]
+check("...and no stray subtext marker on discord",
+      "-# " not in plain_dc, plain_dc)
+eq("...which is one line there too", plain_dc.count("\n"), 1)
+check("...with its time on that same line",
+      plain_dc.endswith(") `09:30 06/09`"), plain_dc)
+
+# The trust boundary, reached from a new direction: this sentence came off
+# somebody else's endpoint, and each channel loses different characters.
+hostile_gist = telegram.build([("G", [row(
+    "t", "k", ai_summary="<b>bold</b> & <script>alert(1)</script>")])])[0][0]
+check("a tag from the model is escaped for telegram",
+      "&lt;script&gt;" in hostile_gist and "<script>" not in hostile_gist,
+      hostile_gist)
+
+hostile_dgist = discord.build([("G", [row(
+    "t", "k", ai_summary="a *starred* [bracket] and `tick`")])])[0][0]
+check("markdown from the model is escaped for discord",
+      "\\*starred\\*" in hostile_dgist and "\\[bracket\\]" in hostile_dgist,
+      hostile_dgist)
+
+# A summarised story is three times the text, so a chunk holds a third as many.
+# The budget still has to hold - a story is never split across two messages.
+wide = [("G", [row("Story {}".format(i), "k{}".format(i),
+                   ai_summary="Câu tóm tắt số {}. ".format(i) * 4)
+               for i in range(60)])]
+check("every summarised discord chunk is still under the limit",
+      all(len(text) <= discord.LIMIT for text, _ in discord.build(wide)),
+      str([len(t) for t, _ in discord.build(wide)]))
+check("every summarised telegram chunk is too",
+      all(len(text) <= telegram.LIMIT for text, _ in telegram.build(wide)))
+eq("and no story is lost in the splitting",
+   sorted(k for _, keys in discord.build(wide) for k in keys),
+   sorted("k{}".format(i) for i in range(60)))
+
 
 # --------------------------------------------------------------------------
 

@@ -60,7 +60,8 @@ DEFAULTS = {
     },
     # The AI summary (P6-4). Off, and therefore free: an existing config.yaml
     # that says nothing about `ai` upgrades into this version and behaves
-    # exactly as it did before. The endpoint is spelled as a whole url rather
+    # exactly as it did before. One sentence per story, written once per story
+    # and stored, rather than one paragraph per topic rewritten every cycle. The endpoint is spelled as a whole url rather
     # than a base, because the OpenAI *wire format* is what is being spoken -
     # OpenRouter, DeepSeek, Groq and a local Ollama all answer it, and only
     # some of them put it under `/v1`.
@@ -68,9 +69,8 @@ DEFAULTS = {
         "enabled": False,
         "api_url": "https://api.openai.com/v1/chat/completions",
         "model": "gpt-4o-mini",
-        "max_per_topic": 5,
+        "max_per_run": 20,
         "timeout_s": 60,
-        "notify_at_hour": 8,
     },
     "notification": {
         "enabled": True,
@@ -306,11 +306,11 @@ def validate(cfg, env=None):
                 "ops.{} must be an http(s) url or empty, got {!r}".format(
                     name, url))
 
-    # The summary's own numbers. `max_per_topic` has no zero case worth having:
-    # zero titles a topic is a prompt with nothing in it and a bill for asking.
-    for name, low, high in (("max_per_topic", 1, None),
-                            ("timeout_s", 1, None),
-                            ("notify_at_hour", 0, 23)):
+    # The summary's own numbers. `max_per_run` has no zero case worth having:
+    # zero stories is a prompt with nothing in it and a bill for asking, and a
+    # cap of zero would silently disable a feature `ai.enabled` says is on.
+    for name, low, high in (("max_per_run", 1, None),
+                            ("timeout_s", 1, None)):
         value = cfg.get("ai." + name)
         if (not isinstance(value, int) or isinstance(value, bool)
                 or value < low or (high is not None and value > high)):

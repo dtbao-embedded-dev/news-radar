@@ -5,7 +5,8 @@
 
 Takes a version, writes the changelog and VERSION, commits it on the current
 release/* branch as "chore(release): vX.Y.Z", merges release/* into developing
-and developing into main, tags main, returns to release/*, and pushes.
+and developing into main, tags that release commit, returns to release/*, and
+pushes.
 
 Standard library only: this runs on a bare checkout. Every git call goes
 through an argument list - no shell, so it behaves the same on Windows and
@@ -171,7 +172,26 @@ def extract_changelog_section(text, version):
 
 
 def release_commands(version, release_branch, remote):
-    """The exact git chain, in execution order. Pure - runs nothing."""
+    """The exact git chain, in execution order. Pure - runs nothing.
+
+    **The tag names `release_branch` explicitly rather than tagging HEAD.** Two
+    things have to be true at once and only this satisfies both:
+
+    - *The tag must point at the `chore(release): vX.Y.Z` commit.* Tagging HEAD
+      here tags whatever `main` merged to, which is a commit whose message is
+      "chore(release): merge developing into main" - so `git describe`, the
+      GitHub Release page and `git log --decorate` on the release branch all
+      name a merge, not the release. Its tree is identical, which is exactly
+      why the mistake survived four versions (v0.1.0 through v0.2.4).
+    - *The tag must be created last.* It is the one step whose failure the
+      preflight then refuses to re-run: a tag left behind by a merge that broke
+      halfway makes the retry fail on "tag already exists", for a release that
+      never happened.
+
+    The merges do not move `release_branch`, so by the time this runs its tip is
+    still the release commit. Naming the branch keeps this function pure - a
+    SHA would have to be captured mid-chain, and `--dry-run` could not print it.
+    """
     return [
         ["git", "add"] + RELEASE_FILES,
         ["git", "commit", "-m", "chore(release): {}".format(version)],
@@ -183,7 +203,7 @@ def release_commands(version, release_branch, remote):
         ["git", "merge", "--no-ff", "-m",
          "chore(release): merge {} into {}".format(INTEGRATION_BRANCH, STABLE_BRANCH),
          INTEGRATION_BRANCH],
-        ["git", "tag", "-a", version, "-m", version],
+        ["git", "tag", "-a", version, "-m", version, release_branch],
         ["git", "switch", release_branch],
         ["git", "push", remote, release_branch, INTEGRATION_BRANCH, STABLE_BRANCH],
         ["git", "push", remote, version],

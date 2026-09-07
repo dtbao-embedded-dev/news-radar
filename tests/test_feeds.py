@@ -86,8 +86,14 @@ vn = mod.parse(body("rss_vnexpress.xml"), "rss", "vnexpress_sohoa", fetched_at=N
 eq("one VnExpress item", len(vn), 1)
 eq("markup and runs of whitespace are stripped out of the title, once, here",
    vn[0].title, "Chip ESP32-C6 ra mắt tại Việt Nam")
-check("the description, img tag and all, never reaches the item",
+check("the description never reaches the title",
       "img" not in vn[0].title and "vnecdn" not in vn[0].title)
+# It reaches the excerpt instead - which is where the AI summary is written
+# from, and the reason it is stripped rather than dropped.
+eq("the description becomes the excerpt, tags stripped",
+   vn[0].excerpt, "Espressif cong bo")
+check("...and the img markup does not survive into it",
+      "vnecdn" not in vn[0].excerpt and "<" not in vn[0].excerpt, vn[0].excerpt)
 
 
 # --- Atom -----------------------------------------------------------------

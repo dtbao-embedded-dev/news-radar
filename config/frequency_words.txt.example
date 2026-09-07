@@ -16,9 +16,9 @@
 # widen local matching but cost no extra request.
 #
 # A group may have NO plain term, if it has at least one /regex/ and a
-# `=> Label`. The label is then what the search templates query. That is the
-# only way to hunt for a term without also matching it loosely - see the RTOS
-# group below for why you would want that.
+# `=> Label`. The label is then what the search templates query - the only
+# way to hunt for a term without also matching it loosely. The GitHub Trending
+# group at the end of this file is the worked example.
 #
 # Matching folds case and Vietnamese diacritics, so "dien tu" matches
 # "Dien tu" and "Điện tử". A /regex/ is applied to the original title.
@@ -38,35 +38,48 @@ OTA update
 @10
 => Firmware
 
-# Two separate problems solved in two separate places, and this group is the
-# worked example of both.
-#
-# Getting RTOS stories at all: `RTOS` is four characters, and HN Algolia's typo
-# tolerance matched 41,612 stories for it (ESP32 matches 1,308) while
-# search_by_date handed back the most recent of that noise. The fix is
-# `typoTolerance=false` on the template in config.yaml, not a longer term here -
-# with it `RTOS` returns 18 of 20 where `FreeRTOS` returns 14, and Google News
-# prefers the short form too. So the query stays `RTOS`.
-#
-# Keeping the wrong RTOS stories out: matching folds case, and `RTOs` - Indian
-# Regional Transport Offices - folds to exactly the same string. Measured
-# 2026-09-07: 4 of this group's 10 stories were e-rickshaw enforcement and
-# licence backlogs. A plain term cannot tell them apart at all, and adding a
-# regex *beside* a plain term does not help either, because the two are OR-ed
-# and a regex only ever widens a group.
-#
-# Hence a group with no plain term. Its regexes run on the ORIGINAL title, so
-# `\bRTOS\b` requires the capital S and the word boundary, and the search
-# query comes from the `=> Label` below instead of from a first plain term.
-/\bRTOS\b/
-/\bFreeRTOS\b/
-/\bZephyr\b/
-@8
-=> RTOS
-
 RISC-V
 @8
 => RISC-V
+
+# One group per model vendor, and each one earns its place by being its own
+# search query: a group's first plain term is what the templates ask for, so
+# five names in one group would have queried only the first. Measured
+# 2026-09-07 on the fixed feeds alone, without a query of their own, GLM
+# appeared once, Qwen twice and DeepSeek seven times in 2,239 items - with a
+# query each they return 8, 20 and 67. A broad query instead of five narrow
+# ones was tried and rejected: "chatbot" returned 36 vendor mentions but only
+# ChatGPT and Claude, "LLM" returned 6.
+#
+# Plain terms, no regexes, because the corpus decided it. `Claude` was the
+# worry - Monet, Shannon, Jean-Claude - and `GLM` the other one, being also the
+# OpenGL maths library and the generalized linear model. Measured across 2,655
+# live items: 135 hits for Claude and 11 for GLM, and every single one was
+# about the model. A word-boundary regex found exactly the same set, so it
+# would have bought nothing; `!` exclusions can be added the day that changes.
+#
+# These sit ahead of the AI group deliberately. A story matches both, the page
+# shows it in both, but a message sends it once under the first group in this
+# file - and "Claude" says more than "AI".
+Claude
+@6
+=> Claude
+
+ChatGPT
+@6
+=> ChatGPT
+
+GLM
+@6
+=> GLM
+
+Qwen
+@6
+=> Qwen
+
+DeepSeek
+@6
+=> DeepSeek
 
 # "AI" as a plain term would be a disaster: matching is substring, not
 # word-boundary, so it would hit said, maintain, chain, fail, email, training
@@ -112,7 +125,6 @@ awesome-llm
 @10
 => AI Repos
 
-# Applied to every item from every source, before any group is considered.
 # GitHub trending repositories, from the gh_trending feed, which titles every
 # entry `owner/repo` and is the only feed whose match_excerpt is on. This group
 # is regex-only on purpose: the repo NAME is all the title holds, and the
@@ -140,6 +152,7 @@ awesome-llm
 @8
 => GitHub Trending
 
+# Applied to every item from every source, before any group is considered.
 [GLOBAL_FILTER]
 !giveaway
 !coupon

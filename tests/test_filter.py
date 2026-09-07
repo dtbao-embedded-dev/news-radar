@@ -175,6 +175,7 @@ if SHIPPED.is_file():
     sgroups, sfilter = keywords.parse(SHIPPED)
     picked = mod.select([
         item("ESP32-C6 gets Zephyr support"),
+        item("Anthropic ships Claude Opus 4.5 with a longer context"),
         item("Google races ahead in AI, technology chief says"),
         item("Show HN: Argus, open-source AI agents for testing web apps"),
         item("He said the chain of failures was detailed in an email"),
@@ -182,8 +183,14 @@ if SHIPPED.is_file():
         item("Ranked: the best coffee in Hanoi"),
     ], sgroups, sfilter)
     titles = {i.title: labels for i, labels in picked}
-    eq("the shipped file picks up the ESP32 story in two groups",
-       titles.get("ESP32-C6 gets Zephyr support"), ["ESP32", "RTOS"])
+    eq("the shipped file picks up the ESP32 story",
+       titles.get("ESP32-C6 gets Zephyr support"), ["ESP32"])
+    # A model story matches its own group and the AI group. The order matters
+    # beyond the page: `notify.pick()` sends it once, under the first label
+    # here, so "Claude" has to come before "AI" in the keyword file.
+    eq("a model story is claimed by its own group before the AI group",
+       titles.get("Anthropic ships Claude Opus 4.5 with a longer context"),
+       ["Claude", "AI"])
     eq("the shipped AI group catches a bare AI token",
        titles.get("Google races ahead in AI, technology chief says"), ["AI"])
     eq("an open-source AI project lands in both AI groups",

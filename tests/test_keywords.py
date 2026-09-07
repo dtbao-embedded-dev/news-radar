@@ -202,17 +202,25 @@ shipped = (pathlib.Path(__file__).resolve().parent.parent
            / "config" / "frequency_words.txt.example")
 if shipped.is_file():
     sgroups, sfilter = mod.parse(shipped)
-    eq("the shipped keyword template parses into 7 groups", len(sgroups), 7)
+    eq("the shipped keyword template parses into 11 groups", len(sgroups), 11)
     eq("its primary terms are the ones the search templates will query",
        [g.primary for g in sgroups],
-       ["ESP32", "firmware", "RTOS", "RISC-V", "artificial intelligence",
-        "open source AI", "GitHub Trending"])
+       ["ESP32", "firmware", "RISC-V", "Claude", "ChatGPT", "GLM", "Qwen",
+        "DeepSeek", "artificial intelligence", "open source AI",
+        "GitHub Trending"])
     # ESP32, AI and AI Repos were widened when the template took on six more
-    # feeds - two Espressif, three AI and GitHub trending. A cap left where it
-    # was would have let the new sources crowd the old ones out of the same
-    # ten slots rather than add to them.
+    # feeds. The five model groups are narrow topics and get @6 apiece.
     eq("its caps survive the parse",
-       [g.cap for g in sgroups], [12, 10, 8, 8, 12, 10, 8])
+       [g.cap for g in sgroups], [12, 10, 8, 6, 6, 6, 6, 6, 12, 10, 8])
+
+    # Load-bearing order: `notify.pick()` sends a story under the FIRST group
+    # in this file that claims it, and a Claude story matches the AI group too.
+    # Ahead of it, the message says "Claude"; behind it, "AI".
+    labels = [g.label for g in sgroups]
+    check("every model group sits ahead of the AI group",
+          all(labels.index(v) < labels.index("AI")
+              for v in ("Claude", "ChatGPT", "GLM", "Qwen", "DeepSeek")),
+          repr(labels))
     eq("its global filter has four exclusions", len(sfilter), 4)
     check("every group has a non-empty label",
           all(g.label for g in sgroups))
@@ -222,7 +230,8 @@ if shipped.is_file():
     # chain, fail, email and Ukraine; the word boundary lives in a regex, run
     # against the original title. If that regex is ever lost the groups do not
     # break loudly - they quietly match a great deal less - so it is pinned.
-    ai, repos = sgroups[4], sgroups[5]
+    by_label = {g.label: g for g in sgroups}
+    ai, repos = by_label["AI"], by_label["AI Repos"]
     eq("the AI group carries its word-boundary regex", len(ai.regexes), 1)
     check("...which matches a bare AI token",
           ai.regexes[0].search("Google races ahead in AI"))

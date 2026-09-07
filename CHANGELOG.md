@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.4 - 2026-09-07
+
 ### Fixes
 
 - **deploy**: the `watchtower` service runs the maintained fork,

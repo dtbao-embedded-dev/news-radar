@@ -25,7 +25,7 @@ import logging
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-__all__ = ["local_tz", "day_bounds", "write", "DAYS_DIR"]
+__all__ = ["local_tz", "day_bounds", "write", "remove", "DAYS_DIR"]
 
 log = logging.getLogger("news_radar.render")
 
@@ -421,3 +421,49 @@ def write(data_dir, labels, day_rows, meta, tz, threshold=5):
     log.info("rendered %s (%d group(s), %d story(ies))", written[0], len(labels),
              sum(len(day_rows.get(label) or []) for label in labels))
     return written
+
+
+def remove(data_dir):
+    """Delete the published page. Returns the paths removed, newest name last.
+
+    The other half of `report.html`. Not writing the page would leave the last
+    one it wrote sitting on the web server forever, dated and wrong - a reader
+    cannot tell a frozen report from a working one, and that is the exact
+    failure the switch was turned off to avoid.
+
+    Three things it deliberately does not do:
+
+    - **It never touches anything but a page.** `news.db` lives in this same
+      directory, and it holds every story the radar has ever seen. Only
+      `index.html` and `days/*.html` - the two names this module writes - are
+      ever unlinked.
+    - **It leaves a `days/` that still has something in it.** The directory is
+      removed only when it is empty, so a file somebody else put there keeps
+      both itself and its directory.
+    - **It says nothing when there was nothing to remove.** With the report
+      off this runs every cycle, and a line every ten minutes about a
+      directory that has been clean since Tuesday is how a log stops being
+      read.
+    """
+    data_dir = Path(data_dir)
+    removed = []
+
+    for path in [data_dir / INDEX_NAME] + sorted(
+            (data_dir / DAYS_DIR).glob("*.html")):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        removed.append(path)
+
+    try:
+        (data_dir / DAYS_DIR).rmdir()
+    except OSError:
+        # Missing, or not empty. Both are fine and neither is this function's
+        # business to force.
+        pass
+
+    if removed:
+        log.info("the HTML report is off: removed %d published file(s) from %s",
+                 len(removed), data_dir)
+    return removed

@@ -366,7 +366,13 @@ def start_stack():
         return False
 
     port = read_env(ROOT / ENV_FILE).get("NEWS_RADAR_HTTP_PORT") or DEFAULT_HTTP_PORT
-    say("ok", "stack is up - http://localhost:{}".format(port))
+    say("ok", "stack is up - stories go to Telegram and Discord")
+    # The template ships `report.html: false`, so the port answers 404 until
+    # somebody turns the page on. Printing the url unconditionally, as this
+    # used to, sent every new install to a blank page and made the radar look
+    # broken on its first minute.
+    say("skip", "the HTML report is off - set report.html: true in "
+                "config/config.yaml to publish it on http://localhost:{}".format(port))
     return True
 
 

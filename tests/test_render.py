@@ -268,6 +268,46 @@ check("...and no live script tag reaches the page",
 check("an ampersand from the model is escaped", "&amp;" in xss, xss)
 
 
+# -- remove: unpublishing, without touching what is not a page -------------
+#
+# `report.html: false` means the page is off, and a page that is off must not
+# still be sitting on the web server. The one thing this must never reach is
+# `news.db`, which lives in the same directory and holds every story the radar
+# has ever seen.
+
+gone_root = data_dir()
+mod.write(gone_root, LABELS, rows, META, VN, threshold=2)
+db = gone_root / "news.db"
+db.write_bytes(b"SQLite format 3\x00")
+
+removed = mod.remove(gone_root)
+eq("remove reports both page files", sorted(p.name for p in removed),
+   ["2026-09-05.html", "index.html"])
+check("the index is gone", not (gone_root / "index.html").exists())
+check("the day snapshot is gone",
+      not (gone_root / "days" / "2026-09-05.html").exists())
+check("the empty days directory is gone too",
+      not (gone_root / "days").exists())
+check("the store is untouched",
+      db.is_file() and db.read_bytes() == b"SQLite format 3\x00")
+
+eq("a second call removes nothing and does not raise",
+   mod.remove(gone_root), [])
+eq("a data dir that never had a page is a no-op",
+   mod.remove(data_dir()), [])
+eq("a data dir that does not exist at all is a no-op",
+   mod.remove(TMP / "never-created"), [])
+
+# A `days/` holding something that is not a page keeps the directory: removing
+# a file this function did not write is not its job.
+kept_root = data_dir()
+mod.write(kept_root, LABELS, rows, META, VN, threshold=2)
+(kept_root / "days" / "notes.txt").write_text("mine", encoding="utf-8")
+mod.remove(kept_root)
+check("a foreign file in days/ survives, and keeps the directory",
+      (kept_root / "days" / "notes.txt").is_file())
+
+
 # --------------------------------------------------------------------------
 
 if FAILURES:

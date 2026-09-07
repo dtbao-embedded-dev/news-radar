@@ -9,6 +9,29 @@ updated: 2026-09-07
 
 ## What works
 
+### The page can be turned off, and turning it off unpublishes it (2026-09-07, unreleased)
+
+`report.html` is the switch that did not exist. Three facts worth keeping:
+
+- **Off deletes rather than skips.** `render.remove()` unlinks `index.html` and
+  `days/*.html` and rmdirs an emptied `days/`; `news.db` sits in that same
+  directory and is never touched, a `days/` holding a non-page file keeps both,
+  and a cycle with nothing to remove logs nothing. Verified on a real offline
+  `--once` cycle against a local `http.server`: a pre-seeded stale page and day
+  snapshot were both gone and `output/` held exactly `['news.db']`.
+- **The code default is `true`, the template ships `false`.** The seventh
+  deliberate disagreement in [[config-and-env]], and the only one where an
+  absent key would *destroy* something: an upgrade that says nothing about
+  `report.html` must keep publishing.
+- **The site check follows the page.** `Config.site_check_url()` returns `""`
+  when the page is off, so `ops.site_url` is not GET. Measured both ways: page
+  off, a deliberately 404 url logs `site check skipped` and the ping still goes
+  out; page on, the same url produces `the published site is unreachable` and
+  the ping is withheld - the check was disabled, not broken.
+- **The shipped poll interval is 10 minutes**, the code default still 30. One
+  cycle costs 35-57 s for 22 requests, so the process is idle most of the
+  interval; the exposure is the request rate at Google News and HN Algolia.
+
 ### The summary is per story, and paid for once (2026-09-07, unreleased)
 
 `ai.*` wrote one paragraph per keyword group, rendered at the top of the page

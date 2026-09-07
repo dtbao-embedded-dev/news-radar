@@ -16,6 +16,44 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.7 - 2026-09-07
+
+### Features
+
+- **report**: new `report.html` key turns the HTML report off, and the shipped
+  `config.yaml.example` now ships it **off**. Off does not merely stop writing
+  the page: the next cycle **deletes** `output/index.html` and
+  `output/days/*.html`, so the web server has nothing left to serve. A frozen
+  page is worse than none - a reader cannot tell yesterday's report from a
+  working one. `output/news.db` and the backups are never touched, a `days/`
+  holding anything else is left alone, and a cycle that finds nothing to remove
+  logs nothing. The code default is `true`, so an upgrade that never mentions
+  the key keeps publishing exactly as before. `scripts/setup.py` and the README
+  stop sending a fresh install to `http://localhost:8088` for a page that is
+  not there.
+
+### Fixes
+
+- **ops**: with `report.html` off, the `ops.site_url` check is **skipped**
+  rather than run against a page that no longer exists. Left as it was, a
+  deployment that turned the report off would GET a 404 every cycle - which
+  withholds the heartbeat ping *and* counts as a failed cycle, so `ops.Health`
+  would alert after two of them and the dead-man's switch would trip on a radar
+  that was working perfectly. The url in `config.yaml` is left untouched, so
+  turning the page back on restores the check with nothing to remember; the log
+  says once per cycle that the check was skipped.
+
+### Changed
+
+- **schedule**: the shipped `config.yaml.example` now polls every **10
+  minutes** instead of 30. The code default stays 30, so a config that never
+  mentions `schedule` keeps the half-hour it already had - an upgrade must not
+  triple a running deployment's request rate on its own. A cycle costs 35-57s
+  for the 22 requests the shipped feed list makes, so the process is still idle
+  most of the interval; what does change is the traffic at Google News and HN
+  Algolia, the two sources already known to throttle. An existing deployment
+  opts in by editing its own `config.yaml`.
+
 ## v0.2.6 - 2026-09-07
 
 ### Fixes

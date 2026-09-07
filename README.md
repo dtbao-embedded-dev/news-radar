@@ -84,7 +84,12 @@ Same two steps on Windows and Linux. `setup.py` checks Python and Docker,
 creates `config/config.yaml`, `config/frequency_words.txt` and `docker/.env`
 from their templates without ever overwriting an existing file, asks for the
 Telegram and Discord secrets, then builds the image locally and brings the stack
-up — default `http://localhost:8088`, overridable with `NEWS_RADAR_HTTP_PORT`.
+up.
+
+The stories arrive on Telegram and Discord. The **HTML report ships off**
+(`report.html: false`): set it to `true` in `config/config.yaml` to publish the
+page as well, served on `http://localhost:8088` and overridable with
+`NEWS_RADAR_HTTP_PORT`.
 
 | Flag | For |
 |---|---|

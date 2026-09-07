@@ -7,7 +7,12 @@ app:
   timezone: Asia/Ho_Chi_Minh
 
 schedule:
-  interval_minutes: 30
+  # 10 is what ships; the code default is 30, so a config that never mentions
+  # this key keeps the half-hour it already had. One cycle costs 35-57s for the
+  # 22 requests the shipped feed list makes, so ten minutes still leaves the
+  # process idle most of the time - but it is three times the traffic at Google
+  # News and HN Algolia, and those are the two that throttle first.
+  interval_minutes: 10
   run_on_start: true
 
 # Fixed feeds: fetched whole every run, then matched locally.
@@ -114,7 +119,17 @@ report:
   # story missed by one refused cycle is never offered again.
   mode: daily            # incremental | current | daily
   max_per_group: 0       # 0 = unlimited; a group's own @n wins over this
-  rank_threshold: 5
+  rank_threshold: 5      # the first N of each group are highlighted on the page
+
+  # The HTML report. false is what ships: Telegram and Discord already carry
+  # every story, and a second copy of the same day on a web server is one more
+  # thing to keep reachable and correct. Turning it off also *deletes*
+  # output/index.html and output/days/*.html on the next cycle, so the web
+  # server has nothing left to serve - a frozen page reads as "no news" rather
+  # than "the page is off". The store is never touched, and ops.site_url stops
+  # being checked. The code default is true, so an upgrade that says nothing
+  # here keeps publishing.
+  html: false
 
 rank:
   weight_source: 0.5

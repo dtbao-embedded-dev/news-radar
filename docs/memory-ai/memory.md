@@ -19,6 +19,29 @@ _Generated 2026-09-07 - 20 durable doc(s)._
 
 ## What works
 
+### The page can be turned off, and turning it off unpublishes it (2026-09-07, unreleased)
+
+`report.html` is the switch that did not exist. Three facts worth keeping:
+
+- **Off deletes rather than skips.** `render.remove()` unlinks `index.html` and
+  `days/*.html` and rmdirs an emptied `days/`; `news.db` sits in that same
+  directory and is never touched, a `days/` holding a non-page file keeps both,
+  and a cycle with nothing to remove logs nothing. Verified on a real offline
+  `--once` cycle against a local `http.server`: a pre-seeded stale page and day
+  snapshot were both gone and `output/` held exactly `['news.db']`.
+- **The code default is `true`, the template ships `false`.** The seventh
+  deliberate disagreement in [[config-and-env]], and the only one where an
+  absent key would *destroy* something: an upgrade that says nothing about
+  `report.html` must keep publishing.
+- **The site check follows the page.** `Config.site_check_url()` returns `""`
+  when the page is off, so `ops.site_url` is not GET. Measured both ways: page
+  off, a deliberately 404 url logs `site check skipped` and the ping still goes
+  out; page on, the same url produces `the published site is unreachable` and
+  the ping is withheld - the check was disabled, not broken.
+- **The shipped poll interval is 10 minutes**, the code default still 30. One
+  cycle costs 35-57 s for 22 requests, so the process is idle most of the
+  interval; the exposure is the request rate at Google News and HN Algolia.
+
 ### The summary is per story, and paid for once (2026-09-07, unreleased)
 
 `ai.*` wrote one paragraph per keyword group, rendered at the top of the page
@@ -851,6 +874,27 @@ the ops layer and the summary - and the whole thing is reachable at
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**The page is off and the radar polls three times an hour (2026-09-07,
+unreleased after v0.2.6).** Three changes, all on `release/v0.2`:
+
+- `schedule.interval_minutes` was confirmed to live in **both** places - the
+  code default `config.py` `DEFAULTS` (30) and the shipped
+  `config.yaml.example`. The template now says **10**; the default stays 30, so
+  an upgrade that never mentions `schedule` keeps the half-hour it had. What to
+  watch is Google News and HN Algolia, the two hosts already known to throttle,
+  now asked three times as often.
+- New `report.html` key. `false` ships in the template and **deletes** the
+  published page on the next cycle - `index.html` and `days/*.html`, never
+  `news.db`. Telegram and Discord already carry every story; a frozen page on a
+  web server is a second, worse copy of the same day.
+- With the page off, `ops.site_url` is no longer checked. Left alone it would
+  404 every cycle, withhold the ping and alert after two - a false alarm about
+  a radar that is working.
+
+**Next:** the homelab's own `config.yaml` is a separate, gitignored file. The
+new values reach it only by hand, then `docker compose up -d`. Until then the
+homelab still polls every 30 minutes and still publishes the page.
 
 **Search quality, reviewed against TrendRadar and measured (2026-09-07,
 unreleased after v0.2.5).** The search *mechanics* came out clean - every claim
@@ -1724,7 +1768,7 @@ news-radar/
 │   ├── filter.py               # DONE - global filter + match against groups
 │   ├── rank.py                 # DONE - dedup + weighted ranking + @n cap
 │   ├── store.py                # DONE - SQLite persistence, seen-set, retention, backup
-│   ├── render.py               # DONE - output/index.html + days/<date>.html
+│   ├── render.py               # DONE - write() + remove(); index.html + days/<date>.html
 │   ├── ops.py                  # DONE - P6: heartbeat, Health, ALERT_AFTER
 │   ├── summarize.py            # DONE - P6-4: per-topic AI summary, OpenAI wire format
 │   └── notify/                 # DONE - P4
@@ -2294,7 +2338,7 @@ Two consequences worth knowing before changing this:
   asserts the rule is on the page.
 
 ### [interface] Config Keys, Keyword File and Environment
-*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER*
 
 # Config Keys, Keyword File and Environment
 
@@ -2308,7 +2352,7 @@ Loaded from `NEWS_RADAR_CONFIG`, default `config/config.yaml`. Any key omitted
 falls back to the default below.
 
 **The Default column is `config.py`'s `DEFAULTS`, not what the template ships**,
-and the two disagree on purpose in five places (marked inline). A default is what
+and the two disagree on purpose in seven places (marked inline). A default is what
 an *absent* key falls back to, so it has to be the harmless value: an upgrade
 that never mentioned `storage.retention_days` must not start deleting rows, and a
 clone with no `feeds` should fail the "nothing to hunt" gate rather than silently
@@ -2318,7 +2362,7 @@ someone chose it.
 | Key | Type | Default | Meaning |
 |-----|------|---------|---------|
 | `app.timezone` | str | `Asia/Ho_Chi_Minh` | Timezone used when rendering timestamps; storage stays UTC |
-| `schedule.interval_minutes` | int | `30` | Sleep between crawls in the in-process loop |
+| `schedule.interval_minutes` | int | `30` *(template ships `10`)* | Sleep between crawls in the in-process loop. The default stays at the half-hour an upgrade inherits - an absent `schedule` section must not triple a running deployment's request rate. A cycle costs 35-57 s for the shipped 22 requests, so ten minutes still leaves the process idle most of the interval; what it does change is the traffic at the two hosts that throttle first, Google News and HN Algolia |
 | `schedule.run_on_start` | bool | `true` | Crawl immediately on container start instead of waiting one interval |
 | `feeds[]` | list | `[]` *(template ships 8)* | Fixed feeds - see [[news-sources]] |
 | `feeds[].id` | str | - | Stable id; used in `sources`, in the report, and as the `reported` key |
@@ -2336,6 +2380,7 @@ someone chose it.
 | `report.mode` | str | `incremental` **(template ships `daily`)** | `incremental` (this run's new matches), `current` (this run's whole shortlist, every cycle), `daily` (the whole local day minus what the channel already got). The template ships `daily` because it reads the same window the page renders, so a phone and the page agree on which stories exist - and a story missed by one refused cycle is offered again instead of lost |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
 | `report.rank_threshold` | int | `5` | The first N of each group are highlighted on the page |
+| `report.html` | bool | `true` **(template ships `false`)** | The HTML report. `false` does not merely stop writing the page: the next cycle **deletes** `<data_dir>/index.html` and `<data_dir>/days/*.html`, so the web server has nothing left to serve - a frozen page reads as "no news" rather than "the page is off". `news.db`, the backups and any non-page file in `days/` are never touched, and `ops.site_url` stops being checked. The default is the disagreement with teeth: `true` is the only value an absent key can safely mean, because the alternative would have an upgrade delete a deployment's published page for saying nothing |
 | `rank.weight_source` | float | `0.5` | Weight of the source term |
 | `rank.weight_frequency` | float | `0.3` | Weight of the cross-source frequency term |
 | `rank.weight_freshness` | float | `0.2` | Weight of the freshness term |
@@ -2343,7 +2388,7 @@ someone chose it.
 | `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
 | `storage.retention_days` | int | `0` **(template ships `90`)** | `0` = keep everything; otherwise prune rows and day files past the window. The default and the template disagree on purpose - an absent key must never make an upgrade start deleting, while a fresh install should have a ceiling |
 | `ops.heartbeat_url` | str | `""` | Dead-man's switch pinged after every clean cycle (healthchecks.io / Uptime Kuma push). `""` = no ping |
-| `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. **Point it at `http://caddy:8080/`**, which resolves over the compose network: it then tests the web server this stack is responsible for. A public URL here turns somebody else's outage into a failed cycle. `""` = no check |
+| `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. **Point it at `http://caddy:8080/`**, which resolves over the compose network: it then tests the web server this stack is responsible for. A public URL here turns somebody else's outage into a failed cycle. `""` = no check. **Ignored entirely when `report.html` is `false`** - `Config.site_check_url()` returns `""` there, because a 404 on a page nobody publishes would withhold the ping and alert after two cycles. The value in the file is left as written, so turning the page back on restores the check |
 | `ops.backup_dir` | str | `backups` | Where the daily store backup is written. **Never under `storage.data_dir`** - that directory is served to the public web |
 | `ops.backup_keep` | int | `7` | Newest N backups kept; `0` = back nothing up |
 | `ai.enabled` | bool | `false` | The AI summary - one sentence under each story, on the page and in the message. Off is the shipped case: a config that says nothing about `ai` never reaches the network and never sees a bill |
@@ -2880,7 +2925,7 @@ wrong, which makes it the least surprising place in the program for a second
 thing to go wrong, and nothing it does may end the schedule loop.
 
 ### [interface] Crawl CLI - python -m news_radar
-*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/ops.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile - keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --check, --config, --debug, config drift, config-templates, missing_keys, template_path, entrypoint, schedule loop, SIGTERM, exit codes, crawl*
+*`interface/crawl-cli.md` - The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process. - status: active - source: src/news_radar/__main__.py, src/news_radar/ops.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile - keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --check, --config, --debug, config drift, config-templates, missing_keys, template_path, entrypoint, schedule loop, SIGTERM, exit codes, crawl, report.html, render.remove, site_check_url*
 
 # Crawl CLI - `python -m news_radar`
 
@@ -3036,6 +3081,36 @@ what a total would hide, and the page makes the same promise for the same reason
 shortlist; `90 story(ies) today` is what the store holds for the whole local day.
 The page is rendered from the store, never from the run in memory - that is what
 makes a restart at noon still publish what the morning found.
+
+**With `report.html` off, the cycle unpublishes instead of rendering.**
+`_publish()` branches three ways: the page off calls `render.remove()`, groups
+present calls `render.write()`, and no groups leaves the page alone. Off is not
+"skip the write" - the last page this ever wrote would otherwise sit on the web
+server forever, dated and wrong, and a reader cannot tell a frozen report from a
+working one. Only `index.html` and `days/*.html` are unlinked; `news.db` shares
+that directory and is never touched, a `days/` holding anything else keeps both
+the file and the directory, and a cycle that finds nothing to remove logs
+nothing - at ten-minute intervals that line would appear 144 times a day. The
+summaries are still written, because they belong to the messages as much as to
+the page, and the closing count says so honestly:
+
+```
+INFO  the HTML report is off: removed 2 published file(s) from /app/output
+INFO  stored 2 match row(s) as run 20260907T063802Z; 2 story(ies) across
+      1 group(s) today, published nowhere - report.html is off
+```
+
+**And the site check goes with it.** `crawl()` reads `cfg.site_check_url()`
+rather than `ops.site_url` directly: with the page off it is `""`, so nothing is
+GET, and the one line saying so is printed only when a url was actually
+configured. Left running, that check would 404 every cycle - which withholds the
+ping *and* counts as a failed cycle, so `ops.Health` would alert after two of
+them about a radar that is working perfectly.
+
+```
+INFO  heartbeat: site check skipped, the HTML report is off
+INFO  heartbeat: pinged
+```
 
 **An unusable keyword file costs the search feeds, not the run.** The fixed
 feeds do not need it, so `crawl()` logs the `KeywordError` on one line and

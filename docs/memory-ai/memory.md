@@ -49,11 +49,28 @@ debugging-only.
   The path is dead; a machine that still holds one of those files must not be
   able to commit it.
 
-**Two loose ends the code cannot close**, both recorded in [[updating-homelab]]:
-the Cloudflare DNS record and the tunnel still exist on the account and will
-answer `1033` until someone deletes them, and `ops.site_url` on the homelab is
-still the public URL - it has to move to `http://caddy:8080/` or every cycle
-fails on a hostname nothing serves.
+**Torn down on the real deployment the same day** (2026-09-07), and measured at
+each step:
+
+- the `news-radar-tunnel` container was stopped and removed - `news.dtbao.org`
+  went from `200` to `502` while `http://localhost:8088/` stayed `200`, and the
+  crawl and Caddy containers were untouched;
+- the `news` tunnel was deleted from the Cloudflare account. Three tunnels
+  remain there and none of them are this project's; `git.dtbao.org` and
+  `photos.dtbao.org` both still answered `200` afterwards, which is the check
+  that the blast radius was one tunnel wide;
+- `ops.site_url` was moved to `http://caddy:8080/` on the homelab **before the
+  next cycle ran**. It had still been the public URL, so the following cycle
+  would have failed on a `530`, and two of those in a row is a real alert about
+  a non-problem. The cycle after the restart logged
+  `heartbeat: http://caddy:8080/ answered`.
+
+**One loose end is left, and it needs the Cloudflare dashboard.** The
+`news.dtbao.org` CNAME still exists and now points at a tunnel that is gone, so
+the hostname answers **530** instead of not resolving. `cloudflared tunnel
+route` can only *create* DNS records - there is no delete subcommand - so
+removing it is a dashboard or API operation, not something this repository can
+do.
 
 ### The package is an image, and the data is out of its way (2026-09-06)
 
@@ -610,8 +627,11 @@ the ops layer and the summary - and the whole thing is reachable at
   `release.py`. Until then `docker compose pull` has nothing to fetch, and the
   homelab migration cannot start. Cut the version first, in that order.
 - **v0.2.2 is cut and pushed but not deployed.** The homelab still runs
-  `v0.2.1`, and still with a tunnel in front of it; nothing changes there until
-  it is updated.
+  `v0.2.1`. The tunnel in front of it is gone as of 2026-09-07, but **its
+  compose file still defines the `cloudflared` service** - only the container
+  was removed, so `--profile tunnel up -d` there would start it again against a
+  tunnel that no longer exists. The compose file without that service arrives
+  with the migration.
   `~/news-radar/config/config.yaml` is gitignored and still says
   `report.mode: incremental` - a hand edit no release can make for you, and what
   `--check` will name.
@@ -783,6 +803,22 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **And then it was torn down for real, the same day** (2026-09-07). Not just
+  removed from the repository: the connector container stopped and removed
+  (`news.dtbao.org` `200` -> `502`, LAN copy still `200`, crawl and Caddy
+  untouched), the `news` tunnel deleted from the Cloudflare account (three
+  unrelated tunnels left alone, `git.dtbao.org` and `photos.dtbao.org` still
+  `200`), and `ops.site_url` moved to `http://caddy:8080/` **before the next
+  cycle** - it was still the public URL, and one more cycle would have started
+  counting toward a real alert about a hostname nobody was serving on purpose.
+- **The DNS record is the one piece no CLI can remove.** `cloudflared tunnel
+  route` creates records and has no delete; deleting the CNAME is a dashboard or
+  API operation. Until it goes, `news.dtbao.org` answers **530** rather than not
+  resolving - the record is still there, pointing at a tunnel that is not.
+- **Removing a thing from the repository is not removing it from the world.**
+  The bank said the tunnel was gone a day before the connector stopped running.
+  Worth separating in writing next time: what the code no longer does, and what
+  the deployment no longer runs.
 - **Then the tunnel was removed outright** (2026-09-07), one commit later.
   `docker/cloudflared.yml` deleted, the `cloudflared` service and the `tunnel`
   profile gone from compose, `NEWS_RADAR_TUNNEL_ID` gone from `.env.example`,
@@ -1064,13 +1100,14 @@ loader and the design bank - see `progress.md`.
    then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays
    unset** - the compose file is still in `docker/`, so the default `..` is
    already `~/news-radar`. Do **not** `git checkout v0.2.3` out of habit: that
-   is the command that deletes `config/frequency_words.txt`. **This migration
-   also takes the site off the internet**: the tunnel is gone from the stack, so
-   `rm -f docker/cloudflared.yml docker/tunnel-credentials.json` and expect
-   `news.dtbao.org` to stop answering. Point `ops.site_url` at
-   `http://caddy:8080/` in the same edit as `report.mode`, and delete the
-   Cloudflare DNS record and the tunnel on the account when convenient - left
-   alone the hostname answers `1033` forever instead of `NXDOMAIN`.
+   is the command that deletes `config/frequency_words.txt`. The tunnel teardown
+   is **already done** (2026-09-07): the connector container is removed, the
+   `news` tunnel is deleted from the Cloudflare account, and `ops.site_url` on
+   the homelab is already `http://caddy:8080/`. What phase 1 still adds there is
+   `rm -f docker/cloudflared.yml docker/tunnel-credentials.json` and a compose
+   file that no longer defines the service at all - until then, `--profile
+   tunnel up -d` on that machine would start a connector for a tunnel that no
+   longer exists.
 4. **Edit `report.mode` on the homelab by hand, in the same visit.**
    `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
    no release can reach it, which is what
@@ -3916,15 +3953,18 @@ release removes the tunnel: the report is served on
 `http://<host>:NEWS_RADAR_HTTP_PORT` and nowhere else. Two loose ends the
 commands above do not tidy for you:
 
-- **the Cloudflare DNS record and the tunnel itself still exist** on the
-  Cloudflare account, now pointing at a connector that will never run again.
-  `cloudflared tunnel delete <name>` and removing the DNS record are account
-  operations, outside this repository - but leaving them means the hostname
-  answers Cloudflare `1033` forever rather than `NXDOMAIN`;
-- **`ops.site_url` in `config/config.yaml` may still be the public URL.** Point
-  it at `http://caddy:8080/`, which resolves over the compose network. Left as
-  the public name it would fetch a hostname nothing serves, fail every cycle,
-  and withhold the heartbeat ping for a problem that is not this stack's.
+- **`ops.site_url` in `config/config.yaml` may still be the public URL**, and
+  this is the urgent one. Point it at `http://caddy:8080/`, which resolves over
+  the compose network, then restart the crawl so it re-reads the config. Left as
+  the public name it fetches a hostname nothing serves, fails every cycle, and
+  two failures in a row is a genuine alert about a non-problem. Do it **before**
+  the next cycle, not after;
+- **the tunnel and its DNS record are account operations.**
+  `cloudflared tunnel delete <name>` removes the tunnel and needs
+  `~/.cloudflared/cert.pem`, not the credentials file. The CNAME is the part no
+  CLI can do: `cloudflared tunnel route` only *creates* records, so deleting it
+  is a dashboard or API job. Until it goes, the hostname answers **530** - it
+  still resolves, and points at a tunnel that no longer exists.
 
 `NEWS_RADAR_HOME` stays **unset** here: the compose file sits in `docker/`, the
 default `..` is `~/news-radar`, and that is already where `config/`, `output/`

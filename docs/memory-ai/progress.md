@@ -39,11 +39,28 @@ debugging-only.
   The path is dead; a machine that still holds one of those files must not be
   able to commit it.
 
-**Two loose ends the code cannot close**, both recorded in [[updating-homelab]]:
-the Cloudflare DNS record and the tunnel still exist on the account and will
-answer `1033` until someone deletes them, and `ops.site_url` on the homelab is
-still the public URL - it has to move to `http://caddy:8080/` or every cycle
-fails on a hostname nothing serves.
+**Torn down on the real deployment the same day** (2026-09-07), and measured at
+each step:
+
+- the `news-radar-tunnel` container was stopped and removed - `news.dtbao.org`
+  went from `200` to `502` while `http://localhost:8088/` stayed `200`, and the
+  crawl and Caddy containers were untouched;
+- the `news` tunnel was deleted from the Cloudflare account. Three tunnels
+  remain there and none of them are this project's; `git.dtbao.org` and
+  `photos.dtbao.org` both still answered `200` afterwards, which is the check
+  that the blast radius was one tunnel wide;
+- `ops.site_url` was moved to `http://caddy:8080/` on the homelab **before the
+  next cycle ran**. It had still been the public URL, so the following cycle
+  would have failed on a `530`, and two of those in a row is a real alert about
+  a non-problem. The cycle after the restart logged
+  `heartbeat: http://caddy:8080/ answered`.
+
+**One loose end is left, and it needs the Cloudflare dashboard.** The
+`news.dtbao.org` CNAME still exists and now points at a tunnel that is gone, so
+the hostname answers **530** instead of not resolving. `cloudflared tunnel
+route` can only *create* DNS records - there is no delete subcommand - so
+removing it is a dashboard or API operation, not something this repository can
+do.
 
 ### The package is an image, and the data is out of its way (2026-09-06)
 
@@ -600,8 +617,11 @@ the ops layer and the summary - and the whole thing is reachable at
   `release.py`. Until then `docker compose pull` has nothing to fetch, and the
   homelab migration cannot start. Cut the version first, in that order.
 - **v0.2.2 is cut and pushed but not deployed.** The homelab still runs
-  `v0.2.1`, and still with a tunnel in front of it; nothing changes there until
-  it is updated.
+  `v0.2.1`. The tunnel in front of it is gone as of 2026-09-07, but **its
+  compose file still defines the `cloudflared` service** - only the container
+  was removed, so `--profile tunnel up -d` there would start it again against a
+  tunnel that no longer exists. The compose file without that service arrives
+  with the migration.
   `~/news-radar/config/config.yaml` is gitignored and still says
   `report.mode: incremental` - a hand edit no release can make for you, and what
   `--check` will name.

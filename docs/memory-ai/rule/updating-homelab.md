@@ -114,15 +114,18 @@ release removes the tunnel: the report is served on
 `http://<host>:NEWS_RADAR_HTTP_PORT` and nowhere else. Two loose ends the
 commands above do not tidy for you:
 
-- **the Cloudflare DNS record and the tunnel itself still exist** on the
-  Cloudflare account, now pointing at a connector that will never run again.
-  `cloudflared tunnel delete <name>` and removing the DNS record are account
-  operations, outside this repository - but leaving them means the hostname
-  answers Cloudflare `1033` forever rather than `NXDOMAIN`;
-- **`ops.site_url` in `config/config.yaml` may still be the public URL.** Point
-  it at `http://caddy:8080/`, which resolves over the compose network. Left as
-  the public name it would fetch a hostname nothing serves, fail every cycle,
-  and withhold the heartbeat ping for a problem that is not this stack's.
+- **`ops.site_url` in `config/config.yaml` may still be the public URL**, and
+  this is the urgent one. Point it at `http://caddy:8080/`, which resolves over
+  the compose network, then restart the crawl so it re-reads the config. Left as
+  the public name it fetches a hostname nothing serves, fails every cycle, and
+  two failures in a row is a genuine alert about a non-problem. Do it **before**
+  the next cycle, not after;
+- **the tunnel and its DNS record are account operations.**
+  `cloudflared tunnel delete <name>` removes the tunnel and needs
+  `~/.cloudflared/cert.pem`, not the credentials file. The CNAME is the part no
+  CLI can do: `cloudflared tunnel route` only *creates* records, so deleting it
+  is a dashboard or API job. Until it goes, the hostname answers **530** - it
+  still resolves, and points at a tunnel that no longer exists.
 
 `NEWS_RADAR_HOME` stays **unset** here: the compose file sits in `docker/`, the
 default `..` is `~/news-radar`, and that is already where `config/`, `output/`

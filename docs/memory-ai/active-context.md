@@ -87,6 +87,22 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **And then it was torn down for real, the same day** (2026-09-07). Not just
+  removed from the repository: the connector container stopped and removed
+  (`news.dtbao.org` `200` -> `502`, LAN copy still `200`, crawl and Caddy
+  untouched), the `news` tunnel deleted from the Cloudflare account (three
+  unrelated tunnels left alone, `git.dtbao.org` and `photos.dtbao.org` still
+  `200`), and `ops.site_url` moved to `http://caddy:8080/` **before the next
+  cycle** - it was still the public URL, and one more cycle would have started
+  counting toward a real alert about a hostname nobody was serving on purpose.
+- **The DNS record is the one piece no CLI can remove.** `cloudflared tunnel
+  route` creates records and has no delete; deleting the CNAME is a dashboard or
+  API operation. Until it goes, `news.dtbao.org` answers **530** rather than not
+  resolving - the record is still there, pointing at a tunnel that is not.
+- **Removing a thing from the repository is not removing it from the world.**
+  The bank said the tunnel was gone a day before the connector stopped running.
+  Worth separating in writing next time: what the code no longer does, and what
+  the deployment no longer runs.
 - **Then the tunnel was removed outright** (2026-09-07), one commit later.
   `docker/cloudflared.yml` deleted, the `cloudflared` service and the `tunnel`
   profile gone from compose, `NEWS_RADAR_TUNNEL_ID` gone from `.env.example`,
@@ -368,13 +384,14 @@ loader and the design bank - see `progress.md`.
    then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays
    unset** - the compose file is still in `docker/`, so the default `..` is
    already `~/news-radar`. Do **not** `git checkout v0.2.3` out of habit: that
-   is the command that deletes `config/frequency_words.txt`. **This migration
-   also takes the site off the internet**: the tunnel is gone from the stack, so
-   `rm -f docker/cloudflared.yml docker/tunnel-credentials.json` and expect
-   `news.dtbao.org` to stop answering. Point `ops.site_url` at
-   `http://caddy:8080/` in the same edit as `report.mode`, and delete the
-   Cloudflare DNS record and the tunnel on the account when convenient - left
-   alone the hostname answers `1033` forever instead of `NXDOMAIN`.
+   is the command that deletes `config/frequency_words.txt`. The tunnel teardown
+   is **already done** (2026-09-07): the connector container is removed, the
+   `news` tunnel is deleted from the Cloudflare account, and `ops.site_url` on
+   the homelab is already `http://caddy:8080/`. What phase 1 still adds there is
+   `rm -f docker/cloudflared.yml docker/tunnel-credentials.json` and a compose
+   file that no longer defines the service at all - until then, `--profile
+   tunnel up -d` on that machine would start a connector for a tunnel that no
+   longer exists.
 4. **Edit `report.mode` on the homelab by hand, in the same visit.**
    `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
    no release can reach it, which is what

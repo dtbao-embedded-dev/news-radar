@@ -9,6 +9,27 @@ updated: 2026-09-07
 
 ## Current focus
 
+**The page is off and the radar polls three times an hour (2026-09-07,
+unreleased after v0.2.6).** Three changes, all on `release/v0.2`:
+
+- `schedule.interval_minutes` was confirmed to live in **both** places - the
+  code default `config.py` `DEFAULTS` (30) and the shipped
+  `config.yaml.example`. The template now says **10**; the default stays 30, so
+  an upgrade that never mentions `schedule` keeps the half-hour it had. What to
+  watch is Google News and HN Algolia, the two hosts already known to throttle,
+  now asked three times as often.
+- New `report.html` key. `false` ships in the template and **deletes** the
+  published page on the next cycle - `index.html` and `days/*.html`, never
+  `news.db`. Telegram and Discord already carry every story; a frozen page on a
+  web server is a second, worse copy of the same day.
+- With the page off, `ops.site_url` is no longer checked. Left alone it would
+  404 every cycle, withhold the ping and alert after two - a false alarm about
+  a radar that is working.
+
+**Next:** the homelab's own `config.yaml` is a separate, gitignored file. The
+new values reach it only by hand, then `docker compose up -d`. Until then the
+homelab still polls every 30 minutes and still publishes the page.
+
 **Search quality, reviewed against TrendRadar and measured (2026-09-07,
 unreleased after v0.2.5).** The search *mechanics* came out clean - every claim
 in `config.yaml`'s comments was re-run and held: `when:7d` cuts the oldest hit

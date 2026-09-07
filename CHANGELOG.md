@@ -16,7 +16,37 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Breaking Changes
+
+- **keywords**: the `RTOS` group is **removed** from
+  `config/frequency_words.txt.example`, and five model groups take its place -
+  `Claude`, `ChatGPT`, `GLM`, `Qwen`, `DeepSeek`, `@6` apiece. A deployment
+  keeps its own `config/frequency_words.txt` untouched (it is gitignored), so
+  nothing changes for an existing radar until that file is edited by hand.
+
+### Changed
+
+- **sources**: the `google_news` (hl=vi) template ships **disabled**. It pays a
+  request per keyword group, and the keyword file now has eleven of them: over
+  the six shipped groups it had returned 53 usable stories of which 49 were the
+  AI group, and 0 for ESP32, RTOS and GitHub Trending. Eleven requests every ten
+  minutes at the host already known to throttle first, for coverage the five new
+  model groups replace. The budget holds at **34 requests a cycle** against 33
+  before. `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news.
+
 ### Features
+
+- **keywords**: five model groups - `Claude`, `ChatGPT`, `GLM`, `Qwen`,
+  `DeepSeek` - each one its own group rather than five terms in one, because a
+  group's first plain term is its only search query. Measured: on the fixed
+  feeds alone GLM appeared once, Qwen twice and DeepSeek seven times in 2,239
+  items; with a query each they return 8, 20 and 67. A single group with a broad
+  query was tried and rejected - `"chatbot"` surfaced 36 vendor mentions but
+  only ChatGPT and Claude, `"LLM"` six. Plain terms, no regexes: `Claude` and
+  `GLM` were the ambiguity worry (Monet, the OpenGL maths library) and across
+  2,655 live items all 135 Claude hits and all 11 GLM hits were about the model.
+  The groups sit **ahead of the AI group** on purpose, so `notify.pick()` sends
+  a story labelled `Claude` rather than `AI`.
 
 - **rank**: `rank_groups()` takes a `max_age_days` cut and drops stories past it
   **before** anything is scored, with `fresh_enough()` deciding one story at a

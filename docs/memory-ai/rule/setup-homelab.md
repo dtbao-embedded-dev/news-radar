@@ -1,33 +1,118 @@
 ---
 title: Setting Up on the Homelab
 category: rule
-purpose: The procedure from a fresh clone to news.dtbao.org serving, identical on Windows and Linux.
+purpose: The procedure from nothing to a deployment serving the report on the LAN, and to a development checkout.
 status: active
-updated: 2026-09-05
-source: scripts/setup.py, docker/docker-compose.yml, docker/Caddyfile, docker/cloudflared.yml
+updated: 2026-09-07
+source: docker/docker-compose.yml, docker/.env.example, docker/Caddyfile, .github/workflows/image.yml, scripts/setup.py, src/news_radar/__main__.py
 confidence: confirmed
-keywords: setup, setup.py, docker compose, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088
+keywords: deployment directory, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, ghcr, image, docker compose pull, ghcr private, package visibility, watchtower, autoupdate profile, --check, setup, setup.py, homelab, LAN only, published nowhere, no tunnel, reverse proxy, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088
 order: 2
 ---
 
 # Setting Up on the Homelab
 
-> Two steps: clone, then `python scripts/setup.py` - the script starts the stack
-> itself. The same two on Windows and on Linux; that is why setup is a Python
-> script and not a pair of shell scripts.
+> A **deployment** runs the published image and keeps no source. A **checkout**
+> is for developing. They share one `docker-compose.yml`, told apart by a single
+> variable, so there is no second file to drift. Updating one, and migrating an
+> existing checkout into one, is [[updating-homelab]].
+
+## Two ways to run it
+
+| | Deployment (production) | Checkout (development) |
+|---|---|---|
+| What it holds | compose file, `.env`, and the deployment's own data | the whole repository |
+| `NEWS_RADAR_HOME` | `.` - data beside the compose file | unset (`..`) - data at the repo root |
+| Crawl image | pulled from GHCR | built from the local `Dockerfile` |
+| Install | `docker compose pull && up -d` | `python scripts/setup.py` |
+| Update | `docker compose pull && up -d`, or watchtower - see [[updating-homelab]] | `git pull`, rebuild |
+| Git | **none** | yes |
+
+**The absence of git on a deployment is the design, not a shortcut.** A tracked
+file a deployment edits cannot survive `git checkout <tag>`, and it fails in
+whichever of two ways is worse for you: untouched it is **deleted**, edited the
+checkout **aborts** and the upgrade stops. This project has already been on the
+wrong side of that once (`config/frequency_words.txt`, v0.2.2). A machine with no
+checkout has no command that can do either to `config/`, `output/` or
+`backups/`.
 
 ## Prerequisites
 
-| Needs | Why |
-|-------|-----|
-| Python 3.11+ | Runs `setup.py` and `release.py`; `setup.py` checks the version and refuses an older one |
-| Docker Engine + Compose v2 | Runs the stack. `setup.py` reports both versions before doing anything else |
-| A free host port | The default published port is `8088`, overridable with `NEWS_RADAR_HTTP_PORT`. `8080` is deliberately not the default even though it is free - see [[deployment-homelab]] |
+| Needs | Deployment | Checkout |
+|-------|-----------|----------|
+| Docker Engine + Compose v2 | yes | yes |
+| Python 3.11+ | **no** | yes - runs `setup.py` and `release.py` |
+| A free host port | `8088` by default, `NEWS_RADAR_HTTP_PORT` overrides it | same |
 
-Nothing else. There are no API keys for fetching news; every secret is a
-notification secret.
+There are no API keys for fetching news; every secret is a notification secret.
 
-## Procedure
+## Installing a deployment
+
+The deployment directory is flat: the compose file and the three files beside it
+come from the release, everything else is yours and nothing ever overwrites it.
+
+```
+~/news-radar/
+  docker-compose.yml         from the release
+  Caddyfile                  from the release
+  .env                       yours - secrets, and NEWS_RADAR_HOME=.
+  config/config.yaml         yours
+  config/frequency_words.txt yours
+  output/                    yours - the store and the published pages
+  backups/                   yours - dated copies of the store
+```
+
+```
+mkdir -p ~/news-radar/config ~/news-radar/output ~/news-radar/backups
+cd ~/news-radar
+BASE=https://raw.githubusercontent.com/dtbao-embedded-dev/news-radar/v<version>
+curl -fsSLO "$BASE/docker/docker-compose.yml"
+curl -fsSLO "$BASE/docker/Caddyfile"
+curl -fsSL  "$BASE/docker/.env.example"                  -o .env
+curl -fsSL  "$BASE/config/config.yaml.example"           -o config/config.yaml
+curl -fsSL  "$BASE/config/frequency_words.txt.example"   -o config/frequency_words.txt
+```
+
+Then edit `.env`. Two things it will not work without:
+
+- the notification secrets - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+  `DISCORD_WEBHOOK_URL`. The crawl **refuses to start** while an enabled channel
+  has none: a stack that runs and silently never notifies is the failure this
+  project most wants to avoid.
+- **`NEWS_RADAR_HOME=.`** - without it the compose default is `..`, and the
+  container mounts the directory *above* the deployment.
+
+```
+docker compose pull
+docker compose --profile autoupdate up -d
+docker compose run --rm news-radar --check
+```
+
+**The report is now reachable on `http://<host>:8088` and nowhere else.** There
+is no tunnel and no reverse proxy in this stack - see the section below.
+
+**The GHCR package is private until somebody makes it public.** A package
+published by a workflow inherits the repository's *access permissions* but
+**not** its visibility, so a new one is private even from a public repo and the
+`pull` above answers `denied`. Fix it once, on the package's page under the
+repository's **Packages** - Package settings - Change visibility - Public. The
+alternative is `docker login ghcr.io` on the homelab with a read:packages token,
+which is a credential on the deployment for no benefit.
+
+**`pull` first, always.** The compose file carries `image:` and `build:` both,
+and `up` **does not fall back to pulling** - measured, it goes straight to the
+build and fails:
+
+```
+failed to solve: failed to read dockerfile: open Dockerfile: no such file or directory
+```
+
+That error on a deployment means the pull was skipped, not that anything is
+broken. Pull, then `up -d`, and nothing builds again.
+
+## Installing a checkout
+
+Unchanged, and still two steps:
 
 ```
 git clone git@github.com:dtbao-embedded-dev/news-radar.git
@@ -35,37 +120,20 @@ cd news-radar
 python scripts/setup.py
 ```
 
-**Step 2 in detail.** `setup.py` checks Python and Docker, then creates the two
-files that are deliberately not in git:
+`setup.py` checks Python and Docker, creates the three files that are
+deliberately not in git, asks for any notification secret still empty, and then
+starts the stack itself.
 
 | Created | From | Holds |
 |---------|------|-------|
 | `config/config.yaml` | `config/config.yaml.example` | Feeds, search templates, ranking weights, schedule |
-| `docker/.env` | `docker/.env.example` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `DISCORD_WEBHOOK_URL`, `TZ`, `NEWS_RADAR_HTTP_PORT` |
+| `config/frequency_words.txt` | `config/frequency_words.txt.example` | The keyword groups |
+| `docker/.env` | `docker/.env.example` | The secrets, `TZ`, `NEWS_RADAR_HTTP_PORT`, `NEWS_RADAR_HOME`, `NEWS_RADAR_VERSION` |
 
-It then asks for any notification secret that is still empty and writes it into
-`docker/.env`, preserving the comments. It **exits non-zero while a required
-secret is blank** - a stack that starts and silently never notifies is the
-failure this project most wants to avoid.
-
-An existing file is never overwritten: it is reported as `[skip]`. Use `--force`
-to replace one deliberately.
-
-**Step 3 happens inside step 2.** Once the checks pass and the secrets are
-filled, `setup.py` runs `docker compose -f docker/docker-compose.yml up -d`
-itself and prints the URL the page is served on. There is no separate command to
-type. Two things it decides for itself by looking at the checkout: it names
-`caddy` alone when there is no `Dockerfile` to build the crawl service from, and
-it adds `--profile tunnel` when `docker/tunnel-credentials.json` is there. A
-compose failure is reported and exits non-zero - the script never claims a stack
-it could not start.
-
-| Flag | Use it when |
-|------|-------------|
-| `--dry-run` | You want to see what it would do. Writes nothing, asks nothing |
-| `--check` | Verifying an existing install - same checks plus the secrets, creates nothing, non-zero on a gap |
-| `--force` | Regenerating a config from the template on purpose |
-| `--non-interactive` | Unattended provisioning; a blank secret is reported, not prompted for |
+An existing file is never overwritten; it is reported as `[skip]`. `--force`
+replaces one deliberately. Leave `NEWS_RADAR_HOME` empty here - the compose
+default `..` is already the repo root. Its four flags and what each guarantees
+are in [[cli-scripts]], which is where that contract lives.
 
 ## Getting the secrets
 
@@ -74,66 +142,53 @@ it could not start.
   `https://api.telegram.org/bot<TOKEN>/getUpdates`.
 - **Discord** - channel settings, Integrations, Webhooks, New Webhook, Copy URL.
 
-Both live only in `docker/.env`, which is gitignored. They never go into
-`config.yaml`.
+Both live only in `.env`, never in `config.yaml`.
 
-## Exposing news.dtbao.org
+## Reaching it from outside the LAN
 
-Caddy serves `output/` inside the docker network on port `8080`. The published
-host port (`8088` by default) is for local debugging only - the tunnel never
-touches it.
+**Nothing in this stack does that, deliberately.** Caddy serves the
+deployment's `output/` on port `8080` inside the docker network, published on the
+host as `NEWS_RADAR_HTTP_PORT` (default `8088`). That port is the whole of the
+project's answer.
 
-The connector runs as the `cloudflared` service in this same compose project,
-behind the `tunnel` profile. Two steps, once per machine:
+There used to be a `cloudflared` service here carrying a public hostname. It was
+removed: a connector is a permanent moving part, with its own credentials, its
+own failure mode (Cloudflare `1033` while every other log line says success) and
+its own upgrade story - all of that inside a project whose actual job is to write
+HTML into a directory. Whatever you put in front of the published port is a
+choice you can change without touching this repository, which is the point.
 
-1. **Have a tunnel.** `cloudflared tunnel create news` if there is none, then
-   `cloudflared tunnel route dns news news.dtbao.org` to point the hostname at
-   it. Both write to the Cloudflare account, not to this repo.
-2. **Give the container its credentials.** Copy the tunnel's credentials JSON
-   (`~/.cloudflared/<tunnel-id>.json`, written by `tunnel create`) to
-   `docker/tunnel-credentials.json`. It is gitignored; the tunnel id in
-   `docker/cloudflared.yml` is not a secret and stays committed. A different
-   tunnel means editing that id.
+If you do front it, three things this project already does are worth keeping:
 
-After that `python scripts/setup.py` starts the tunnel too - it adds
-`--profile tunnel` on its own once it sees the credentials file. By hand:
-
-```
-docker compose -f docker/docker-compose.yml --profile tunnel up -d
-```
-
-**Do not add `news.dtbao.org` to a connector running on the host instead.** A
-host connector cannot resolve `caddy`, so it would have to be pointed at the
-published debug port; and this homelab's host connector (`win-dev`) carries
-`ssh.dtbao.org` and `remote.dtbao.org`, so restarting it for a news route drops
-the operator's own remote access. See [[deployment-homelab]].
+- **`docker/Caddyfile` answers `404` for `/news.db*` and for directory
+  listings.** The store is not part of the report, and serving it hands a
+  stranger the whole archive in one request. Those rules are what a proxy would
+  be relying on - see [[deployment-homelab]].
+- **`ops.site_url` should stay `http://caddy:8080/`**, not the public name. It
+  runs inside the compose network, so it tests the thing this stack is
+  responsible for; a public URL would make somebody else's outage into a failed
+  cycle and withhold the heartbeat ping for it.
+- **The archive is public the moment the port is.** Every
+  `output/days/*.html` ever written is readable by anyone who can reach it, and
+  there is no auth in this stack at all.
 
 ## Verifying it works
 
-1. `docker compose -f docker/docker-compose.yml --profile tunnel ps` - all
-   three services `running`. Drop `--profile tunnel` and `cloudflared`
-   disappears from the listing; that is the profile working, not a fault.
-2. `curl http://localhost:8088/` - Caddy answers with the current report.
-   A 200 from a *different* service means the port is taken; change
+1. `docker compose ps` - `news-radar` and `caddy` running, plus `watchtower`
+   when its profile is on. A service missing from the listing without its
+   profile is the profile working, not a fault.
+2. `curl http://localhost:8088/` - Caddy answers with the current report. A 200
+   from a *different* service means the port is taken; change
    `NEWS_RADAR_HTTP_PORT` rather than guessing.
-3. `curl https://news.dtbao.org/` - `200`, and the same report. This already
-   leaves the LAN: the request goes out to the Cloudflare edge and comes back
-   in through the tunnel. `curl https://news.dtbao.org/news.db` must answer
-   `404`.
-4. Cloudflare error `1033` there means the hostname is routed to a tunnel with
-   no connector - read `docker compose logs cloudflared`, which prints
-   `Registered tunnel connection` once per edge connection when it is healthy.
+3. `curl http://localhost:8088/news.db` - **`404`**. The store shares the
+   volume with the pages, and this is the Caddyfile rule that keeps it out of
+   reach of anyone who can reach the port. `curl http://localhost:8088/days/`
+   must answer `404` too.
+4. `docker compose logs news-radar | head` - `news-radar <version> starting`.
+   That version is the one the image was published as, so it is also how you
+   read whether an update actually landed.
 5. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
    received exactly one message.
 
-## Updating
-
-```
-git pull
-python scripts/setup.py --check
-docker compose -f docker/docker-compose.yml --profile tunnel up -d --build
-```
-
-`--check` catches a config key added upstream that the local `config.yaml` does
-not have yet. The crawl container reads its config at startup, so a config change
-needs a restart - see [[deployment-homelab]].
+Updating a deployment, freezing or rolling back a version, and turning an
+existing checkout into a deployment are all [[updating-homelab]].

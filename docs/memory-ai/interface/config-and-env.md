@@ -3,10 +3,10 @@ title: Config Keys, Keyword File and Environment
 category: interface
 purpose: Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads.
 status: active
-updated: 2026-09-06
+updated: 2026-09-07
 source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py
 confidence: confirmed
-keywords: config.yaml, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
+keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
 order: 1
 ---
 
@@ -46,7 +46,7 @@ someone chose it.
 | `search_templates[].format` | str | `rss` | `rss`, `atom`, or `hn_algolia_json` |
 | `search_templates[].enabled` | bool | `true` | `reddit_search` ships **disabled** in the template - it duplicates the fixed Reddit feed heavily |
 | `search_templates[].rank_weight` | float | `1.0` *(template ships `0.8`)* | Search hits rank below front-page hits in the shipped template |
-| `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file |
+| `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file. Gitignored and created by `setup.py` from `frequency_words.txt.example`, so `git checkout <tag>` cannot revert a deployment's tuning |
 | `report.mode` | str | `incremental` **(template ships `daily`)** | `incremental` (this run's new matches), `current` (this run's whole shortlist, every cycle), `daily` (the whole local day minus what the channel already got). The template ships `daily` because it reads the same window the page renders, so a phone and the page agree on which stories exist - and a story missed by one refused cycle is offered again instead of lost |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
 | `report.rank_threshold` | int | `5` | The first N of each group are highlighted on the page |
@@ -57,7 +57,7 @@ someone chose it.
 | `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
 | `storage.retention_days` | int | `0` **(template ships `90`)** | `0` = keep everything; otherwise prune rows and day files past the window. The default and the template disagree on purpose - an absent key must never make an upgrade start deleting, while a fresh install should have a ceiling |
 | `ops.heartbeat_url` | str | `""` | Dead-man's switch pinged after every clean cycle (healthchecks.io / Uptime Kuma push). `""` = no ping |
-| `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. This is what notices the tunnel connector going away. `""` = no check |
+| `ops.site_url` | str | `""` | GET immediately before the ping; a non-200 withholds the ping and counts as a failed cycle. **Point it at `http://caddy:8080/`**, which resolves over the compose network: it then tests the web server this stack is responsible for. A public URL here turns somebody else's outage into a failed cycle. `""` = no check |
 | `ops.backup_dir` | str | `backups` | Where the daily store backup is written. **Never under `storage.data_dir`** - that directory is served to the public web |
 | `ops.backup_keep` | int | `7` | Newest N backups kept; `0` = back nothing up |
 | `ai.enabled` | bool | `false` | The AI summary. Off is the shipped case: a config that says nothing about `ai` never reaches the network and never sees a bill |
@@ -78,6 +78,26 @@ someone chose it.
 **No secret ever appears in this file.** A leaked `config.yaml` must be harmless.
 
 ## frequency_words.txt
+
+**A local file, like `config.yaml`.** `config/frequency_words.txt.example` is
+what ships; `setup.py` copies it to `config/frequency_words.txt` on a fresh
+checkout and never overwrites it afterwards, and `.gitignore` covers the copy.
+The reason is the upgrade, not secrecy. A tracked file a deployment edits cannot
+survive the `git checkout <tag>` a deploy used to run, and **the two ways it
+fails are opposite** - both measured on a throwaway clone rather than reasoned
+about:
+
+| The local file is | `git checkout <new tag>` does |
+|-------------------|-------------------------------|
+| untouched, as the release shipped it | **deletes it.** The radar then matches nothing and every search feed is skipped |
+| edited - a deployment's tuned groups | **refuses.** `error: Your local changes to the following files would be overwritten by checkout ... Aborting`, and the upgrade stops with nothing changed |
+
+So tuning is not silently reverted, as this file used to claim; it is the
+*untuned* case that loses a file, and the tuned one that blocks the deploy until
+somebody reaches for `git checkout -f` and loses it anyway. Untracking removes
+both. Changing the groups **for everyone** means editing the `.example` and
+cutting a version - that is still a technical change and still belongs in the
+changelog.
 
 Plain text, UTF-8. **A blank line separates one group from the next**, and each
 group is counted, capped and displayed independently.
@@ -120,7 +140,8 @@ Here `ESP32` is the primary term - the search templates are queried with it - wh
 
 ## Environment variables
 
-The only place secrets live. In the container they come from `docker/.env`;
+The only place secrets live. In the container they come from the `.env` beside
+the compose file - `docker/.env` in a checkout, the deployment root otherwise;
 outside it, from the real environment.
 
 | Variable | Required | Default | Read by |
@@ -131,6 +152,37 @@ outside it, from the real environment.
 | `OPENAI_API_KEY` | only if the endpoint wants one | - | `__main__.py`, handed to `summarize.summarize()`. Unset (or blank) sends **no `Authorization` header at all**, which is what a LAN SGLang/vLLM/Ollama expects |
 | `NEWS_RADAR_CONFIG` | no | `config/config.yaml` | `config.py` |
 | `TZ` | no | `Asia/Ho_Chi_Minh` | container clock; `app.timezone` still wins for rendering |
+
+### Read by Compose, not by any Python here
+
+These four never reach the application. Compose substitutes them while it parses
+`docker-compose.yml`, so a typo in one is a wrong mount or a wrong image rather
+than a config error the code could report.
+
+| Variable | Default | What it decides |
+|----------|---------|-----------------|
+| `NEWS_RADAR_HOME` | `..` | The directory holding `config/`, `output/` and `backups/`, resolved relative to the compose file. Unset is the repository root, which is a checkout's own layout; a deployment sets `.` and keeps its data beside the compose file with no git checkout on the machine |
+| `NEWS_RADAR_VERSION` | `latest` | Which published image the crawl service runs. Pinning it freezes a deployment or rolls one back, **on its own**: watchtower polls the tag the running container was created from, and a version tag does not move. Republishing that same tag is the one thing that gets past it |
+| `NEWS_RADAR_HTTP_PORT` | `8088` | Caddy's published host port, for local debugging only |
+| `WATCHTOWER_POLL_INTERVAL` | `86400` | Seconds between GHCR polls, when the `autoupdate` profile is on |
+
+**`NEWS_RADAR_HOME` set wrong fails loudly, and leaves a mess.** Measured rather
+than assumed, because the first guess written here was that it would come up
+clean and publish a report with no history - it does not. Docker **creates** a
+bind-mount path that does not exist, as `root`, so the container gets three
+empty directories; `load()` then cannot find `config.yaml`, `main()` returns `1`,
+and `restart: unless-stopped` loops it - 9 restarts in 45 seconds when measured.
+Two consequences worth knowing before the typo happens:
+
+- the failure is in `docker logs` and **nowhere else**. It exits before
+  `ops.Health` exists, so no channel is told - see [[crawl-cli]];
+- the root-owned directories it left behind cannot be removed without `sudo`,
+  which is its own small surprise on a homelab.
+
+The silent version of this failure is a different mistake: copying `config/`
+across during a migration but not `output/news.db`. Then the config loads, the
+run succeeds, and the page is published with no history. [[setup-homelab]]
+carries the value each layout wants and moves nothing.
 
 Startup validation: a channel that is `enabled: true` with its variable missing is
 a **fatal config error**, not a warning.

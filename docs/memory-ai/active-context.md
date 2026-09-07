@@ -1,6 +1,6 @@
 ---
 title: Active Context
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 
 # Active Context
@@ -8,6 +8,51 @@ updated: 2026-09-06
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**Shipping as an image, with the deployment's data out of reach (2026-09-06,
+unreleased on `release/v0.2`).** The previous work made an upgrade *checkable*;
+this makes the failure it checks for unreachable. Production stops being a git
+checkout, so the machine holding `config/`, `output/` and `backups/` has no
+command that can delete them. Five changes: `${NEWS_RADAR_HOME:-..}` on every
+bind mount including caddy's `/srv`, a GHCR image reference beside the kept
+`build:`, `.github/workflows/image.yml` publishing on a `v*` tag, a `watchtower`
+service behind an opt-in `autoupdate` profile scoped by label to the crawl
+container alone, and `python -m news_radar --check` carrying the config-drift
+check into the image where `scripts/setup.py` no longer exists.
+
+**The tunnel is gone (2026-09-07).** The `cloudflared` service,
+`docker/cloudflared.yml`, `NEWS_RADAR_TUNNEL_ID` and the credentials-file
+detection in `setup.py` were all removed one commit after the id was finally
+parameterised - which is the honest sequence, because parameterising it is what
+made it obvious how much machinery a connector was for a project that writes
+HTML into a directory. **The report is served on `NEWS_RADAR_HTTP_PORT` and
+published nowhere**; what fronts that port is a decision outside this
+repository. `--profile tunnel` still parses and is a no-op.
+
+**Three answers to one question.** The package is the **image** - not an app
+binary. The stack is three processes and a binary would package one of them,
+while breaking this project's own rule that a release may never overwrite a
+local config file. Auto-update is then a registry pull, and "user data
+somewhere an update cannot reach" is "the deployment has no git".
+
+**Nothing is live and nothing is even pullable yet.** The image has never been
+published; the workflow's first real evidence is the run after the next
+`release.py`. Cut the version, then migrate the homelab - in that order, since
+the migration's first command is `docker compose pull`.
+
+**The upgrade path was the previous work (2026-09-06, after v0.2.2).** Asking how
+a version update is handled found a procedure that existed, described a
+production this one is not, and promised a check nothing performed. Four
+changes, all unreleased on `release/v0.2`: `setup.py --check` now names config
+keys the template has and the local file lacks (and fails on a missing
+destination file), `store.open_db()` refuses a store between `0` and
+`SCHEMA_VERSION` instead of returning it, `config/frequency_words.txt` became a
+local file created from a committed `.example`, and `## Updating` in
+[[setup-homelab]] was rewritten for the detached-tag production that actually
+runs. **That awkward next deploy no longer has to happen**: the migration above
+removes `.git` and pulls an image instead of checking a tag out, so the
+`config/frequency_words.txt` trap is stepped around rather than walked into.
+Typing `git checkout v0.2.3` on the homelab out of habit still springs it.
 
 **Three defects reported off the live site were fixed on `release/v0.2`
 (2026-09-06)**, all three landing after v0.2.1 and none of them yet on
@@ -42,6 +87,164 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The AI summary is live on OpenRouter** (2026-09-07), and P6-4's open
+  question is answered: two sentences a topic reads as a summary, not a
+  horoscope. `minimax/minimax-m3:free` was picked by POSTing today's real
+  3085-character prompt to two free models and comparing the Vietnamese -
+  `gemma-4-31b:free` answered `429` upstream. First cycle: `summary: 1576
+  character(s) over 5 topic(s)`, page block rendered, `sent to 2 of 2
+  channel(s)`, heartbeat clean.
+- **A new environment variable needs `up -d`, not `restart`.** The plan on file
+  said restart, which is correct for `config.yaml` (a bind mount read at process
+  start) and wrong for `.env`: Compose bakes environment into a container when
+  it creates it, so a restart reuses the old set and the key never arrives. The
+  general shape: bind mounts follow the file, `environment:` follows the
+  container.
+- **The model omitted a topic and was right to.** `RTOS` matched `RTOs` -
+  Indian Regional Transport Offices - so three of that group's five stories were
+  about e-rickshaw enforcement, and the prompt's "omit an unremarkable topic"
+  rule dropped the line. A model routing around a keyword problem is not a fix
+  for it; the page still shows the group.
+- **And then it was torn down for real, the same day** (2026-09-07). Not just
+  removed from the repository: the connector container stopped and removed
+  (`news.dtbao.org` `200` -> `502`, LAN copy still `200`, crawl and Caddy
+  untouched), the `news` tunnel deleted from the Cloudflare account (three
+  unrelated tunnels left alone, `git.dtbao.org` and `photos.dtbao.org` still
+  `200`), and `ops.site_url` moved to `http://caddy:8080/` **before the next
+  cycle** - it was still the public URL, and one more cycle would have started
+  counting toward a real alert about a hostname nobody was serving on purpose.
+- **The DNS record is the one piece no CLI can remove.** `cloudflared tunnel
+  route` creates records and has no delete; deleting the CNAME is a dashboard or
+  API operation. Until it goes, `news.dtbao.org` answers **530** rather than not
+  resolving - the record is still there, pointing at a tunnel that is not.
+- **Removing a thing from the repository is not removing it from the world.**
+  The bank said the tunnel was gone a day before the connector stopped running.
+  Worth separating in writing next time: what the code no longer does, and what
+  the deployment no longer runs.
+- **Then the tunnel was removed outright** (2026-09-07), one commit later.
+  `docker/cloudflared.yml` deleted, the `cloudflared` service and the `tunnel`
+  profile gone from compose, `NEWS_RADAR_TUNNEL_ID` gone from `.env.example`,
+  and `TUNNEL_CREDENTIALS` plus the profile detection gone from `scripts/setup.py`.
+  Twelve bank docs and the README followed. The tests now pin the **absence**:
+  no `cloudflared` service, no service declaring a `tunnel` profile, no
+  `cloudflared.yml` on disk, only `caddy` publishing a port - and in
+  `test_setup.py`, that a leftover credentials file changes nothing.
+- **Parameterising a thing is a good way to find out you do not want it.** The
+  work below made the tunnel id a variable; doing that laid out every piece a
+  connector needs - a config file, a credentials file, a profile, an env var, a
+  detection rule in `setup.py` - and the next question was why any of it was in
+  a project whose job is to write HTML into a directory.
+- **`.gitignore` keeps ignoring `docker/tunnel-credentials.json` on purpose.**
+  The path is dead, but a machine that still has one of those files must not be
+  able to commit it by accident. Removing an ignore for a secret is the one
+  direction that has no upside.
+- **History was annotated, not rewritten.** P5 delivered a tunnel and that is
+  true; `delivery-phases.md` and the P5 entries in this file say so and now also
+  say it was undone. The Known issues list is where the *current* state lives,
+  and that is what changed.
+- **The repository stopped naming one deployment** (2026-09-07). `docker/cloudflared.yml`
+  carried this homelab's tunnel id and its hostname, so the two files a second
+  deployment would need were welded to the first one. The id is now
+  `NEWS_RADAR_TUNNEL_ID` in `.env`, passed as the argument to `run`; the hostname
+  is gone entirely, replaced by a single catch-all ingress to `caddy:8080` -
+  Cloudflare DNS already knows which hostname reaches this tunnel. Verified with
+  cloudflared itself rather than by reading: `tunnel ingress validate` answers
+  `OK`, and `tunnel ingress rule <url>` matches rule #0 to `http://caddy:8080`.
+  **Breaking for the running deployment** - the migration has to read the id out
+  of the old file before replacing it.
+- **cloudflared does not expand environment variables inside its own config**,
+  which is the whole reason the id could not just become `${...}` in that file.
+  Compose *does* expand them in `command:`, so that is where it went. Checked
+  before designing around it, not after.
+- **`updating-homelab.md` was split out of `setup-homelab.md`** (2026-09-07).
+  The latter had hit the bank's 300-line ceiling twice in two days because it was
+  covering two concepts - installing, and updating/migrating. `rule/` orders
+  shifted: release-flow 1, setup-homelab 2, updating-homelab 3,
+  reference-trendradar 4, changelog 5.
+- **A committed `.example` is a place a real value sneaks back in.** The first
+  version of the `NEWS_RADAR_TUNNEL_ID` comment used this deployment's actual id
+  as its example, putting back into git exactly what the change had just taken
+  out. It is a placeholder UUID now.
+- **Every "what could break" line was then checked, and four of six were wrong**
+  (2026-09-06). Corrections landed in two commits across `.gitignore`,
+  `docker/.env.example`, `docker/docker-compose.yml`, `CHANGELOG.md`,
+  `deployment-homelab.md`, `config-and-env.md`, `setup-homelab.md`,
+  `crawl-cli.md`, `progress.md` and this file. What survived: `up -d` before
+  `pull` really does fail on the absent Dockerfile. What did not: the wrong
+  `NEWS_RADAR_HOME` story, the "P6 alerts within two cycles" story, and the
+  "pinning alone loses to the next poll" story.
+- **A "what could break" list written from reasoning is a set of hypotheses.**
+  This one was 33% accurate, written by someone who had just read all the code.
+  Worth remembering the next time such a list is offered as a closing summary:
+  it is the beginning of a verification pass, not the end of one.
+- **`ops.Health` covers a failing cycle, not a failing process.** It is built
+  inside `run()`, so a config the loader refuses exits at `__main__.py:611`
+  before it exists, and `restart: unless-stopped` hands every restart a fresh
+  counter. Measured: 9 restarts in 45 s, zero health lines, zero messages. This
+  is the argument for arming `ops.heartbeat_url` *before* enabling auto-update,
+  and it is now step 1 in Next steps rather than step 3.
+- **Watchtower follows the tag the container was created from.** Not `:latest`
+  in general - so pinning `NEWS_RADAR_VERSION` freezes a deployment on its own,
+  and six places had been written saying the opposite.
+- **Docker creates a missing bind-mount path, as root.** A typo in
+  `NEWS_RADAR_HOME` therefore leaves three root-owned directories the operator
+  cannot `rm`. Found because the verification script's own cleanup failed on it.
+- **A GHCR package inherits the repo's access permissions but not its
+  visibility**, so it is private even from a public repo. One manual step, and
+  the migration cannot start without it.
+- **The image and data-layout work landed in seven commits on `release/v0.2`**
+  (2026-09-06): `docker/docker-compose.yml` (the four data mounts, the `image:`
+  line, the watchtower service and the label), `docker/.env.example`
+  (`NEWS_RADAR_HOME`, `NEWS_RADAR_VERSION`, `WATCHTOWER_POLL_INTERVAL`),
+  `.github/workflows/image.yml` (new), `src/news_radar/config.py`
+  (`TEMPLATE_CANDIDATES`, `template_path()`, `_key_paths()`, `_mapping()`,
+  `missing_keys()`), `src/news_radar/__main__.py` (`--check`, `_check_config()`),
+  `Dockerfile` (the baked template), `tests/test_deploy.py` (new),
+  `tests/test_config.py`, `CHANGELOG.md`, and six bank docs.
+- **The default has to be the old behaviour, or the variable is a migration.**
+  `${NEWS_RADAR_HOME:-..}` resolves to the repository root when nothing sets it,
+  which is exactly where a checkout's `config/`, `output/` and `backups/`
+  already are. That is what let this land without moving a single byte on the
+  homelab, and it is why the migration's phase 1 leaves the variable unset.
+- **The fourth mount is the one that bites.** The plan said "the three bind
+  mounts"; caddy's `../output:/srv:ro` is a fourth, on a different service.
+  Left behind it would have the crawl publish to one directory and the web
+  server serve another - the site 404s while every crawl log line says success.
+  Found by writing the test before the edit.
+- **A check that passes by checking nothing is worse than no check.** The first
+  R8 run reported byte-identical files while `ls` inside the container showed
+  empty directories, which would have been a mount that mounted nothing. Proving
+  the mount in both directions first - host file visible inside, container write
+  visible outside, `:ro` refusing - is what made the result mean anything.
+- **`:ro` on a docker socket is not a sandbox**, and the first comment written
+  for it claimed it was. A socket is a socket: the flag stops the socket *file*
+  being replaced, every API call still goes through, and access is root on the
+  host. The real narrowing is `WATCHTOWER_LABEL_ENABLE` plus the profile. Same
+  shape as the `rel="noopener"` with no `target="_blank"` this project already
+  shipped once - half a pattern reads as the whole one.
+- **`bash -s` reads its script from stdin**, so `docker compose exec` inside a
+  heredoc'd remote script eats the rest of the script, and redirecting stdin
+  kills it outright. Both were hit in one afternoon. Write the script to a file
+  on the remote first.
+- **The upgrade work landed in thirteen commits on `release/v0.2`**
+  (2026-09-06): `scripts/setup.py` (`template_keys()`, `missing_config_keys()`,
+  `ensure_file(..., verify=)`, a third `TEMPLATES` pair), `src/news_radar/store.py`
+  (`open_db()`'s fourth branch), `.gitignore`, the rename to
+  `config/frequency_words.txt.example`, `tests/test_setup.py`,
+  `tests/test_store.py`, `tests/test_keywords.py`, `tests/test_filter.py`,
+  `README.md`, and five bank docs.
+- **A documented promise nothing implements is worse than an undocumented gap.**
+  `cli-scripts.md` had claimed for months that `--check` catches a key added
+  upstream. Believing it is what let `report.mode` sit stale through a release.
+  Both halves of that sentence are now code, and both are tested.
+- **`git checkout <tag>` is a deploy step with side effects.** It deletes a path
+  the new commit does not carry - which is how the keyword-file split breaks the
+  next upgrade, and why that entry is a `### Breaking Changes` rather than a
+  `### Features`. Proven on a throwaway clone, not reasoned about.
+- **`skill-support-commit` cannot commit a pure untrack.** `git rm --cached`
+  leaves the file byte-identical on disk, so the skill's `git reset` baseline
+  re-tracks it and `git add` finds no diff; it stopped cleanly and said so. That
+  one commit (`34138b5`) was made by hand. Worth knowing before the next rename.
 - **The three live defects landed in ten commits on `release/v0.2`**
   (2026-09-06): `render.py` (`_day_nav()` takes a prefix, `write()` renders once
   per destination, `_story()` gains `target="_blank"`), `notify/__init__.py`
@@ -181,30 +384,55 @@ loader and the design bank - see `progress.md`.
 
 ## Next steps
 
-1. **Cut v0.2.2 and redeploy, or the three fixes stay in the branch.**
-   `python scripts/release.py 0.2.2` on `release/v0.2`, then on the homelab:
-   `git fetch --tags origin` → `git checkout v0.2.2` → `cd docker` →
-   `docker compose --profile tunnel up -d --build`.
-2. **Edit `report.mode` on the homelab by hand.** `~/news-radar/config/config.yaml`
-   is gitignored and still says `incremental`; the template change cannot reach
-   it. Set `mode: daily` before the redeploy, in the same visit. Expect a small
-   burst on the first cycle after it - every story of the current day that the
-   channel has not already been told about goes out at once.
-3. **Point `ops.heartbeat_url` at a real monitor.** It ships empty, so the half
-   of P6-1 that survives the container being killed is built but not armed. A
-   healthchecks.io ping url or an Uptime Kuma push url in `config/config.yaml`
-   (gitignored) is the whole change - no code, no restart of anything else.
-4. **Let it run seven days.** That is P6's definition of done and the only thing
+1. **Arm `ops.heartbeat_url` *before* anything else here.** It is one line in
+   `~/news-radar/config/config.yaml` and it is now the precondition for
+   `--profile autoupdate`, not a nice-to-have: a release that fails to start is
+   reported by nothing at all (see progress.md, Known issues). Auto-update
+   without it means a bad release goes unnoticed until somebody opens the page.
+2. **Cut the version, watch the image publish, then make the package public.**
+   `python scripts/release.py 0.2.3`. Two workflows fire on that tag now: the
+   existing `Release`, and `Publish image`. **The package will be private** -
+   confirmed, a workflow-published package inherits the repo's access
+   permissions but not its visibility. Switch it to Public under the
+   repository's Packages, then prove it from the homelab:
+   `docker pull ghcr.io/dtbao-embedded-dev/news-radar:0.2.3`. Nothing can be
+   migrated until that command works.
+3. **Migrate the homelab, phase 1 only.** `## Migrating an existing checkout` in
+   [[updating-homelab]]: `rm -rf .git .github`, re-fetch the compose file, `pull`,
+   then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays
+   unset** - the compose file is still in `docker/`, so the default `..` is
+   already `~/news-radar`. Do **not** `git checkout v0.2.3` out of habit: that
+   is the command that deletes `config/frequency_words.txt`. The tunnel teardown
+   is **already done** (2026-09-07): the connector container is removed, the
+   `news` tunnel is deleted from the Cloudflare account, and `ops.site_url` on
+   the homelab is already `http://caddy:8080/`. What phase 1 still adds there is
+   `rm -f docker/cloudflared.yml docker/tunnel-credentials.json` and a compose
+   file that no longer defines the service at all - until then, `--profile
+   tunnel up -d` on that machine would start a connector for a tunnel that no
+   longer exists.
+4. **Edit `report.mode` on the homelab by hand, in the same visit.**
+   `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
+   no release can reach it, which is what
+   `docker compose run --rm news-radar --check` will tell you. Set
+   `mode: daily`. Expect a small burst on the first cycle after it - every story
+   of the current day the channel has not already been told about goes out at
+   once.
+5. **Then watch one auto-update happen on its own.** Cut a trivial version after
+   the migration and leave it: within `WATCHTOWER_POLL_INTERVAL` the crawl
+   container should be recreated and `docker compose logs news-radar | head`
+   should say the new version. Until that has been seen once, auto-update is
+   built and not proven.
+6. **Let it run seven days.** That is P6's definition of done and the only thing
    still open. On day seven: the crawl container still `Up` with no restart,
    `backups/` holding one file per day and no more, the day list capped at 90,
    and however many alerts arrived being ones you would have wanted.
-5. **Watch whether `ALERT_AFTER = 2` is the right chattiness.** Every alert so
+7. **Watch whether `ALERT_AFTER = 2` is the right chattiness.** Every alert so
    far came from a `site_url` pointed at a 404 on purpose; real feed flakiness
    has not been through it yet.
-6. **Retention will actually delete something for the first time** once the
+8. **Retention will actually delete something for the first time** once the
    store holds anything older than 90 days. A backup is written immediately
    before each prune, so the first one has a copy standing in front of it.
-7. **Still worth eyeballing from P4**: whether 5 Discord messages per cycle is
+9. **Still worth eyeballing from P4**: whether 5 Discord messages per cycle is
    pleasant or noisy, and whether any real headline trips an escaping case the
    fixtures missed.
 
@@ -258,6 +486,41 @@ loader and the design bank - see `progress.md`.
   timestamp spelling - a phone showing the same story differently is a second
   report, and the reader has to reconcile two things that were meant to be one.
   When the page's story row changes, `notify/` changes in the same commit.
+- **No auto-update without a dead-man's switch.** `--profile autoupdate` may not
+  be turned on while `ops.heartbeat_url` is empty. Auto-update removes the human
+  who would have noticed the deploy, and the failure it most plausibly
+  introduces - a release that will not start - is the one shape `ops.Health`
+  structurally cannot report. Measured, not assumed.
+- **A claim about behaviour is a test that has not been run.** The bank already
+  said "a doc sentence that describes behaviour is a test that has not been
+  written"; the verification pass extended it. Six such sentences were checked
+  and four were wrong, so the rule is now: a "what could break" list is written
+  as hypotheses and either measured or labelled unmeasured. Never presented as
+  findings.
+- **The package is the image, and it is not an app.** The stack is three
+  processes - crawl, caddy, cloudflared - so a PyInstaller or Tauri binary would
+  package one of them and leave you installing the other two. Docker already
+  supplies everything "background app" means here: restart on crash, start at
+  boot with no login, log rotation, network isolation. And a single binary would
+  have to carry `config.yaml` inside it, which breaks the rule directly below
+  this one. The user-facing app is the page at `news.dtbao.org`.
+- **Production holds no git checkout.** That is the whole mechanism behind "an
+  update cannot clean the data": not a rule anyone has to follow, but the
+  absence of the command that does the damage. It is why the deployment gets a
+  compose file over HTTP rather than a clone.
+- **A default must reproduce the old behaviour.** `${NEWS_RADAR_HOME:-..}` is
+  `..` when unset, which is where a checkout's data already lives - so
+  introducing the variable moved nothing and broke nothing. A variable whose
+  default changes behaviour is a migration wearing a variable's clothes.
+- **A local file is one a release may not overwrite.** `config.yaml`,
+  `frequency_words.txt` and `.env` are the deployment's, not the repository's;
+  each ships as a committed `.example` that `setup.py` copies once. A release can
+  only *tell* you what it added - which is what `setup.py --check` is for, and
+  why there is no config migration and is not going to be one.
+- **A promise in the bank is a promise the code has to keep.** `--check` was
+  documented for months as catching a key added upstream and never did, and a
+  deployment ran a whole release on a stale value because the doc was believed.
+  A doc sentence that describes behaviour is a test that has not been written.
 - **A relative href is a fact about the file, not about the page.** Two output
   files at two depths cannot share one nav. `index.html` and `days/<date>.html`
   differ in exactly that block and nowhere else.
@@ -287,14 +550,18 @@ loader and the design bank - see `progress.md`.
   per commit: all of P4 is one `**crawl**` line.
 - **Both scripts stay stdlib-only** so they run on a bare checkout, before
   anything is installed.
-- **Self-hosted, not GitHub Pages.** The crawl and the site both run on the
-  homelab; `news.dtbao.org` is reached through a Cloudflare Tunnel whose
-  connector is a container **in this stack**, not on the host. A host connector
-  cannot resolve `caddy`, and restarting one that carries other hostnames costs
-  those too.
-- **A tunnel id is not a secret, a credentials file is.**
-  `docker/cloudflared.yml` is committed; `docker/tunnel-credentials.json` is
-  gitignored. The `tunnel` compose profile keeps a checkout without that file
-  from ever starting the connector.
+- **Self-hosted, and published nowhere.** The crawl and the site both run on
+  the homelab, and the stack's answer for who can read it is one published port.
+  There was a Cloudflare Tunnel in here; it was removed on 2026-09-07 because a
+  connector is a permanent moving part - its own credentials, its own failure
+  mode (`1033` while every log line says success), its own upgrade story - in a
+  project whose job is to write HTML into a directory. **Reaching the report
+  from outside the LAN is now a decision made in front of the published port,
+  and changing it does not touch this repository.** That is the property being
+  bought; the cost is that nothing here monitors whatever fronts it.
+- **`ops.site_url` points at `http://caddy:8080/`, not at a public name.** It
+  resolves over the compose network, so it tests the web server this stack is
+  responsible for. A public URL there turns an outage nobody here can fix into a
+  failed cycle and a withheld heartbeat ping.
 - **Secrets live only in `docker/.env`.** `config.yaml` is committed as a
   template and a leaked copy must be harmless.

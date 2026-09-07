@@ -20,6 +20,17 @@ from . import __version__
 ENV_CONFIG_PATH = "NEWS_RADAR_CONFIG"
 DEFAULT_CONFIG_PATH = "config/config.yaml"
 
+# Where `--check` looks for the shipped template, in order. The image is first
+# because that is the deployment that has no other way to ask: production runs
+# the published image and keeps no checkout, so `scripts/setup.py --check` is
+# not there to be run. The template cannot live under `config/` in the image -
+# that path is bind-mounted over by the deployment's own directory at runtime,
+# and anything baked there is hidden.
+TEMPLATE_CANDIDATES = (
+    Path("/app/config-templates/config.yaml.example"),
+    Path("config/config.yaml.example"),
+)
+
 # Every key the contract documents, with the documented default. A key absent
 # from config.yaml falls back to what is here; a key present there wins. Lists
 # are replaced wholesale, never merged - half a feed list from two sources would
@@ -147,6 +158,64 @@ class Config:
 def config_path():
     """Where the config is read from: NEWS_RADAR_CONFIG, else the default."""
     return Path(os.environ.get(ENV_CONFIG_PATH) or DEFAULT_CONFIG_PATH)
+
+
+def template_path():
+    """The first TEMPLATE_CANDIDATES entry that exists, or None."""
+    for candidate in TEMPLATE_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _key_paths(node, prefix=""):
+    """Every dotted key path in a parsed config, list contents excluded.
+
+    A list is a leaf here on purpose. `feeds[].id` differs per deployment by
+    design, so naming it would make the drift check noise on every upgrade -
+    while `feeds` itself is still a key, because a template that grew a whole
+    new section is exactly what this is for.
+    """
+    if not isinstance(node, dict):
+        return []
+    paths = []
+    for key, value in node.items():
+        path = "{}.{}".format(prefix, key) if prefix else str(key)
+        paths.append(path)
+        paths.extend(_key_paths(value, path))
+    return paths
+
+
+def _mapping(path):
+    """Parse a config file to a dict. Anything unreadable is an empty one."""
+    try:
+        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def missing_keys(template_path_, local_path):
+    """Keys the template has that the local config does not, in template order.
+
+    The same question `scripts/setup.py --check` answers for a checkout, asked
+    where a checkout no longer exists: production runs the published image, and
+    the guarantee had to travel with it. A release can add a key or change what
+    the template recommends, and nothing may overwrite a deployment's own
+    config - so naming the difference is all anyone can do. `report.mode` sat at
+    `incremental` through a release that had moved to `daily` for want of it.
+
+    **Missing keys only, never differing values.** `ops.site_url` and the `ai.*`
+    endpoint are meant to differ on a real deployment; a check that fires every
+    upgrade is one nobody reads.
+
+    A local config that is not there is not drift: `load()` has already refused
+    to start over it, which is a louder failure than this one.
+    """
+    if not Path(local_path).is_file():
+        return []
+    have = set(_key_paths(_mapping(local_path)))
+    return [key for key in _key_paths(_mapping(template_path_)) if key not in have]
 
 
 def load(path=None, env=None):

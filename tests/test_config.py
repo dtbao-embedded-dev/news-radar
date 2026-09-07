@@ -375,6 +375,117 @@ else:
 
 
 # --------------------------------------------------------------------------
+# config drift, the copy that survives losing the checkout
+# --------------------------------------------------------------------------
+
+# scripts/setup.py answers the same question for a checkout. Production stops
+# being a checkout once it runs the published image, and the guarantee has to
+# go with it - `report.mode` sat at `incremental` through a release that had
+# moved on precisely because nothing checked.
+TEMPLATE = """\
+app:
+  timezone: Asia/Ho_Chi_Minh
+report:
+  mode: daily
+  max_per_group: 0
+notification:
+  enabled: true
+  channels:
+    telegram:
+      enabled: true
+feeds:
+  - id: hn
+    url: https://example.invalid/hn
+"""
+
+
+def pair(template, local):
+    """Two files on disk; returns (template_path, local_path)."""
+    COUNTER[0] += 1
+    t = TMP / "tpl-{}.yaml".format(COUNTER[0])
+    l = TMP / "loc-{}.yaml".format(COUNTER[0])
+    t.write_text(template, encoding="utf-8")
+    if local is not None:
+        l.write_text(local, encoding="utf-8")
+    return t, l
+
+
+t, l = pair(TEMPLATE, TEMPLATE)
+check("an up-to-date config drifts by nothing",
+      cfgmod.missing_keys(t, l) == [], repr(cfgmod.missing_keys(t, l)))
+
+t, l = pair(TEMPLATE, TEMPLATE.replace("  mode: daily\n", ""))
+check("a key only the template has is named",
+      cfgmod.missing_keys(t, l) == ["report.mode"], repr(cfgmod.missing_keys(t, l)))
+
+t, l = pair(TEMPLATE, TEMPLATE.replace("      enabled: true\n", "", 1))
+check("a key three levels down is named in full",
+      cfgmod.missing_keys(t, l) == ["notification.channels.telegram.enabled"],
+      repr(cfgmod.missing_keys(t, l)))
+
+# The rule that keeps this check readable rather than fired-every-upgrade.
+# `ops.site_url` and the `ai.*` endpoint are meant to differ on a real
+# deployment; a value diff would be noise you learn to skip.
+t, l = pair(TEMPLATE, TEMPLATE.replace("mode: daily", "mode: incremental"))
+check("a differing value is not drift",
+      cfgmod.missing_keys(t, l) == [], repr(cfgmod.missing_keys(t, l)))
+
+# `feeds[].id` differs per deployment by design; naming it would make this
+# noise on every upgrade. The list key itself is still a key.
+t, l = pair(TEMPLATE, TEMPLATE.replace("    url: https://example.invalid/hn\n", ""))
+check("keys inside a list item are not compared",
+      cfgmod.missing_keys(t, l) == [], repr(cfgmod.missing_keys(t, l)))
+t, l = pair(TEMPLATE, TEMPLATE.replace(
+    "feeds:\n  - id: hn\n    url: https://example.invalid/hn\n", ""))
+check("the top-level list itself is still a key",
+      cfgmod.missing_keys(t, l) == ["feeds"], repr(cfgmod.missing_keys(t, l)))
+
+# A local file that is not there is load()'s problem, and it is fatal there.
+t, l = pair(TEMPLATE, None)
+check("a config that does not exist reports no drift",
+      cfgmod.missing_keys(t, l) == [], repr(cfgmod.missing_keys(t, l)))
+
+# The one that would have caught the real bug: the shipped template against
+# itself has to be silent, or every deployment sees a false finding on day one.
+if example.is_file():
+    check("the shipped template does not drift from itself",
+          cfgmod.missing_keys(example, example) == [],
+          repr(cfgmod.missing_keys(example, example)))
+
+# Where --check looks for the template: the image first, then a checkout.
+check("the checkout is one of the template locations",
+      any(str(p).replace("\\", "/").endswith("config/config.yaml.example")
+          for p in cfgmod.TEMPLATE_CANDIDATES),
+      repr([str(p) for p in cfgmod.TEMPLATE_CANDIDATES]))
+check("the image path is looked at before the checkout",
+      "config-templates" in str(cfgmod.TEMPLATE_CANDIDATES[0]),
+      repr(str(cfgmod.TEMPLATE_CANDIDATES[0])))
+
+# The image branch of template_path() cannot be exercised outside a container,
+# so pin the two halves against each other instead: WORKDIR + the COPY
+# destination in the Dockerfile have to add up to TEMPLATE_CANDIDATES[0]. A
+# silent disagreement here means --check reports "no config template in this
+# build" on the one machine that has no other way to ask.
+dockerfile = pathlib.Path(__file__).resolve().parent.parent / "Dockerfile"
+if dockerfile.is_file():
+    text = dockerfile.read_text(encoding="utf-8")
+    workdir = [l.split(None, 1)[1].strip() for l in text.splitlines()
+               if l.startswith("WORKDIR ")]
+    copies = [l for l in text.splitlines()
+              if l.startswith("COPY ") and "config.yaml.example" in l]
+    check("the Dockerfile bakes the config template in", len(copies) == 1,
+          repr(copies))
+    if workdir and copies:
+        dest = copies[0].split()[-1].lstrip("./").rstrip("/")
+        baked = "{}/{}/config.yaml.example".format(workdir[0].rstrip("/"), dest)
+        check("the baked template is where --check looks for it",
+              baked == str(cfgmod.TEMPLATE_CANDIDATES[0]).replace("\\", "/"),
+              "{} vs {}".format(baked, cfgmod.TEMPLATE_CANDIDATES[0]))
+else:
+    FAILURES.append("Dockerfile is missing from the checkout")
+
+
+# --------------------------------------------------------------------------
 
 if FAILURES:
     print("FAIL - {} check(s):".format(len(FAILURES)))

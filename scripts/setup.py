@@ -29,18 +29,22 @@ ROOT = Path(__file__).resolve().parent.parent
 
 MIN_PYTHON = (3, 11)
 
-# (template, destination) - both relative to the repo root.
+# (template, destination) - both relative to the repo root. The first pair is
+# the config, and `missing_config_keys()` reads it by index.
+#
+# The keyword file is a pair for a different reason than the other two: it holds
+# no secret, but it is what a deployment tunes, and a tracked file is overwritten
+# by the `git checkout <tag>` that every upgrade runs. A deploy may not quietly
+# revert somebody's keyword groups.
 TEMPLATES = [
     (Path("config/config.yaml.example"), Path("config/config.yaml")),
+    (Path("config/frequency_words.txt.example"),
+     Path("config/frequency_words.txt")),
     (Path("docker/.env.example"), Path("docker/.env")),
 ]
 
 ENV_FILE = Path("docker/.env")
 COMPOSE_FILE = Path("docker/docker-compose.yml")
-
-# Gitignored, placed by hand from the Cloudflare Tunnel's credentials. Its
-# presence is what turns the `tunnel` compose profile on - see compose_argv().
-TUNNEL_CREDENTIALS = Path("docker/tunnel-credentials.json")
 
 # Mirrors the fallback in docker-compose.yml; 8080 is commonly taken already.
 DEFAULT_HTTP_PORT = "8088"
@@ -118,8 +122,94 @@ def check_docker():
 # --------------------------------------------------------------------------
 
 
-def ensure_file(src, dst, dry_run, force):
-    """Create dst from src. Returns False only on a real failure."""
+def template_keys(path):
+    """Every `parent.child` key path in a config file, in file order.
+
+    A deliberate non-parser. This script runs before anything is installed, so
+    it cannot `import yaml` - and it does not need to: the question is which
+    keys a file mentions, not what they mean. Two rules keep the scan honest:
+
+    - a line inside a list item is skipped, because `feeds[].id` differs per
+      deployment by design and naming it would make this noise on every upgrade;
+    - indentation drives a stack, so `notification.channels.telegram.enabled`
+      comes out whole rather than as its last segment.
+
+    ponytail: line scan, not a parser - a key whose name is quoted, or a value
+    written as a multi-line block, is not understood. Both files it is pointed
+    at are this project's own templates. Swap in `yaml.safe_load` the day
+    setup.py is allowed a dependency.
+    """
+    keys = []
+    stack = []  # (indent, name) for each open parent
+    list_indent = None  # inside a list item until something dedents past it
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return keys
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        indent = len(line) - len(line.lstrip())
+        if list_indent is not None and indent > list_indent:
+            # A continuation line of a list item: `url:` under `- id:`. Same
+            # rule as the dash itself, and the reason the test pins `feeds.url`
+            # out of the result.
+            continue
+        list_indent = None
+        if stripped.startswith("-"):
+            list_indent = indent
+            continue
+
+        name, sep, _rest = stripped.partition(":")
+        if not sep or not name or " " in name:
+            continue
+
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        stack.append((indent, name))
+        keys.append(".".join(part for _i, part in stack))
+    return keys
+
+
+def missing_config_keys(root=None):
+    """Keys `config.yaml.example` has that the local `config.yaml` does not.
+
+    This is what an upgrade needs and nothing else offered: a new release can
+    add a key or change what the template recommends, and `ensure_file()`
+    deliberately leaves an existing `config.yaml` alone - so a deployment can
+    run for releases on a config that never heard of the key. `report.mode` did
+    exactly that.
+
+    **Missing keys only, never differing values.** `ops.site_url`, `ai.api_url`
+    and `ai.model` are meant to differ from the template on any real
+    deployment; a value diff would fire on every upgrade and be learned away.
+
+    No local config is not drift - `ensure_file()` has just created one from
+    this same template, and it has already said so.
+    """
+    root = ROOT if root is None else Path(root)
+    template, local = TEMPLATES[0]
+    local_path = root / local
+    if not local_path.is_file():
+        return []
+
+    have = set(template_keys(local_path))
+    return [key for key in template_keys(root / template) if key not in have]
+
+
+def ensure_file(src, dst, dry_run, force, verify=False):
+    """Create dst from src. Returns False only on a real failure.
+
+    `verify` is `--check`: it inspects a checkout that is supposed to be ready,
+    so a destination that does not exist is a finding rather than a plan. That
+    is not hypothetical - `git checkout <tag>` deletes a file that was tracked
+    in the old commit and is not in the new one, which is what an upgrade does
+    to `config/frequency_words.txt`, and a radar with no keyword groups is not a
+    ready checkout.
+    """
     src_abs = ROOT / src
     dst_abs = ROOT / dst
 
@@ -130,6 +220,11 @@ def ensure_file(src, dst, dry_run, force):
     if dst_abs.exists() and not force:
         say("skip", "{} exists, left alone (use --force to overwrite)".format(dst))
         return True
+
+    if verify:
+        say("fail", "{} is missing - re-run without --check to create it "
+                    "from {}".format(dst, src))
+        return False
 
     verb = "overwrite" if dst_abs.exists() else "create"
     if dry_run:
@@ -222,25 +317,22 @@ def ensure_secrets(dry_run, interactive, verify=False):
 def compose_argv(root=None):
     """The `up -d` argv for whatever can actually start in this checkout.
 
-    Two narrowings, both read off the filesystem rather than asked about:
+    One narrowing, read off the filesystem rather than asked about: no
+    `Dockerfile` means the crawl service cannot build and a full `up -d` would
+    die on it, so bring up the web half alone.
 
-    - No `Dockerfile` means the crawl service cannot build and a full `up -d`
-      would die on it, so bring up the web half alone.
-    - The `cloudflared` service sits behind the `tunnel` compose profile and
-      mounts a credentials file that is never committed. The profile goes on
-      only when that file is there; a checkout without one starts exactly what
-      it started before rather than a container crash-looping on the mount.
+    No compose profile is ever added. `autoupdate` is production's decision to
+    make by hand, and the `tunnel` profile this used to detect a credentials
+    file for no longer exists - the report is served on the LAN and published
+    nowhere.
 
-    `root` exists so the rules can be exercised against a throwaway tree - see
+    `root` exists so the rule can be exercised against a throwaway tree - see
     tests/test_setup.py. It defaults to this checkout.
     """
     root = ROOT if root is None else root
     # as_posix(): the same printed command works when pasted into any shell,
     # including a Windows one, instead of growing backslashes there.
-    argv = ["docker", "compose", "-f", COMPOSE_FILE.as_posix()]
-    if (root / TUNNEL_CREDENTIALS).is_file():
-        argv += ["--profile", "tunnel"]
-    argv += ["up", "-d"]
+    argv = ["docker", "compose", "-f", COMPOSE_FILE.as_posix(), "up", "-d"]
     if not (root / "Dockerfile").is_file():
         argv.append("caddy")
     return argv
@@ -308,10 +400,19 @@ def main(argv=None):
     ok = check_docker() and ok
 
     for src, dst in TEMPLATES:
-        ok = ensure_file(src, dst, dry, args.force) and ok
+        ok = ensure_file(src, dst, dry, args.force, verify=args.check) and ok
 
     interactive = not args.non_interactive and not dry
     secrets_ok = ensure_secrets(dry, interactive, verify=args.check)
+
+    # Reported in every mode, fatal only under --check. A key the local config
+    # never got falls back to the code's own default, so the stack runs either
+    # way - but it runs on a decision nobody made, which is exactly how
+    # `report.mode` stayed `incremental` through a release that had moved on.
+    drifted = missing_config_keys()
+    for key in drifted:
+        say("warn", "{} has {} and {} does not".format(
+            TEMPLATES[0][0].as_posix(), key, TEMPLATES[0][1].as_posix()))
 
     print()
     if args.dry_run:
@@ -329,6 +430,11 @@ def main(argv=None):
         return 1
 
     if args.check:
+        if drifted:
+            say("fail", "{} key(s) above are in the template and not in your "
+                        "config - add them, or accept the default knowing it is "
+                        "a default".format(len(drifted)))
+            return 1
         say("ok", "checkout is ready - re-run without --check to start the stack")
         return 0
 

@@ -16,6 +16,127 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.3 - 2026-09-07
+
+### Breaking Changes
+
+- **deploy**: the Cloudflare Tunnel is gone. The `cloudflared` service,
+  `docker/cloudflared.yml`, `NEWS_RADAR_TUNNEL_ID` and the credentials-file
+  detection that used to switch on the `tunnel` compose profile
+  (`scripts/setup.py`) are all removed. **The report is served on the LAN and
+  published nowhere**: `NEWS_RADAR_HTTP_PORT` (8088) is the only way in, and it
+  is no longer "for local debugging". Anything that used to answer on the public
+  hostname stops answering the moment the connector is stopped. `--profile
+  tunnel` still parses and is now a no-op - it starts exactly what `up -d`
+  starts - so an old command in somebody's shell history does nothing
+  surprising. Two follow-ups for an existing deployment: point `ops.site_url` at
+  `http://caddy:8080/` (it resolves over the compose network and needs no
+  published port), and delete `docker/tunnel-credentials.json`. `.gitignore`
+  keeps ignoring that path deliberately, so a machine that still has one cannot
+  commit it by accident. Putting the report back on the internet is now a
+  decision for whatever fronts it, made outside this project.
+
+- **deploy**: `docker/cloudflared.yml` no longer names this deployment. The
+  tunnel id moved to `NEWS_RADAR_TUNNEL_ID` in `.env` and is passed as the
+  argument to `run`, and the ingress hostname is gone entirely - a single
+  catch-all rule sends everything arriving on the tunnel to `caddy:8080`, and
+  which hostname that is already lives in Cloudflare DNS. The id could not stay
+  in the file as a variable because **cloudflared does not expand environment
+  variables inside its own config**, while Compose does expand them in
+  `command:`. **An existing deployment must set `NEWS_RADAR_TUNNEL_ID` before
+  starting `--profile tunnel`**, or the connector starts with no tunnel to run
+  and the site goes back to Cloudflare `1033`. `cloudflared tunnel list` prints
+  the id; the credentials file already carries the same one. What this gives up
+  is the `http_status:404` rule that used to sit behind the named one, which
+  only ever guarded against the account owner routing a stray hostname here.
+  Verified with cloudflared itself: `tunnel ingress validate` answers `OK` and
+  `tunnel ingress rule <url>` matches rule #0 to `http://caddy:8080`.
+
+- **keywords**: `config/frequency_words.txt` is now a local file created from
+  `config/frequency_words.txt.example`, exactly like `config.yaml`, and is
+  gitignored. It holds no secret; the reason is the upgrade. A tracked file that
+  a deployment edits cannot survive the `git checkout <tag>` every deploy runs.
+  **Upgrading goes one of two bad ways**, both measured on a throwaway clone: a
+  file left as the release shipped it is **deleted** by the checkout, because it
+  was tracked in the old commit and is not in the new one - the radar would then
+  match nothing and every search feed would be skipped; a file the deployment
+  **edited** makes git refuse the checkout outright (`error: Your local changes
+  to the following files would be overwritten by checkout ... Aborting`) and the
+  upgrade stops. Untracking it is what removes both. After checking out this
+  version, run
+  `python scripts/setup.py` (or copy the `.example` by hand) **before** starting
+  the stack; `setup.py --check` now fails while the file is absent rather than
+  calling the checkout ready. Changing the groups for everyone still means
+  editing the `.example` and cutting a version.
+
+### Fixes
+
+- **store**: `open_db()` refuses a store whose `user_version` sits between `0`
+  and `SCHEMA_VERSION` instead of returning a connection to it. That case fell
+  through all three branches, so a build with a newer schema would have read an
+  older file as if it matched - a query silently reading a column that means
+  something else now. Unreachable today (`SCHEMA_VERSION` is `1`), and the point
+  is that the day someone bumps it is a loud one: the error names both versions
+  and says to write the migration first.
+
+### Features
+
+- **deploy**: `docker-compose.yml` reads every directory a deployment owns -
+  `config/`, `output/`, `backups/` - from one variable, `NEWS_RADAR_HOME`,
+  resolved relative to the compose file. Unset it is `..`, the repository root,
+  which is exactly where those directories already are: a dev checkout behaves
+  as before. A deployment sets it to `.` and keeps its data beside the compose
+  file, with no git checkout on that machine at all - which is the point, since
+  the way this project has already lost a file is `git checkout <tag>` deleting
+  a path the new commit does not carry. The crawl service also names a published
+  image, `ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}`,
+  keeping `build:` beside it so a checkout still builds what it is editing.
+  `caddy`'s `/srv` mount moved with the others: leaving it behind would have the
+  crawl publish to one directory and the web server serve another.
+- **deploy**: pushing a `v*` tag now publishes that image. `.github/workflows/
+  image.yml` builds `linux/amd64` and pushes `<version>` and `latest` to GHCR,
+  refusing a tag the `VERSION` file disagrees with - `VERSION` is baked into the
+  image, so a mismatch would have the running container report a version that
+  was never published. The image name is spelled out in both the workflow and
+  the compose file, and `tests/test_deploy.py` pins that the two agree.
+- **deploy**: the stack can update itself. A `watchtower` service behind the new
+  `autoupdate` compose profile polls GHCR once a day, pulls a newer `:latest`
+  and recreates **only** the crawl container - it is the one carrying
+  `com.centurylinklabs.watchtower.enable`, because caddy is `2-alpine` and
+  cloudflared is pinned to an exact version and neither should upgrade itself
+  unreviewed. The profile is opt-in for the same reason the tunnel one is: on a
+  dev checkout this would pull `:latest` over the image just built. A recreate
+  re-attaches the same bind mounts, so an update still cannot touch anything
+  under `NEWS_RADAR_HOME`. Freezing a deployment is `NEWS_RADAR_VERSION` on its
+  own: watchtower polls the tag the running container was created from, and a
+  version tag does not move. **This does not have a safety net yet.** A release
+  that fails to load its config exits before `ops.Health` is ever constructed,
+  so a crash-looping container alerts nobody - measured, 9 restarts in 45
+  seconds with zero health lines - and `ops.heartbeat_url` ships empty. Arm a
+  monitor before turning `autoupdate` on.
+- **crawl**: `python -m news_radar --check` reports config keys the shipped
+  template has and the running config does not, then exits - `1` when there is
+  one, `0` when there is not. This is the half of `scripts/setup.py --check`
+  that a deployment still needs after it stops being a checkout: the image
+  carries `config.yaml.example` at `/app/config-templates/`, deliberately not
+  under `/app/config`, which the deployment's own directory is mounted over. The
+  rules are the same as `setup.py`'s - missing keys only, never differing
+  values, and never keys inside a list item - and the two implementations stay
+  separate on purpose: `setup.py` runs before anything is installed and may not
+  `import yaml`, while the image has PyYAML and can parse properly.
+- **setup**: `scripts/setup.py` names every key that `config.yaml.example` has
+  and the local `config.yaml` does not, and `--check` exits `1` when there is
+  one. The documented contract already claimed this and no code had ever done
+  it, which is how a deployment ran a whole release on `report.mode:
+  incremental` after the template had moved on. Missing keys only, never
+  differing values: `ops.site_url` and the `ai.*` endpoint are meant to differ
+  on a real deployment, and a check that fires every upgrade is one nobody
+  reads. Reported in every mode, fatal only under `--check` - an absent key
+  still falls back to the code default, so the stack starts either way.
+- **setup**: `--check` also fails when a file `setup.py` is meant to create is
+  missing, instead of printing what it would create and exiting `0`. Same
+  documented promise ("required files exist"), same gap between it and the code.
+
 ## v0.2.2 - 2026-09-06
 
 ### Fixes

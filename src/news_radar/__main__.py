@@ -21,7 +21,13 @@ import threading
 import time
 
 from . import __version__
-from .config import ConfigError, load
+from .config import (
+    TEMPLATE_CANDIDATES,
+    ConfigError,
+    load,
+    missing_keys,
+    template_path,
+)
 from .fetch.feeds import read_fixed_feeds
 from .fetch.http import Fetcher
 from .fetch.search import read_search_feeds
@@ -582,6 +588,32 @@ def run(cfg, once=False):
     return 0
 
 
+def _check_config(cfg):
+    """Report keys the shipped template has and this config does not.
+
+    The half of `scripts/setup.py --check` that a deployment still needs after
+    it stops being a checkout. Runs after `load()` on purpose: a config that
+    cannot start at all is the louder finding, and `load()` has already said so.
+    """
+    template = template_path()
+    if template is None:
+        log.error("no config template in this build - looked in: %s",
+                  ", ".join(str(p) for p in TEMPLATE_CANDIDATES))
+        return 1
+
+    drifted = missing_keys(template, cfg.path)
+    for key in drifted:
+        log.warning("%s has %s and %s does not", template, key, cfg.path)
+    if drifted:
+        log.error("%d key(s) above are in the template and not in your config - "
+                  "add them, or accept the default knowing it is a default",
+                  len(drifted))
+        return 1
+
+    log.info("config is up to date with %s", template)
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="news_radar",
@@ -593,6 +625,9 @@ def main(argv=None):
                         help="config file to use (default: $NEWS_RADAR_CONFIG)")
     parser.add_argument("--debug", action="store_true",
                         help="verbose per-source logging")
+    parser.add_argument("--check", action="store_true",
+                        help="report config keys the shipped template has and "
+                             "this config does not, then exit")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -612,6 +647,9 @@ def main(argv=None):
 
     if args.debug or cfg.get("advanced.debug", False):
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if args.check:
+        return _check_config(cfg)
 
     log.info("news-radar %s starting (config: %s)", __version__, cfg.path)
     _install_signal_handlers()

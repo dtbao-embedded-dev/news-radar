@@ -121,12 +121,21 @@ commands above do not tidy for you:
   the public name it fetches a hostname nothing serves, fails every cycle, and
   two failures in a row is a genuine alert about a non-problem. Do it **before**
   the next cycle, not after;
-- **the tunnel and its DNS record are account operations.**
-  `cloudflared tunnel delete <name>` removes the tunnel and needs
-  `~/.cloudflared/cert.pem`, not the credentials file. The CNAME is the part no
-  CLI can do: `cloudflared tunnel route` only *creates* records, so deleting it
-  is a dashboard or API job. Until it goes, the hostname answers **530** - it
-  still resolves, and points at a tunnel that no longer exists.
+- **the tunnel and its DNS record are account operations**, and both can be
+  done from the deployment. `cloudflared tunnel delete <name>` removes the
+  tunnel; it needs `~/.cloudflared/cert.pem`, not the per-tunnel credentials
+  file. The CNAME is the part `cloudflared` cannot do - `tunnel route` only
+  *creates* records - but the API can, and the token for it is already on the
+  box: `cert.pem` carries a base64 `ARGO TUNNEL TOKEN` block holding
+  `{accountID, zoneID, apiToken}`, and that `apiToken` is what
+  `tunnel route dns` writes records with. `DELETE
+  /client/v4/zones/<zoneID>/dns_records/<id>` with it as a bearer token removes
+  the record. Until it goes the hostname answers **530**: still resolving, and
+  pointing at a tunnel that is not there.
+
+  **`~/.cloudflared/cert.pem` is therefore a zone-wide DNS-write credential**,
+  not just a login artifact - a stronger secret than any per-tunnel credentials
+  file, and worth knowing before it is copied anywhere.
 
 `NEWS_RADAR_HOME` stays **unset** here: the compose file sits in `docker/`, the
 default `..` is `~/news-radar`, and that is already where `config/`, `output/`

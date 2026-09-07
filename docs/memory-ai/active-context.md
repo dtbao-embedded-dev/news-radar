@@ -87,6 +87,21 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **Both tunnel loose ends are closed, and v0.2.4 removed the last drift**
+  (2026-09-07). The `news.dtbao.org` CNAME is deleted - `cloudflared` has no DNS
+  delete, but `~/.cloudflared/cert.pem` carries an `ARGO TUNNEL TOKEN` block
+  whose `apiToken` is a zone credential, which is what `tunnel route dns` writes
+  with, so one `DELETE /zones/<id>/dns_records/<id>` did it. The hostname does
+  not resolve at all now; the zone holds 9 records and none is `news`. **That
+  file is a zone-wide DNS-write credential**, worth knowing before it is copied.
+  And 0.2.4 was cut so the *released* compose file carries the watchtower fix -
+  the homelab's copy is byte-identical to it again (`52656984a84bcd72` both
+  sides), which is how the hand-patch stopped being drift.
+- **The deployment compose file is only ever fixed by a release.** A `pull`
+  updates the image, never the file that runs it. So a hand-patch on the
+  deployment is drift until a version carries the same change and the file is
+  re-fetched - which is the argument for cutting a patch release over a one-line
+  compose fix rather than leaving it edited in place.
 - **v0.2.3 is cut, published and deployed** (2026-09-07) - the first release to
   go out as an image, and the first time the whole pipeline ran for real.
   `Release`, `Test` and `Publish image` all green on the tag; the homelab pulled

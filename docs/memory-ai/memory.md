@@ -105,12 +105,20 @@ each step:
   a non-problem. The cycle after the restart logged
   `heartbeat: http://caddy:8080/ answered`.
 
-**One loose end is left, and it needs the Cloudflare dashboard.** The
-`news.dtbao.org` CNAME still exists and now points at a tunnel that is gone, so
-the hostname answers **530** instead of not resolving. `cloudflared tunnel
-route` can only *create* DNS records - there is no delete subcommand - so
-removing it is a dashboard or API operation, not something this repository can
-do.
+**Finished off the same day.** The `news.dtbao.org` CNAME is deleted:
+`cloudflared` has no delete for DNS records, but the token that writes them is
+already on the box - `~/.cloudflared/cert.pem` carries an `ARGO TUNNEL TOKEN`
+block whose `apiToken` is a zone credential, and one `DELETE
+/zones/<id>/dns_records/<id>` removed it. Guarded to an exact name match and
+listed before it was touched: one `CNAME news.dtbao.org ->
+94fedb96-...cfargotunnel.com`, the tunnel that had already been deleted.
+Afterwards the hostname does not resolve at all (`Name or service not known`),
+the zone holds **9 records** and none of them is `news`, and `git.dtbao.org`,
+`photos.dtbao.org` and `www.dtbao.org` all still answer through Cloudflare.
+
+**That makes `~/.cloudflared/cert.pem` a zone-wide DNS-write credential**, which
+is a stronger secret than the per-tunnel credentials file the bank has always
+called out. Worth knowing before that file is ever copied somewhere.
 
 ### The package is an image, and the data is out of its way (2026-09-06)
 
@@ -862,6 +870,21 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **Both tunnel loose ends are closed, and v0.2.4 removed the last drift**
+  (2026-09-07). The `news.dtbao.org` CNAME is deleted - `cloudflared` has no DNS
+  delete, but `~/.cloudflared/cert.pem` carries an `ARGO TUNNEL TOKEN` block
+  whose `apiToken` is a zone credential, which is what `tunnel route dns` writes
+  with, so one `DELETE /zones/<id>/dns_records/<id>` did it. The hostname does
+  not resolve at all now; the zone holds 9 records and none is `news`. **That
+  file is a zone-wide DNS-write credential**, worth knowing before it is copied.
+  And 0.2.4 was cut so the *released* compose file carries the watchtower fix -
+  the homelab's copy is byte-identical to it again (`52656984a84bcd72` both
+  sides), which is how the hand-patch stopped being drift.
+- **The deployment compose file is only ever fixed by a release.** A `pull`
+  updates the image, never the file that runs it. So a hand-patch on the
+  deployment is drift until a version carries the same change and the file is
+  re-fetched - which is the argument for cutting a patch release over a one-line
+  compose fix rather than leaving it edited in place.
 - **v0.2.3 is cut, published and deployed** (2026-09-07) - the first release to
   go out as an image, and the first time the whole pipeline ran for real.
   `Release`, `Test` and `Publish image` all green on the tag; the homelab pulled
@@ -4065,12 +4088,21 @@ commands above do not tidy for you:
   the public name it fetches a hostname nothing serves, fails every cycle, and
   two failures in a row is a genuine alert about a non-problem. Do it **before**
   the next cycle, not after;
-- **the tunnel and its DNS record are account operations.**
-  `cloudflared tunnel delete <name>` removes the tunnel and needs
-  `~/.cloudflared/cert.pem`, not the credentials file. The CNAME is the part no
-  CLI can do: `cloudflared tunnel route` only *creates* records, so deleting it
-  is a dashboard or API job. Until it goes, the hostname answers **530** - it
-  still resolves, and points at a tunnel that no longer exists.
+- **the tunnel and its DNS record are account operations**, and both can be
+  done from the deployment. `cloudflared tunnel delete <name>` removes the
+  tunnel; it needs `~/.cloudflared/cert.pem`, not the per-tunnel credentials
+  file. The CNAME is the part `cloudflared` cannot do - `tunnel route` only
+  *creates* records - but the API can, and the token for it is already on the
+  box: `cert.pem` carries a base64 `ARGO TUNNEL TOKEN` block holding
+  `{accountID, zoneID, apiToken}`, and that `apiToken` is what
+  `tunnel route dns` writes records with. `DELETE
+  /client/v4/zones/<zoneID>/dns_records/<id>` with it as a bearer token removes
+  the record. Until it goes the hostname answers **530**: still resolving, and
+  pointing at a tunnel that is not there.
+
+  **`~/.cloudflared/cert.pem` is therefore a zone-wide DNS-write credential**,
+  not just a login artifact - a stronger secret than any per-tunnel credentials
+  file, and worth knowing before it is copied anywhere.
 
 `NEWS_RADAR_HOME` stays **unset** here: the compose file sits in `docker/`, the
 default `..` is `~/news-radar`, and that is already where `config/`, `output/`

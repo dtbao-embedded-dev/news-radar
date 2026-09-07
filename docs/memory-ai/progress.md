@@ -95,12 +95,20 @@ each step:
   a non-problem. The cycle after the restart logged
   `heartbeat: http://caddy:8080/ answered`.
 
-**One loose end is left, and it needs the Cloudflare dashboard.** The
-`news.dtbao.org` CNAME still exists and now points at a tunnel that is gone, so
-the hostname answers **530** instead of not resolving. `cloudflared tunnel
-route` can only *create* DNS records - there is no delete subcommand - so
-removing it is a dashboard or API operation, not something this repository can
-do.
+**Finished off the same day.** The `news.dtbao.org` CNAME is deleted:
+`cloudflared` has no delete for DNS records, but the token that writes them is
+already on the box - `~/.cloudflared/cert.pem` carries an `ARGO TUNNEL TOKEN`
+block whose `apiToken` is a zone credential, and one `DELETE
+/zones/<id>/dns_records/<id>` removed it. Guarded to an exact name match and
+listed before it was touched: one `CNAME news.dtbao.org ->
+94fedb96-...cfargotunnel.com`, the tunnel that had already been deleted.
+Afterwards the hostname does not resolve at all (`Name or service not known`),
+the zone holds **9 records** and none of them is `news`, and `git.dtbao.org`,
+`photos.dtbao.org` and `www.dtbao.org` all still answer through Cloudflare.
+
+**That makes `~/.cloudflared/cert.pem` a zone-wide DNS-write credential**, which
+is a stronger secret than the per-tunnel credentials file the bank has always
+called out. Worth knowing before that file is ever copied somewhere.
 
 ### The package is an image, and the data is out of its way (2026-09-06)
 

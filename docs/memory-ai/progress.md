@@ -9,6 +9,47 @@ updated: 2026-09-07
 
 ## What works
 
+### The report has an absolute age floor (2026-09-07, unreleased)
+
+`rank.max_age_days` drops a story past the limit before anything is scored.
+The audit that produced it: **12 of 68 shortlisted stories were over 30 days
+old**, five of them Hugging Face blog posts holding half of `AI Repos`, the
+oldest **27,466 hours - 3.1 years**.
+
+The score could not have caught it. Freshness is `0.5 ** (age / 12h)`, which
+reaches 0 after about two days, so beyond that point a three-day-old story and
+a three-year-old one are literally the same number; when a group runs short of
+fresh matches, the archive a feed happens to ship fills the rest of its cap.
+`huggingface` carries 859 entries and `openai` 1,173, all of them fetched every
+cycle.
+
+Measured end to end on a real `--once` cycle at 14 days:
+
+| | Before | After |
+|---|---|---|
+| Oldest story reaching the store | 27,466 h | **284 h** (11.8 d) |
+| Stories over 336 h | 17 | **0** |
+| Shortlist size | 68 | 64 |
+| Groups at their cap | 7 of 7 | 6 of 7 |
+
+Only `RTOS` shrank, 8 stories to 4 - four of its eight really were over a
+fortnight old. Everything else refilled from fresher candidates, which is the
+property worth remembering: **the cut changes which stories fill a section, not
+how many, until a keyword genuinely has nothing recent.**
+
+Two decisions inside it, both load-bearing:
+
+- **An undated story is kept at every threshold.** Same rule `score()` follows
+  from the other end - a missing date is not evidence of age. It is also what
+  keeps the `GitHub Trending` group alive: `gh_trending` dates not one entry,
+  and the group still holds its full 8 after the cut.
+- **The code default is `0`, no cut.** An upgrade that never mentioned `rank`
+  must report exactly what it did yesterday. Eighth deliberate disagreement
+  between `DEFAULTS` and the template.
+
+What this does **not** fix: bandwidth. Both archive feeds are still fetched and
+parsed in full every cycle; the cut only stops them reaching the report.
+
 ### Matching can read an excerpt, one source at a time (2026-09-07, unreleased)
 
 Four numbers carry this whole change, all measured against live sources rather

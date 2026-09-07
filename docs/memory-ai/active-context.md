@@ -9,6 +9,24 @@ updated: 2026-09-07
 
 ## Current focus
 
+**Report quality, measured rather than argued (2026-09-07, unreleased after
+v0.2.7).** Auditing the shipped sources end to end turned up three defects and
+all three are fixed: `genk` disabled (0 of 61 entries carry a date, so it could
+never place), a config comment corrected, and an absolute age floor added -
+`rank.max_age_days`, template 14. Numbers in [[progress]].
+
+**The pattern across this whole session is worth keeping.** Four separate
+things looked obviously right and were wrong until measured: blanket excerpt
+matching (+42% noise), `arxiv_cs_ai` (ceiling below every group's cut),
+`esp_idf_releases` at weight 0.8 (looked broken, was correct), and `r_embedded`
+(looked dead, works on the homelab). Every one was settled by running the real
+pipeline against live sources, not by reading the code.
+
+**Next:** cut a release, then the homelab needs both of its gitignored files
+edited by hand - `config.yaml` for the new feeds and `rank.max_age_days`, and
+`config/frequency_words.txt` for the `GitHub Trending` group. Nothing here
+reaches production on its own.
+
 **Sources widened for AI, GitHub trending and Espressif (2026-09-07,
 unreleased after v0.2.7).** A survey of 44 candidate feeds, each verified with
 the project's own `read_source()`, ended in three changes: per-source excerpt

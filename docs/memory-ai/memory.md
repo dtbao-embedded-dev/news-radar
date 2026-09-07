@@ -19,6 +19,47 @@ _Generated 2026-09-07 - 20 durable doc(s)._
 
 ## What works
 
+### The report has an absolute age floor (2026-09-07, unreleased)
+
+`rank.max_age_days` drops a story past the limit before anything is scored.
+The audit that produced it: **12 of 68 shortlisted stories were over 30 days
+old**, five of them Hugging Face blog posts holding half of `AI Repos`, the
+oldest **27,466 hours - 3.1 years**.
+
+The score could not have caught it. Freshness is `0.5 ** (age / 12h)`, which
+reaches 0 after about two days, so beyond that point a three-day-old story and
+a three-year-old one are literally the same number; when a group runs short of
+fresh matches, the archive a feed happens to ship fills the rest of its cap.
+`huggingface` carries 859 entries and `openai` 1,173, all of them fetched every
+cycle.
+
+Measured end to end on a real `--once` cycle at 14 days:
+
+| | Before | After |
+|---|---|---|
+| Oldest story reaching the store | 27,466 h | **284 h** (11.8 d) |
+| Stories over 336 h | 17 | **0** |
+| Shortlist size | 68 | 64 |
+| Groups at their cap | 7 of 7 | 6 of 7 |
+
+Only `RTOS` shrank, 8 stories to 4 - four of its eight really were over a
+fortnight old. Everything else refilled from fresher candidates, which is the
+property worth remembering: **the cut changes which stories fill a section, not
+how many, until a keyword genuinely has nothing recent.**
+
+Two decisions inside it, both load-bearing:
+
+- **An undated story is kept at every threshold.** Same rule `score()` follows
+  from the other end - a missing date is not evidence of age. It is also what
+  keeps the `GitHub Trending` group alive: `gh_trending` dates not one entry,
+  and the group still holds its full 8 after the cut.
+- **The code default is `0`, no cut.** An upgrade that never mentioned `rank`
+  must report exactly what it did yesterday. Eighth deliberate disagreement
+  between `DEFAULTS` and the template.
+
+What this does **not** fix: bandwidth. Both archive feeds are still fetched and
+parsed in full every cycle; the cut only stops them reaching the report.
+
 ### Matching can read an excerpt, one source at a time (2026-09-07, unreleased)
 
 Four numbers carry this whole change, all measured against live sources rather
@@ -906,6 +947,24 @@ the ops layer and the summary - and the whole thing is reachable at
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**Report quality, measured rather than argued (2026-09-07, unreleased after
+v0.2.7).** Auditing the shipped sources end to end turned up three defects and
+all three are fixed: `genk` disabled (0 of 61 entries carry a date, so it could
+never place), a config comment corrected, and an absolute age floor added -
+`rank.max_age_days`, template 14. Numbers in [[progress]].
+
+**The pattern across this whole session is worth keeping.** Four separate
+things looked obviously right and were wrong until measured: blanket excerpt
+matching (+42% noise), `arxiv_cs_ai` (ceiling below every group's cut),
+`esp_idf_releases` at weight 0.8 (looked broken, was correct), and `r_embedded`
+(looked dead, works on the homelab). Every one was settled by running the real
+pipeline against live sources, not by reading the code.
+
+**Next:** cut a release, then the homelab needs both of its gitignored files
+edited by hand - `config.yaml` for the new feeds and `rank.max_age_days`, and
+`config/frequency_words.txt` for the `GitHub Trending` group. Nothing here
+reaches production on its own.
 
 **Sources widened for AI, GitHub trending and Espressif (2026-09-07,
 unreleased after v0.2.7).** A survey of 44 candidate feeds, each verified with
@@ -2393,7 +2452,7 @@ Two consequences worth knowing before changing this:
   asserts the rule is on the page.
 
 ### [interface] Config Keys, Keyword File and Environment
-*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, match_excerpt, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER*
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, match_excerpt, max_age_days, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER*
 
 # Config Keys, Keyword File and Environment
 
@@ -2443,6 +2502,7 @@ someone chose it.
 | `rank.weight_frequency` | float | `0.3` | Weight of the cross-source frequency term |
 | `rank.weight_freshness` | float | `0.2` | Weight of the freshness term |
 | `rank.freshness_half_life_hours` | float | `12` | Age at which the freshness term halves |
+| `rank.max_age_days` | int | `0` **(template ships `14`)** | Stories older than this are dropped **before** ranking; `0` = no cut. The half-life above cannot do this: freshness reaches 0 after ~2 days, so a three-day-old and a three-year-old story score alike and an archive feed fills a thin group's cap. An entry with **no date is always kept**. The default and the template disagree on purpose - an upgrade must not start discarding what it reported yesterday |
 | `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
 | `storage.retention_days` | int | `0` **(template ships `90`)** | `0` = keep everything; otherwise prune rows and day files past the window. The default and the template disagree on purpose - an absent key must never make an upgrade start deleting, while a fresh install should have a ceiling |
 | `ops.heartbeat_url` | str | `""` | Dead-man's switch pinged after every clean cycle (healthchecks.io / Uptime Kuma push). `""` = no ping |
@@ -3376,7 +3436,7 @@ read_search_feeds(fetcher, cfg, groups, fetched_at=None) -> (items, errors)
   cost the other groups their results.
 
 ### [interface] Selection Layer Contracts
-*`interface/selection-layer.md` - Every public signature of the filter and rank modules - what each returns, what it never reads, and the plain dicts the caller has to build for it. - status: active - source: src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: blocked, group_matches, select, excerpt_sources, match_excerpt, Story, collapse, score, rank_groups, source_weights, weights, default_cap, SATURATION_SPAN, DEFAULT_SOURCE_WEIGHT, global filter, cap*
+*`interface/selection-layer.md` - Every public signature of the filter and rank modules - what each returns, what it never reads, and the plain dicts the caller has to build for it. - status: active - source: src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: blocked, group_matches, select, max_age_days, fresh_enough, excerpt_sources, match_excerpt, Story, collapse, score, rank_groups, source_weights, weights, default_cap, SATURATION_SPAN, DEFAULT_SOURCE_WEIGHT, global filter, cap*
 
 # Selection Layer Contracts
 
@@ -3406,7 +3466,8 @@ in.
 | `Story` | Mutable dataclass: `item`, `source_ids` (tuple), `labels` (tuple), `published_at`, `score=0.0` |
 | `collapse(pairs)` | `[Story]`, one per `dedup_key()`, in first-seen order |
 | `score(story, weights, source_weights, now)` | The weighted sum as a float. Does not mutate the story |
-| `rank_groups(stories, groups, weights, source_weights, now, default_cap=0)` | `{label: [Story, ...]}` - sorted best first, then capped. **Writes `story.score` back** onto every story it is given |
+| `rank_groups(stories, groups, weights, source_weights, now, default_cap=0, max_age_days=0)` | `{label: [Story, ...]}` - every group keyed even when empty. `max_age_days` drops stories past the cut **before** anything is scored, so a group stays at its cap while fresh candidates remain; `0` is no cut |
+| `fresh_enough(story, now, max_age_days)` | `True` when the story is inside the absolute age limit. `0` days switches it off, and a story with **no `published_at` is always kept** - the same "never a guess" rule `score()` follows, and load-bearing: `gh_trending` dates none of its entries |
 
 `Story.item` is the first copy seen and the one displayed; `Story.published_at`
 is the *earliest* of every copy and is not necessarily `item.published_at`. The
@@ -3858,7 +3919,7 @@ ships inert: `ai.enabled` is `false`, so a config that says nothing about `ai`
 upgrades into this version and behaves exactly as it did before.
 
 ### [behavior] How News Is Searched, Matched and Ranked
-*`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, match_excerpt, excerpt, _haystack, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*
+*`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, max_age_days, fresh_enough, age cut, match_excerpt, excerpt, _haystack, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*
 
 # How News Is Searched, Matched and Ranked
 
@@ -3986,6 +4047,28 @@ score = w_source    * max(rank_weight of its sources)
 
 Weights are `rank.weight_source`, `rank.weight_frequency`, `rank.weight_freshness`
 (default 0.5 / 0.3 / 0.2) and `rank.freshness_half_life_hours` (default 12).
+
+**The age cut runs first.** `rank.max_age_days` drops a story past the limit
+**before** anything is scored - `fresh_enough()` decides one story at a time.
+It is the floor the score cannot express: freshness reaches 0 after about two
+days, so past that a three-day-old story and a three-year-old one are the same
+number, and a group short of fresh matches fills the rest of its cap from
+whatever archive a feed ships. Measured before the cut existed: 12 of 68
+shortlisted stories were over 30 days old, five of them Hugging Face posts
+taking half of `AI Repos`, the oldest **27,466 hours**.
+
+Two properties decided by measurement rather than taste:
+
+- **An undated story is kept, at every threshold.** The same rule as the
+  freshness term below, from the other end: a missing date is not evidence.
+  Dropping them would also empty the shipped `GitHub Trending` group, whose
+  feed dates none of its entries.
+- **Groups refill; they do not shrink.** The cut applies to the whole pool
+  before any group is filled. Measured on a real cycle at 14 days: the oldest
+  stored story went from 27,466 h to 284 h, nothing over 336 h survived, and
+  six of the seven groups stayed at their caps. Only `RTOS` shrank, 8 to 4,
+  because four of its eight really were over a fortnight old - which is the
+  section going quiet, the signal this report is built to show.
 
 - An item with `published_at = None` gets a freshness term of `0`, never a guess.
 - An item dated in the **future** is clamped to age `0` rather than trusted:

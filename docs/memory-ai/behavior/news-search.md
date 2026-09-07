@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-07
 source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py
 confidence: confirmed
-keywords: crawl, search algorithm, matching, match_excerpt, excerpt, _haystack, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases
+keywords: crawl, search algorithm, matching, max_age_days, fresh_enough, age cut, match_excerpt, excerpt, _haystack, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases
 order: 1
 ---
 
@@ -136,6 +136,28 @@ score = w_source    * max(rank_weight of its sources)
 
 Weights are `rank.weight_source`, `rank.weight_frequency`, `rank.weight_freshness`
 (default 0.5 / 0.3 / 0.2) and `rank.freshness_half_life_hours` (default 12).
+
+**The age cut runs first.** `rank.max_age_days` drops a story past the limit
+**before** anything is scored - `fresh_enough()` decides one story at a time.
+It is the floor the score cannot express: freshness reaches 0 after about two
+days, so past that a three-day-old story and a three-year-old one are the same
+number, and a group short of fresh matches fills the rest of its cap from
+whatever archive a feed ships. Measured before the cut existed: 12 of 68
+shortlisted stories were over 30 days old, five of them Hugging Face posts
+taking half of `AI Repos`, the oldest **27,466 hours**.
+
+Two properties decided by measurement rather than taste:
+
+- **An undated story is kept, at every threshold.** The same rule as the
+  freshness term below, from the other end: a missing date is not evidence.
+  Dropping them would also empty the shipped `GitHub Trending` group, whose
+  feed dates none of its entries.
+- **Groups refill; they do not shrink.** The cut applies to the whole pool
+  before any group is filled. Measured on a real cycle at 14 days: the oldest
+  stored story went from 27,466 h to 284 h, nothing over 336 h survived, and
+  six of the seven groups stayed at their caps. Only `RTOS` shrank, 8 to 4,
+  because four of its eight really were over a fortnight old - which is the
+  section going quiet, the signal this report is built to show.
 
 - An item with `published_at = None` gets a freshness term of `0`, never a guess.
 - An item dated in the **future** is clamped to age `0` rather than trusted:

@@ -64,12 +64,12 @@ buzz to say nothing happened.
 
 The same row `store.day_matches()` and `store.run_matches()` return - see
 [[storage-layer]]. A channel reads `dedup_key`, `title`, `url`,
-`canonical_url` and `published_at`, and ignores the rest - `sources` included,
-since v0.2.2.
+`canonical_url`, `published_at` and `ai_summary`, and ignores the rest -
+`sources` included, since v0.2.2.
 
-**A message line is the page's line.** The page shows a title and a local time
-and nothing else ([[news-item]]); a message that shows the same story with a
-source id and no time is a second report, not the same one. `notify.stamp(moment,
+**A message line is the page's line.** The page shows a title, the AI sentence
+when there is one, and a local time ([[news-item]]); a message that shows the
+same story with a source id and no time is a second report, not the same one. `notify.stamp(moment,
 tz)` renders `published_at` as `%H:%M %d/%m`, or `--` when the source gave no
 timestamp - the page's own honest dash. The format is duplicated from
 `render._when()` rather than imported: `render` and `notify` are the two halves
@@ -100,7 +100,10 @@ all.
 | `alert(fetcher, text, token, chat_id)` | `bool` - one operational message, **no `parse_mode`** |
 
 Formatting: `<b>label</b>` per group, then
-`• <a href="url">title</a> <i>HH:MM dd/mm</i>` per story.
+`• <a href="url">title</a>` ⏎ `<i>“gist”</i>` ⏎ `<i>HH:MM dd/mm</i>` per
+story **when it has a summary**, and the one-line
+`• <a href="url">title</a> <i>HH:MM dd/mm</i>` when it does not - which is every
+story under the shipped `ai.enabled: false`.
 
 - **HTML, not Markdown.** Telegram's Markdown refuses a message over any
   unbalanced `*` or `_` in a headline and the whole message is lost; HTML has one
@@ -133,7 +136,10 @@ Formatting: `<b>label</b>` per group, then
 | `send(fetcher, groups, webhook_url, tz=UTC)` | `SendResult` |
 | `alert(fetcher, text, webhook_url)` | `bool` - one operational message, Markdown-escaped |
 
-Formatting: `**label**` per group, then ``• [title](url) `HH:MM dd/mm` `` per story.
+Formatting: `**label**` per group, then ``• [title](url)`` ⏎ `-# “gist”` ⏎
+``` `HH:MM dd/mm` ``` per story **when it has a summary**, and the one-line
+``• [title](url) `HH:MM dd/mm` `` when it does not. `-#` is Discord's subtext
+and only works at the start of a line.
 
 - **Plain `content`, no embeds.** The 6000-character total across embeds is
   easier to overrun than any per-embed limit, and it buys nothing here.

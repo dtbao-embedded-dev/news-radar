@@ -19,7 +19,16 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 __all__ = [
     "NewsItem", "new_item", "dedup_key", "canonicalise_url", "strip_html", "fold",
+    "EXCERPT_MAX",
 ]
+
+# How much of a feed's own description survives into the store. Feeds are wildly
+# inconsistent here - a one-line teaser from one, the entire article from the
+# next - and the only consumer is a prompt, where the whole article would be
+# paid for and then ignored. Six hundred characters is a couple of paragraphs:
+# enough for a model to say what the piece is about, bounded enough that fifty
+# of them still fit in one request.
+EXCERPT_MAX = 600
 
 _TAG = re.compile(r"<[^>]*>")
 _SPACE = re.compile(r"\s+")
@@ -117,10 +126,15 @@ class NewsItem:
     fetched_at: dt.datetime
     published_at: dt.datetime | None = None
     keyword_group: str | None = None
+    # The feed's own description, stripped and capped - what the AI summary is
+    # written from. Empty is the normal case for a source that carries none;
+    # nothing downstream may require it.
+    excerpt: str = ""
 
 
 def new_item(title, url, source_id, fetched_at,
-             external_id=None, published_at=None, keyword_group=None):
+             external_id=None, published_at=None, keyword_group=None,
+             excerpt=None):
     """Build a NewsItem, deriving what the parsers should not have to derive.
 
     Raises ValueError on an empty title: an item nobody can read is not a story,
@@ -130,6 +144,12 @@ def new_item(title, url, source_id, fetched_at,
     if not title:
         raise ValueError("item has no title (source_id={!r}, url={!r})".format(
             source_id, url))
+
+    # Same treatment the title gets, and for the same reason: a description
+    # arrives as markup from a stranger's CMS, and every consumer downstream
+    # (the store, the prompt, the page) wants text. Capped after stripping, so
+    # the cap counts characters a reader would see rather than tags.
+    excerpt = strip_html(excerpt)[:EXCERPT_MAX].strip()
 
     canonical = canonicalise_url(url)
     return NewsItem(
@@ -144,6 +164,7 @@ def new_item(title, url, source_id, fetched_at,
         fetched_at=fetched_at,
         published_at=published_at,
         keyword_group=keyword_group,
+        excerpt=excerpt,
     )
 
 

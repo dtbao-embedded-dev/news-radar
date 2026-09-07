@@ -16,6 +16,54 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.5 - 2026-09-07
+
+### Fixes
+
+- **release**: `release.py` tags the `chore(release): vX.Y.Z` commit instead of
+  `main`'s merge commit. `git tag` with no target tags `HEAD`, which at that
+  point in the chain is the merge - so every tag from `v0.1.0` to `v0.2.4`
+  names a commit whose subject is `chore(release): merge developing into main`.
+  Nothing broke, because the two commits have identical trees, but
+  `git describe`, the GitHub Release page and `git log --decorate` on the
+  release branch all named the merge. The tag is still created **last**, after
+  both merges, so a merge that fails halfway leaves no tag behind for the
+  preflight to refuse on the retry. Existing tags are not moved.
+
+### Changed
+
+- **ai**: the summary is now **one sentence under each story** instead of one
+  paragraph per keyword group. The old shape sent the day twice - a paragraph
+  at the top of the page plus one message a local day, *and* the list of links
+  the reader was going to read anyway. The sentence now rides with the story it
+  describes, in the same position on the page, on Telegram and on Discord.
+  Removed with it: the separate daily summary message, `ai.notify_at_hour`,
+  `ai.max_per_topic` and `summarize.daily_key()`.
+- **ai**: `ai.max_per_run` (default 20) caps the stories one cycle will pay to
+  summarise; the rest wait for the next cycle. Replaces `ai.max_per_topic`.
+- **notify**: a story is three lines instead of one when it has a summary -
+  title, the sentence, then the time. A run therefore makes more messages than
+  it used to, most visibly on Discord's 1900-character budget. A story with no
+  summary renders exactly the one line it did before, timestamp included - the
+  time only moves to its own line when there is a sentence between them to move
+  it - which is every story while `ai.enabled` is false.
+
+### Added
+
+- **fetch**: the feed's own description is parsed and kept. `entry.summary` and
+  Atom `content` (longest wins), plus Algolia's `story_text`, land on
+  `NewsItem.excerpt` - stripped of markup and cut to 600 characters - and are
+  stored on `items.excerpt`. It is what the model is shown alongside the
+  headline; a source that carries none is summarised from its title alone.
+- **store**: `items.ai_summary` caches the model's sentence, and
+  `unsummarised()` / `save_summaries()` are the two functions around it. The
+  page is rebuilt from the whole local day every cycle, so without this a story
+  on the page all day would be paid for forty-eight times. An answer of `""` is
+  written too: a headline no model can say anything about is never re-asked.
+- **store**: schema version 2, with a real `1 -> 2` migration in `open_db()` -
+  two nullable `ALTER TABLE`s, no row rewritten. A v1 store from an older build
+  opens and carries on.
+
 ## v0.2.4 - 2026-09-07
 
 ### Fixes

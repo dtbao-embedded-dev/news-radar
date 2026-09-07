@@ -32,6 +32,8 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `run_matches(conn, run_id)` | `{label: [row]}` | The same row shape for one run - what a notification is built from |
 | `unreported(conn, dedup_keys, channel)` | `[dedup_key]` | The seen-set diff, in the caller's order. `[]` for an empty input |
 | `mark_reported(conn, dedup_keys, channel, when)` | `None` | Idempotent - `INSERT OR IGNORE` |
+| `unsummarised(conn, dedup_keys)` | `[dedup_key]` | Those with `ai_summary IS NULL`, in the caller's order. `""` counts as summarised - see [[ai-summary]] |
+| `save_summaries(conn, summaries)` | `int` | `{dedup_key: text}` onto `items.ai_summary`. Writes `""` too: that is the record of having asked |
 | `backup(conn, backup_dir, now, keep)` | `(path \| None, removed)` | One `news-<UTC date>.db` per day via `conn.backup()`. A second call the same day returns `(None, 0)`. `keep <= 0` writes nothing and creates no directory |
 | `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)`. The shipped `config.yaml` sets `90`; the fallback for an **absent** key stays `0` |
 | `to_db(moment)` / `from_db(text)` | `str \| None` / `datetime \| None` | The one serialisation, both ways |
@@ -43,16 +45,18 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `== SCHEMA_VERSION` | Opened |
 | `0` | No file, or an empty one. The schema is created and the version stamped. Not an error - it is the first run |
 | `> SCHEMA_VERSION` | `StoreError`. Another copy of this store is written by a newer build, and dropping columns it needs is not a recovery |
-| anything in between | `StoreError`, naming both versions. **There is no migration code in this project yet** |
+| `1` | **Migrated in place**: `ALTER TABLE items ADD COLUMN excerpt TEXT` and `ai_summary TEXT`, then the version is stamped. A v1 store is a homelab collecting since P4, and two nullable columns are not a reason to throw it away |
+| anything in between | `StoreError`, naming both versions |
 
-The last row is currently unreachable - `SCHEMA_VERSION` is `1`, so there is no
-integer between `0` and it - and it exists so that the day it becomes reachable
-is a loud one. Until v0.2.3 that case fell through every branch and `open_db()`
-returned a connection to a store whose shape the build did not match, which is
-how a query silently reads a column that means something else now.
+`SCHEMA_VERSION` is `2`, so the last row is again the empty set - `0 < v < 2`
+holds for nothing once `1` has its own branch - and it exists so that the day it
+becomes reachable is a loud one. Until v0.2.3 that case fell through every
+branch and `open_db()` returned a connection to a store whose shape the build
+did not match, which is how a query silently reads a column that means something
+else now.
 
-**Bumping `SCHEMA_VERSION` means writing the migration in that branch**, in the
-same commit. The cycle survives a refusal either way: every caller is inside a
+**Bumping `SCHEMA_VERSION` means writing the migration in a branch of its own**,
+above the one that raises, in the same commit. `1 -> 2` is the worked example. The cycle survives a refusal either way: every caller is inside a
 guard, so a refused store costs the page and the notifications, logs a
 traceback, withholds the heartbeat ping, and alerts after two cycles.
 
@@ -60,7 +64,7 @@ traceback, withholds the heartbeat ping, and alerts after two cycles.
 
 | Table | Columns | Purpose |
 |-------|---------|---------|
-| `items` | `dedup_key` PK, `title`, `url`, `canonical_url`, `first_seen_at`, `published_at` | Every story ever shortlisted, one row per dedup key |
+| `items` | `dedup_key` PK, `title`, `url`, `canonical_url`, `first_seen_at`, `published_at`, `excerpt`, `ai_summary` | Every story ever shortlisted, one row per dedup key. `excerpt` is the feed's own description; `ai_summary` is NULL until asked |
 | `item_sources` | `(dedup_key, source_id)` PK | Which sources carried it - accumulating, one row per pair |
 | `matches` | `(dedup_key, group_name, run_id)` PK, `score` | Which groups it matched in a given run, and the score that run gave it |
 | `reported` | `(dedup_key, channel)` PK, `reported_at` | The seen-set: what has already gone out, per channel |
@@ -80,6 +84,9 @@ holds all three in one UPSERT:
 2. **`published_at` keeps the earliest non-null** anyone reported. A source that
    gives no timestamp must not erase one that did, so a `NULL` never wins.
 3. **The source set accumulates**, because `item_sources` ignores a duplicate.
+4. **`excerpt` keeps the first non-empty** anyone carried. The second source to
+   report a story may be the one with a description, and an empty string must
+   never overwrite real text - the same shape as rule 2, for the same reason.
 
 ### The row both readers return
 
@@ -101,6 +108,8 @@ between the two functions.
 | `published_at` | `datetime \| None` | Aware UTC, parsed back |
 | `first_seen_at` | `datetime` | Aware UTC |
 | `sources` | `tuple[str, ...]` | The accumulated source ids |
+| `excerpt` | str | The feed's own description, stripped and capped. `""` when the source gave none |
+| `ai_summary` | str | The model's sentence. `""` for both "not asked" and "asked, nothing useful" - the NULL/`""` distinction lives in SQL, not on the row |
 
 ## `render.py` - layer 5
 
@@ -111,7 +120,7 @@ page does not earn a dependency.
 |-----------|---------|-------|
 | `local_tz(name)` | `tzinfo` | Never raises - see the fallback below |
 | `day_bounds(now, tz)` | `(start_utc, end_utc)` | The local day containing `now`, half-open, expressed in UTC |
-| `write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html`. Same body except `nav.days`, which is written for the depth of the file carrying it - see [[news-item]]. `summary` is the AI summary, one topic per line; falsy renders no block at all, which is the shipped case |
+| `write(data_dir, labels, day_rows, meta, tz, threshold=5)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html`. Same body except `nav.days`, which is written for the depth of the file carrying it - see [[news-item]]. The AI sentences ride in the rows' own `ai_summary`, not as an argument |
 
 `labels` fixes the group order **and** is what keeps an empty group on the page:
 a keyword that has gone quiet looks identical to a keyword nobody wrote about,

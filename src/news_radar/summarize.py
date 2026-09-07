@@ -1,4 +1,4 @@
-"""The day's matches, one line per topic, from an OpenAI-compatible endpoint.
+"""One sentence per story, from an OpenAI-compatible endpoint.
 
 Layer 5, beside `render.py`, `notify/` and `ops.py`. Like them it imports
 **layer 1** for the transport and nothing else - no config, no clock, no store.
@@ -13,17 +13,20 @@ P0. P4's `Fetcher.post_json()` retired the third of those: an OpenAI-compatible
 rather than the vendor is what is being spoken here - OpenRouter, DeepSeek, Groq
 and a local Ollama all answer it, and the last has no bill either.
 
-Two rules govern the whole file:
+Three rules govern the whole file:
 
-- **The summary is per topic, and a quiet topic is not in it.** One line per
-  keyword group: the group's name, then at most `SENTENCES_MAX` sentences about
-  what actually stood out. A group whose day held nothing notable is left out of
-  the prompt entirely, so the model is never handed a topic it would have to
-  fill with "nothing today" - which is how a daily message becomes a wall of
-  text nobody finishes reading.
+- **The summary is per story, and it rides with the story.** The day used to be
+  summarised by topic into one paragraph at the top of the page and one message
+  a day; the reader then got that *and* the list of links, which is the same
+  day described twice. A sentence under each headline is the same information
+  where the reader already is.
+- **A story is summarised once in its life.** The caller passes only the rows
+  the store has no summary for, and writes the answers back. The page is
+  rebuilt every thirty minutes from the whole day's rows, so re-asking would be
+  the same completion paid for forty-eight times.
 - **A summary is optional, so nothing here may raise.** The page and the
-  notification are already written by the time this is asked; an endpoint having
-  a bad afternoon must cost a log line and never a cycle.
+  notification are already written by the time this is asked; an endpoint
+  having a bad afternoon must cost a log line and never a cycle.
 
 Contract: docs/memory-ai/interface/config-and-env.md (`ai.*`)
 """
@@ -32,90 +35,132 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from .fetch.http import HttpError
 
-__all__ = ["summarize", "build_prompt", "daily_key", "SENTENCES_MAX"]
+__all__ = ["summarize", "build_prompt", "parse_answer", "SENTENCES_MAX",
+           "SUMMARY_MAX"]
 
 log = logging.getLogger("news_radar.summarize")
 
-# The whole reason the daily message stays a glance. Two sentences a topic is
-# enough to say what happened and why it is worth a click, and short enough that
-# ten topics still fit on a phone screen without scrolling into resentment.
-SENTENCES_MAX = 2
+# The whole reason a message stays a glance. One sentence a story is what fits
+# under a headline on a phone without turning a twenty-story list into a page
+# of prose nobody finishes.
+SENTENCES_MAX = 1
+
+# The hard stop, applied to whatever comes back. Every channel splits on a size
+# budget, so a model that ignores the sentence count and writes a paragraph
+# would not produce one long line - it would produce three times as many
+# messages. Cut here rather than letting that happen downstream.
+SUMMARY_MAX = 220
+
+# How much of a story's own excerpt reaches the prompt. Shorter than
+# `item.EXCERPT_MAX` on purpose: the store keeps the fuller text because it
+# costs nothing to keep, while every character here is paid for once per story
+# and the first two sentences of a teaser carry the subject.
+EXCERPT_IN_PROMPT = 320
 
 # Written in English because everything in this repository is; the *answer* is
 # Vietnamese because that is who reads the page. `{n}` is SENTENCES_MAX.
 INSTRUCTION = """\
-You are summarising a news radar's matches for today, grouped by topic.
+You are summarising the stories a news radar found today. Each one is numbered,
+with its headline and - when the source gave one - the source's own description.
 
-Write the answer in Vietnamese. Output one line per topic, in the order the
-topics are given below, formatted as:
+Write the answer in Vietnamese. Output one line per story, in the order given,
+formatted exactly as:
 
-    <topic name> — <at most {n} sentences>
+    <number>. <at most {n} sentence>
 
-Say what actually stood out and why it matters. Do not repeat headlines
-verbatim, do not add links, do not number the lines, and do not write any
-heading, preamble or closing remark. If a topic's stories are unremarkable,
-omit that topic's line entirely rather than writing that nothing happened.
+Say what the story is actually about and why it is worth opening. Do not repeat
+the headline verbatim, do not add links, do not write any heading, preamble or
+closing remark, and do not skip a number. If a story's headline and description
+say too little to summarise, write its number followed by the headline's own
+subject in a few words rather than dropping the line.
 
-Topics and their top stories:
+Stories:
 """
 
-
-def daily_key(local_date):
-    """The seen-set key one day's summary is remembered by, per channel.
-
-    The page's summary is rewritten every cycle; the *message* goes out once a
-    local day. So the identity is the date and nothing else - not a timestamp
-    and not a hash of the text, either of which would move with the rewrite and
-    buzz a phone every thirty minutes.
-
-    It rides in the `reported` table beside the story keys, which is what makes
-    "already sent today" survive a container restart. Two consequences worth
-    knowing: the `summary:` prefix is what keeps it from ever colliding with a
-    story's dedup key, and `store.prune()` deletes keys by joining against
-    `items`, so these rows are never pruned - one row per day per channel,
-    which is ~730 a year and cheaper than a second mechanism.
-    """
-    return "summary:{}".format(local_date.isoformat())
+# `1.` / `1)` / `1 -` / `**1.**`, with or without leading bullet junk. Models
+# agree on the number and disagree about everything around it, and the number
+# is the only part that has to be read correctly. The `[*_]*` after the
+# separator is not decoration: `- **1.** Một.` closes its bold *after* the dot,
+# and without it the summary starts with a stray `**`.
+_NUMBERED = re.compile(r"^\W*(\d{1,3})\s*[.):\-–—]\s*[*_]*\s*(.+)$")
 
 
-def build_prompt(rows_by_label, labels, max_per_topic):
-    """`{label: [row]}` -> the prompt text, or `""` when nothing is notable.
+def _clip(text):
+    """`text` cut to SUMMARY_MAX, on a word boundary when there is one near."""
+    text = " ".join((text or "").split())
+    if len(text) <= SUMMARY_MAX:
+        return text
+    cut = text[:SUMMARY_MAX]
+    space = cut.rfind(" ")
+    if space > SUMMARY_MAX - 40:
+        cut = cut[:space]
+    return cut.rstrip(" ,;:-") + "…"
+
+
+def build_prompt(rows):
+    """`[row]` -> the prompt text, or `""` when there is nothing to ask about.
 
     Pure: no clock, no network, no config. Every decision about *what the model
     is even shown* is made here and can be checked without a socket.
 
-    `labels` is the group order the keyword file fixes - the same order the page
-    renders in, so the summary reads down the page rather than across a mapping
-    whose order would shuffle between runs. Within a group the rows arrive
-    already sorted `score DESC` by `store._matches()`, so "the notable ones" is
-    a slice and not a second ranking pass.
+    The rows arrive in the caller's order and the numbering is positional, so
+    `parse_answer()` can map an answer back onto them by index alone - no key,
+    no title matching, and nothing for a model to get wrong except the number.
     """
-    blocks = []
-    for label in labels:
-        rows = (rows_by_label.get(label) or [])[:max_per_topic]
-        if not rows:
-            # Left out on purpose, not rendered empty. See the module docstring.
-            continue
-        titles = "\n".join(
-            "  - {}".format(row.get("title") or "") for row in rows)
-        blocks.append("{}:\n{}".format(label, titles))
+    lines = []
+    for index, row in enumerate(rows, start=1):
+        block = "{}. {}".format(index, (row.get("title") or "").strip())
+        excerpt = " ".join((row.get("excerpt") or "").split())
+        if excerpt:
+            block += "\n   {}".format(excerpt[:EXCERPT_IN_PROMPT])
+        lines.append(block)
 
-    if not blocks:
+    if not lines:
         return ""
-    return INSTRUCTION.format(n=SENTENCES_MAX) + "\n" + "\n\n".join(blocks)
+    return INSTRUCTION.format(n=SENTENCES_MAX) + "\n" + "\n\n".join(lines)
 
 
-def summarize(fetcher, api_url, api_key, model, rows_by_label, labels,
-              max_per_topic):
-    """One completion. Returns the summary text, or `None` for every failure.
+def parse_answer(text, rows):
+    """The model's numbered lines -> `{dedup_key: summary}` for `rows`.
 
-    `None` is the only failure mode this function has. A refused request, a
-    timeout, a proxy answering HTML with a 200, a body shaped like nothing the
-    API documents - each is a page without a summary block and a message that
-    does not go out, never a cycle that stops.
+    Every row handed in comes back with an entry, answered or not: an unmatched
+    row maps to `""`, which `store.save_summaries()` writes as "asked, nothing
+    useful" so the story is never re-asked. A story costing a completion every
+    cycle because one model once skipped its line is the failure this avoids.
+
+    A number outside `1..len(rows)` is dropped rather than clamped - a model
+    that invented a story is not describing one of these, and attaching its
+    sentence to whichever row is nearest would put a wrong summary under a real
+    headline.
+    """
+    found = {}
+    for line in (text or "").splitlines():
+        match = _NUMBERED.match(line.strip())
+        if not match:
+            continue
+        index = int(match.group(1))
+        if 1 <= index <= len(rows):
+            # First line wins: a model that repeats a number is restating, and
+            # the restatement is where a preamble usually ends up.
+            found.setdefault(index, _clip(match.group(2)))
+
+    return {row["dedup_key"]: found.get(index, "")
+            for index, row in enumerate(rows, start=1)}
+
+
+def summarize(fetcher, api_url, api_key, model, rows):
+    """One completion for the whole batch. `{dedup_key: summary}`, or `{}`.
+
+    An empty mapping is the only failure mode this function has. A refused
+    request, a timeout, a proxy answering HTML with a 200, a body shaped like
+    nothing the API documents - each is a page whose stories carry no sentence
+    and messages that go out as they did before, never a cycle that stops. `{}`
+    rather than a mapping of empty strings on purpose: a failed *request* must
+    leave the stories unasked, so the next cycle tries them again.
 
     **An empty `api_key` is a supported deployment, not a failure.** An SGLang,
     vLLM or Ollama on the LAN authenticates nobody; sending it
@@ -123,16 +168,16 @@ def summarize(fetcher, api_url, api_key, model, rows_by_label, labels,
     sits in front of it, so with no key the header is simply not sent.
 
     The two short-circuits above the request are not politeness: an empty url or
-    a day with no story would each be a bill for asking a question with nothing
-    in it.
+    a cycle that found no new story would each be a bill for asking a question
+    with nothing in it.
     """
     if not api_url:
-        return None
+        return {}
 
-    prompt = build_prompt(rows_by_label, labels, max_per_topic)
+    rows = list(rows)
+    prompt = build_prompt(rows)
     if not prompt:
-        log.info("summary: nothing notable today, so nothing was asked")
-        return None
+        return {}
 
     key = (api_key or "").strip()
     try:
@@ -151,7 +196,7 @@ def summarize(fetcher, api_url, api_key, model, rows_by_label, labels,
     except HttpError as exc:
         log.warning("summary: the endpoint refused (%s) - the page and the "
                     "messages go out without one", exc)
-        return None
+        return {}
 
     try:
         payload = json.loads(body.decode("utf-8", "replace"))
@@ -161,15 +206,13 @@ def summarize(fetcher, api_url, api_key, model, rows_by_label, labels,
         # KeyError from an endpoint is not a bug in the radar.
         log.warning("summary: the answer was not in the documented shape (%s: "
                     "%s)", type(exc).__name__, exc)
-        return None
+        return {}
 
     if not text:
         log.warning("summary: the endpoint answered with an empty summary")
-        return None
+        return {}
 
-    # Non-blank lines only. Models separate the topics with a blank line as
-    # often as not, and counting those made the log claim eleven topics for a
-    # page showing six - the number here has to be the number the reader sees.
-    topics = sum(1 for line in text.splitlines() if line.strip())
-    log.info("summary: %d character(s) over %d topic(s)", len(text), topics)
-    return text
+    summaries = parse_answer(text, rows)
+    answered = sum(1 for value in summaries.values() if value)
+    log.info("summary: %d of %d story(ies) answered", answered, len(rows))
+    return summaries

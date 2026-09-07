@@ -112,11 +112,6 @@ nav.days a { padding:.1rem .4rem; border-radius:.3rem; color:var(--dim);
              text-decoration:none; }
 nav.days a:hover { background:var(--panel); color:var(--ink); }
 nav.days a[aria-current="page"] { color:var(--accent); font-weight:600; }
-section.summary { margin:0 0 1.8rem; padding:.9rem 1.1rem;
-                  background:var(--panel); border:1px solid var(--line);
-                  border-left:3px solid var(--accent); border-radius:.55rem; }
-section.summary p { margin:.4rem 0; color:var(--ink2); font-size:.93rem; }
-section.summary strong { color:var(--ink); font-weight:650; }
 section.group { margin:0 0 2.2rem; scroll-margin-top:1.5rem; }
 section.group h2 { display:flex; align-items:baseline; gap:.55rem;
                    margin:0 0 .6rem; padding:0 .6rem .45rem;
@@ -132,6 +127,11 @@ ol.stories { list-style:none; margin:0; padding:0; }
 li.story { display:grid; grid-template-columns:minmax(0,1fr) auto;
            column-gap:1.5rem; align-items:baseline;
            padding:.45rem .6rem; border-radius:.4rem; }
+/* The AI sentence, under the headline and spanning both columns so it wraps
+   against the full width instead of the title's. Absent for a story nothing
+   was written about, which is the shipped case with `ai.enabled` false. */
+li.story p.gist { grid-column:1 / -1; margin:.2rem 0 0; padding-right:1.5rem;
+                  color:var(--ink2); font-size:.82rem; line-height:1.45; }
 li.story:hover { background:var(--panel); }
 li.story a { color:var(--ink); text-decoration:none; font-weight:500;
              line-height:1.4; }
@@ -247,7 +247,7 @@ def _slug(label):
 
 
 def _story(row, hot, tz):
-    """Title on the left, timestamp on the right, and nothing else.
+    """Title on the left, timestamp on the right, the AI sentence underneath.
 
     Neither the score nor the source ids reach the page. Both are still in the
     store - `matches.score` is what put this row above the next one, and
@@ -259,15 +259,23 @@ def _story(row, hot, tz):
     the reader came back to; the `rel` beside it is the half that stops the
     opened page reaching back through `window.opener`. Only story links get it -
     the group and day navs move around this same report and belong in this tab.
+
+    `ai_summary` came off somebody else's endpoint, answering every thirty
+    minutes, so it goes through `_e` exactly like a feed title does. Same trust
+    boundary, reached from a new direction. Empty renders no element at all
+    rather than an empty paragraph: that is the shipped case, and a column of
+    blank gaps under every headline is worse than the page that had none.
     """
+    gist = (row.get("ai_summary") or "").strip()
     return (
         '<li class="{cls}"><a href="{url}" target="_blank"'
         ' rel="noopener noreferrer">{title}</a>'
-        '<span class="meta">{when}</span></li>').format(
+        '<span class="meta">{when}</span>{gist}</li>').format(
             cls="story hot" if hot else "story",
             url=_e(row.get("url") or row.get("canonical_url") or "#"),
             title=_e(row.get("title")),
-            when=_when(row.get("published_at"), tz))
+            when=_when(row.get("published_at"), tz),
+            gist='<p class="gist">{}</p>'.format(_e(gist)) if gist else "")
 
 
 def _group(label, rows, threshold, tz):
@@ -297,39 +305,6 @@ def _jump_nav(labels, day_rows):
         for label, count in ((l, len(day_rows.get(l) or [])) for l in labels)))
 
 
-def _summary(text):
-    """The AI summary as one `<p>` per topic, or nothing at all.
-
-    The model was asked for `<topic> — <sentences>`, one line per topic, so the
-    split is on the first em dash and the topic half is bolded. A line that
-    carries no separator is rendered whole rather than dropped: a model that
-    ignored the format still wrote a sentence, and a sentence the reader cannot
-    see is worse than an unbolded one.
-
-    Everything here came off somebody else's endpoint, answering every thirty
-    minutes, so it goes through `_e` exactly like a feed title does. This is the
-    same trust boundary, reached from a new direction.
-    """
-    if not (text or "").strip():
-        return ""
-
-    paragraphs = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        topic, sep, rest = line.partition("—")
-        if sep and topic.strip() and rest.strip():
-            paragraphs.append("<p><strong>{}</strong> — {}</p>".format(
-                _e(topic.strip()), _e(rest.strip())))
-        else:
-            paragraphs.append("<p>{}</p>".format(_e(line)))
-
-    if not paragraphs:
-        return ""
-    return '<section class="summary">{}</section>'.format("".join(paragraphs))
-
-
 def _day_nav(data_dir, today, prefix=""):
     """Links to every snapshot on disk, newest first, today's included.
 
@@ -352,7 +327,7 @@ def _day_nav(data_dir, today, prefix=""):
         for stem in sorted(stems, reverse=True)))
 
 
-def _page(labels, day_rows, meta, tz, threshold, today, nav, summary=None):
+def _page(labels, day_rows, meta, tz, threshold, today, nav):
     """The whole document: a sticky rail of context, a column of stories.
 
     The rail carries what used to be spread across a header and a footer - the
@@ -386,14 +361,13 @@ def _page(labels, day_rows, meta, tz, threshold, today, nav, summary=None):
         '<button id="theme" type="button" title="Toggle theme"'
         ' aria-label="Toggle theme">&#9680;</button></div>\n'
         "{jump}\n{nav}\n</aside>\n"
-        "<main>\n{summary}{groups}\n"
+        "<main>\n{groups}\n"
         "<footer>run {run} at {generated}</footer>\n</main>\n</div>\n"
         "<script>{script}</script>\n</body>\n</html>\n").format(
             today=_e(today),
             style=STYLE,
             jump=_jump_nav(labels, day_rows),
             nav=nav,
-            summary=_summary(summary),
             groups="\n".join(
                 _group(label, day_rows.get(label) or [], threshold, tz)
                 for label in labels),
@@ -409,7 +383,7 @@ def _page(labels, day_rows, meta, tz, threshold, today, nav, summary=None):
             script=SCRIPT)
 
 
-def write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None):
+def write(data_dir, labels, day_rows, meta, tz, threshold=5):
     """Write `index.html` and today's snapshot. Returns the paths written.
 
     `labels` fixes the group order and is what keeps an empty group on the page:
@@ -425,9 +399,10 @@ def write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None):
     it. One nav for both is how `days/<date>.html` inside `days/` became
     `/days/days/<date>.html` and a 404.
 
-    `summary` is the AI summary, one topic per line, or `None`. Absent is the
-    shipped case - `ai.enabled` defaults to false - and it renders nothing at
-    all rather than an empty card, so a clone's page is the page it always was.
+    The AI summaries are not an argument: they ride in the rows themselves,
+    under `ai_summary`, written into the store before this is called. Absent is
+    the shipped case - `ai.enabled` defaults to false - and a row without one
+    renders exactly the page this project had before.
     """
     data_dir = Path(data_dir)
     (data_dir / DAYS_DIR).mkdir(parents=True, exist_ok=True)
@@ -439,7 +414,7 @@ def write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None):
     for path, prefix in ((data_dir / INDEX_NAME, DAYS_DIR + "/"),
                          (data_dir / DAYS_DIR / "{}.html".format(today), "")):
         page = _page(labels, day_rows, meta, tz, threshold, today,
-                     _day_nav(data_dir, today, prefix), summary)
+                     _day_nav(data_dir, today, prefix))
         path.write_text(page, encoding="utf-8")
         written.append(path)
 

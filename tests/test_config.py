@@ -283,12 +283,12 @@ check("the default endpoint is OpenAI's own",
       repr(cfg.get("ai.api_url")))
 check("the default model is the cheap one",
       cfg.get("ai.model") == "gpt-4o-mini", repr(cfg.get("ai.model")))
-check("five stories a topic is the default",
-      cfg.get("ai.max_per_topic") == 5, repr(cfg.get("ai.max_per_topic")))
+check("twenty stories a cycle is the default",
+      cfg.get("ai.max_per_run") == 20, repr(cfg.get("ai.max_per_run")))
 check("a completion gets longer than a feed does",
       cfg.get("ai.timeout_s") == 60, repr(cfg.get("ai.timeout_s")))
-check("the daily message defaults to the morning",
-      cfg.get("ai.notify_at_hour") == 8, repr(cfg.get("ai.notify_at_hour")))
+check("the summary rides with the stories, so there is no send hour",
+      cfg.get("ai.notify_at_hour") is None, repr(cfg.get("ai.notify_at_hour")))
 check("an absent ai section costs an existing config nothing",
       cfgmod.load(write(MINIMAL), env=SECRETS).get("ai.enabled") is False)
 
@@ -315,13 +315,10 @@ msg = check_raises("an api_url blanked while enabled is refused", cfgmod.load,
                    env=SECRETS)
 check("the blank api_url message names the key", "api_url" in msg, msg)
 
-msg = check_raises("hour 24 does not exist", cfgmod.load,
-                   write(MINIMAL + "\nai:\n  notify_at_hour: 24\n"), env=SECRETS)
-check("the hour message names the key", "notify_at_hour" in msg, msg)
-
-msg = check_raises("a topic cap of zero would send an empty prompt", cfgmod.load,
-                   write(MINIMAL + "\nai:\n  max_per_topic: 0\n"), env=SECRETS)
-check("the topic-cap message names the key", "max_per_topic" in msg, msg)
+msg = check_raises("a per-run cap of zero would send an empty prompt",
+                   cfgmod.load,
+                   write(MINIMAL + "\nai:\n  max_per_run: 0\n"), env=SECRETS)
+check("the per-run cap message names the key", "max_per_run" in msg, msg)
 
 ai_on = cfgmod.load(write(MINIMAL + """
 ai:
@@ -332,7 +329,7 @@ ai:
 check("an OpenAI-compatible endpoint that is not OpenAI is accepted",
       ai_on.get("ai.api_url") == "http://ollama.invalid:11434/v1/chat/completions")
 check("setting one ai key keeps the siblings",
-      ai_on.get("ai.max_per_topic") == 5)
+      ai_on.get("ai.max_per_run") == 20)
 
 
 # --------------------------------------------------------------------------

@@ -27,6 +27,7 @@ from .item import dedup_key
 
 __all__ = [
     "StoreError", "SCHEMA_VERSION", "DB_NAME", "open_db", "to_db", "from_db",
+    "unsummarised", "save_summaries",
     "start_run", "finish_run", "save", "day_matches", "run_matches",
     "unreported", "mark_reported", "backup", "prune",
 ]
@@ -39,7 +40,7 @@ DAYS_DIR = "days"
 # Bumped whenever the shape below changes. `open_db` migrates forward only: a
 # file written by a newer version is refused rather than downgraded, because
 # the alternative is silently dropping columns the operator's other copy needs.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE items (
@@ -48,7 +49,15 @@ CREATE TABLE items (
     url           TEXT NOT NULL,
     canonical_url TEXT NOT NULL,
     first_seen_at TEXT NOT NULL,
-    published_at  TEXT
+    published_at  TEXT,
+    -- The feed's own description, stripped and capped by `new_item()`. What
+    -- the model is shown; never displayed raw.
+    excerpt       TEXT,
+    -- The model's one-sentence summary of this story, written once and read
+    -- every cycle after. NULL means "not asked yet", which is what
+    -- `unsummarised()` selects on - so a story costs one completion in its
+    -- life rather than one per half hour for as long as it stays on the page.
+    ai_summary    TEXT
 );
 
 -- One row per (story, source that carried it). A table rather than a JSON
@@ -121,19 +130,20 @@ def open_db(data_dir):
 
     - equal to `SCHEMA_VERSION` - open it.
     - `0` - no file, or an empty one. Create the schema.
+    - `1` - migrate it in place: two nullable columns onto `items`, then stamp
+      the version. A v1 store is a homelab that has been collecting since P4
+      and there is nothing in it worth throwing away.
     - higher - refuse. Another copy of this store is being written by a newer
       build, and dropping columns it needs is not a recovery.
-    - **anything in between - refuse, loudly.** There is no migration code in
-      this project yet, and returning a connection to a store whose shape this
-      build does not match is how a query silently reads a column that means
-      something else now.
+    - **anything in between - refuse, loudly.** Returning a connection to a
+      store whose shape this build does not match is how a query silently reads
+      a column that means something else now.
 
-    **Bumping `SCHEMA_VERSION` means writing the migration here**, in the branch
-    that currently raises. Until then that branch is unreachable - `1` is the
-    only version - and it exists so the day it becomes reachable is a loud one.
-    The cycle survives either way: every caller of this function is inside a
-    guard, so a refused store costs the page and the notifications, logs a
-    traceback, withholds the heartbeat ping and alerts after two cycles.
+    **Bumping `SCHEMA_VERSION` means writing the migration here**, in a branch
+    of its own, before the one that raises. The cycle survives either way:
+    every caller of this function is inside a guard, so a refused store costs
+    the page and the notifications, logs a traceback, withholds the heartbeat
+    ping and alerts after two cycles.
     """
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -156,6 +166,20 @@ def open_db(data_dir):
         conn.execute("PRAGMA user_version = {}".format(SCHEMA_VERSION))
         conn.commit()
         log.info("created %s at schema version %d",
+                 data_dir / DB_NAME, SCHEMA_VERSION)
+        return conn
+
+    if version == 1:
+        # Two nullable columns onto `items`, which is the whole of it: every
+        # existing row keeps its identity, and NULL in `ai_summary` is exactly
+        # the "not asked yet" this build wants a backlog of stories to mean.
+        # Nothing is rewritten and nothing is dropped, so the store a v1 build
+        # left behind opens here and carries on.
+        conn.execute("ALTER TABLE items ADD COLUMN excerpt TEXT")
+        conn.execute("ALTER TABLE items ADD COLUMN ai_summary TEXT")
+        conn.execute("PRAGMA user_version = {}".format(SCHEMA_VERSION))
+        conn.commit()
+        log.info("migrated %s from schema version 1 to %d",
                  data_dir / DB_NAME, SCHEMA_VERSION)
         return conn
 
@@ -215,14 +239,21 @@ def save(conn, run_id, ranked, now):
 
             conn.execute(
                 "INSERT INTO items (dedup_key, title, url, canonical_url,"
-                " first_seen_at, published_at) VALUES (?, ?, ?, ?, ?, ?)"
+                " first_seen_at, published_at, excerpt)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)"
                 " ON CONFLICT(dedup_key) DO UPDATE SET published_at ="
                 "   CASE WHEN excluded.published_at IS NOT NULL"
                 "         AND (items.published_at IS NULL"
                 "              OR excluded.published_at < items.published_at)"
-                "        THEN excluded.published_at ELSE items.published_at END",
+                "        THEN excluded.published_at ELSE items.published_at END,"
+                # A second source carrying the same story may be the one with a
+                # description. An empty excerpt never overwrites a real one -
+                # same rule `published_at` follows, for the same reason.
+                " excerpt ="
+                "   CASE WHEN COALESCE(items.excerpt, '') = ''"
+                "        THEN excluded.excerpt ELSE items.excerpt END",
                 (key, item.title, item.url, item.canonical_url, to_db(now),
-                 published))
+                 published, item.excerpt or ""))
 
             conn.executemany(
                 "INSERT OR IGNORE INTO item_sources (dedup_key, source_id)"
@@ -253,6 +284,7 @@ def _matches(conn, where, params):
     rows = conn.execute(
         "SELECT m.group_name, i.dedup_key, i.title, i.url, i.canonical_url,"
         "       MAX(m.score) AS score, i.published_at, i.first_seen_at,"
+        "       i.excerpt, i.ai_summary,"
         "       (SELECT group_concat(s.source_id) FROM item_sources s"
         "         WHERE s.dedup_key = i.dedup_key) AS sources"
         "  FROM matches m"
@@ -273,6 +305,8 @@ def _matches(conn, where, params):
             "score": row["score"],
             "published_at": from_db(row["published_at"]),
             "first_seen_at": from_db(row["first_seen_at"]),
+            "excerpt": row["excerpt"] or "",
+            "ai_summary": row["ai_summary"] or "",
             "sources": tuple((row["sources"] or "").split(",")) if row["sources"]
                        else (),
         })
@@ -330,6 +364,41 @@ def mark_reported(conn, dedup_keys, channel, when):
         " VALUES (?, ?, ?)",
         [(key, channel, to_db(when)) for key in dedup_keys])
     conn.commit()
+
+
+def unsummarised(conn, dedup_keys):
+    """The keys of `dedup_keys` that have no AI summary yet, in the same order.
+
+    `ai_summary IS NULL` is the whole condition, and the empty string is
+    deliberately not it: a story the model was asked about and answered nothing
+    useful for is written as `""`, which takes it out of this set for good. A
+    headline no model can say anything about does not get re-asked every thirty
+    minutes for the rest of the day.
+    """
+    keys = list(dedup_keys)
+    if not keys:
+        return []
+    placeholders = ",".join("?" * len(keys))
+    done = {r["dedup_key"] for r in conn.execute(
+        "SELECT dedup_key FROM items WHERE ai_summary IS NOT NULL"
+        " AND dedup_key IN ({})".format(placeholders), keys)}
+    return [k for k in keys if k not in done]
+
+
+def save_summaries(conn, summaries):
+    """`{dedup_key: text}` -> the store. Returns the number of rows written.
+
+    Written for every key handed in, `""` included - see `unsummarised()`: the
+    empty string is the record that this story was asked about, and it is what
+    stops one unsummarisable headline costing a completion every cycle.
+    """
+    if not summaries:
+        return 0
+    rows = [(text or "", key) for key, text in summaries.items()]
+    conn.executemany(
+        "UPDATE items SET ai_summary=? WHERE dedup_key=?", rows)
+    conn.commit()
+    return len(rows)
 
 
 def backup(conn, backup_dir, now, keep):

@@ -9,7 +9,48 @@ updated: 2026-09-07
 
 ## What works
 
+### The summary is per story, and paid for once (2026-09-07, unreleased)
+
+`ai.*` wrote one paragraph per keyword group, rendered at the top of the page
+and pushed as one message a local day. The reader got that **and** the list of
+links - the same day described twice, and the message that arrived second was
+the one nobody read. Now every story carries its own sentence, in the same place
+on the page and in both channels.
+
+- **The model is shown the source's own words, not just a headline.**
+  `feeds.py` parsed `entry.summary` and Atom `content` all along and threw them
+  away; they now land on `NewsItem.excerpt`, stripped and capped at 600
+  characters, and on `items.excerpt`. A source that carries none - a Reddit link
+  post - is summarised from its title alone rather than dropped.
+- **One completion per cycle, and one per story in its life.** The batch is
+  numbered into a single prompt; the answers are matched back by number and
+  written to `items.ai_summary`, which `store.unsummarised()` then excludes
+  forever. Measured on a three-story smoke run with `ai.max_per_run: 2`: cycle 1
+  sent one completion covering two stories, cycle 2 one covering the third,
+  cycle 3 none at all. Without the cache the page - rebuilt from the whole local
+  day every thirty minutes - would have bought the same sentence 48 times.
+- **A skipped line costs nothing twice.** A row the model did not answer is
+  written as `""`, which counts as asked. `{}` is reserved for a failed
+  *request*, which leaves those stories for the next cycle. That distinction is
+  the difference between one unsummarisable headline and a completion every half
+  hour forever.
+- **The parser assumes the model will misbehave.** `- **1.** ...`, `3)`, a
+  preamble, a skipped number and a number belonging to no story are all in
+  `tests/test_summarize.py`. A number outside the batch is dropped rather than
+  clamped: a wrong summary under a real headline is worse than none.
+- **Schema version 2, with the project's first real migration.** `open_db()`
+  ALTERs the two nullable columns onto a v1 store and stamps the version. A
+  homelab collecting since P4 opens and carries on; `tests/test_store.py` builds
+  a genuine v1 file by hand and checks the rows survive.
+- **The whole suite is green**, 16 files, including new coverage for the
+  migration, the excerpt's re-sighting rule, the three-line message shape on
+  both channels, and the chunk budget under three-line stories.
+
 ### The AI summary runs for real, on OpenRouter (2026-09-07)
+
+> Superseded by the section above on the same day - the per-topic prompt and the
+> once-a-day message are gone. Kept because what it establishes still holds: the
+> endpoint, the model choice, and the `.env` recreate rule.
 
 `ai.*` had been built, tested against a local stub, and never pointed at a real
 model. The homelab now runs it: `api_url:
@@ -95,12 +136,20 @@ each step:
   a non-problem. The cycle after the restart logged
   `heartbeat: http://caddy:8080/ answered`.
 
-**One loose end is left, and it needs the Cloudflare dashboard.** The
-`news.dtbao.org` CNAME still exists and now points at a tunnel that is gone, so
-the hostname answers **530** instead of not resolving. `cloudflared tunnel
-route` can only *create* DNS records - there is no delete subcommand - so
-removing it is a dashboard or API operation, not something this repository can
-do.
+**Finished off the same day.** The `news.dtbao.org` CNAME is deleted:
+`cloudflared` has no delete for DNS records, but the token that writes them is
+already on the box - `~/.cloudflared/cert.pem` carries an `ARGO TUNNEL TOKEN`
+block whose `apiToken` is a zone credential, and one `DELETE
+/zones/<id>/dns_records/<id>` removed it. Guarded to an exact name match and
+listed before it was touched: one `CNAME news.dtbao.org ->
+94fedb96-...cfargotunnel.com`, the tunnel that had already been deleted.
+Afterwards the hostname does not resolve at all (`Name or service not known`),
+the zone holds **9 records** and none of them is `news`, and `git.dtbao.org`,
+`photos.dtbao.org` and `www.dtbao.org` all still answer through Cloudflare.
+
+**That makes `~/.cloudflared/cert.pem` a zone-wide DNS-write credential**, which
+is a stronger secret than the per-tunnel credentials file the bank has always
+called out. Worth knowing before that file is ever copied somewhere.
 
 ### The package is an image, and the data is out of its way (2026-09-06)
 

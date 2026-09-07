@@ -41,7 +41,11 @@ DEFAULTS = {
     "feeds": [],
     "search_templates": [],
     "keywords": {"file": "config/frequency_words.txt"},
-    "report": {"mode": "incremental", "max_per_group": 0, "rank_threshold": 5},
+    # `html` is the page itself, and `True` is the only safe default: off does
+    # not merely stop writing it, it deletes what is already published. A
+    # config that never mentions the key must keep the page it has.
+    "report": {"mode": "incremental", "max_per_group": 0, "rank_threshold": 5,
+               "html": True},
     "rank": {
         "weight_source": 0.5,
         "weight_frequency": 0.3,

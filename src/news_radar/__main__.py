@@ -200,7 +200,16 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
         # what the morning found.
         day = store.day_matches(conn, start, end)
 
-        if groups:
+        page_on = cfg.get("report.html", True)
+        if not page_on:
+            # The page is off. Removing it is not tidiness: the alternative is
+            # the last page this ever wrote sitting on the web server forever,
+            # dated and wrong, with no way for a reader to tell it from a
+            # working one. The summaries are still written - they belong to the
+            # messages as much as to the page.
+            _summarize(cfg, conn, day, [g.label for g in groups])
+            render.remove(data_dir)
+        elif groups:
             _summarize(cfg, conn, day, [g.label for g in groups])
             render.write(
                 data_dir, [g.label for g in groups], day,
@@ -234,10 +243,16 @@ def _publish(cfg, ranked, groups, fetched_at, fetched, matched, errors):
         # are on disk and not on the page. A line beginning "the page shows"
         # has to mean the page.
         labels = [g.label for g in groups]
-        log.info("stored %d match row(s) as run %s; the page shows %d "
-                 "story(ies) across %d group(s) today", rows, run_id,
-                 sum(len(day.get(label) or []) for label in labels),
-                 len(labels))
+        today = sum(len(day.get(label) or []) for label in labels)
+        if page_on:
+            log.info("stored %d match row(s) as run %s; the page shows %d "
+                     "story(ies) across %d group(s) today", rows, run_id,
+                     today, len(labels))
+        else:
+            # Same two numbers, and no claim about a page there isn't one of.
+            log.info("stored %d match row(s) as run %s; %d story(ies) across "
+                     "%d group(s) today, published nowhere - report.html is off",
+                     rows, run_id, today, len(labels))
         return run_id
     except Exception:
         log.exception("storing or rendering failed, the fetched items are kept")

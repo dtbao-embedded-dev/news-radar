@@ -69,6 +69,10 @@ cfg = cfgmod.load(write(MINIMAL), env=SECRETS)
 
 check("a key absent from the file takes the documented default",
       cfg.get("schedule.interval_minutes") == 30)
+# The page is the one thing an upgrade must not lose by saying nothing: with
+# the report off, `render.remove()` deletes what is already published.
+check("an absent report.html still publishes the page",
+      cfg.get("report.html") is True, repr(cfg.get("report.html")))
 check("a nested default survives when a sibling is overridden",
       cfg.get("rank.weight_freshness") == 0.2)
 check("dotted lookup of a missing key returns the fallback",
@@ -375,6 +379,11 @@ if example.is_file():
     check("the shipped template polls every 10 minutes",
           shipped.get("schedule.interval_minutes") == 10,
           repr(shipped.get("schedule.interval_minutes")))
+    # The third of these deliberate disagreements, and the one with teeth: off
+    # means the page is deleted, so the code default has to be the one that
+    # publishes.
+    check("the template ships the HTML report off",
+          shipped.get("report.html") is False, repr(shipped.get("report.html")))
 else:
     FAILURES.append("config/config.yaml.example is missing from the checkout")
 

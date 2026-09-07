@@ -16,6 +16,17 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Changed
+
+- **schedule**: the shipped `config.yaml.example` now polls every **10
+  minutes** instead of 30. The code default stays 30, so a config that never
+  mentions `schedule` keeps the half-hour it already had - an upgrade must not
+  triple a running deployment's request rate on its own. A cycle costs 35-57s
+  for the 22 requests the shipped feed list makes, so the process is still idle
+  most of the interval; what does change is the traffic at Google News and HN
+  Algolia, the two sources already known to throttle. An existing deployment
+  opts in by editing its own `config.yaml`.
+
 ## v0.2.6 - 2026-09-07
 
 ### Fixes

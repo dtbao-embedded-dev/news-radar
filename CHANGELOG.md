@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.6 - 2026-09-07
+
 ### Fixes
 
 - **notify**: a story matching two keyword groups is sent **once**, under the

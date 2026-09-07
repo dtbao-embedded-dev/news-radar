@@ -102,7 +102,7 @@ def clip(text, limit=TITLE_MAX):
 def pick(rows_by_label, labels, keys=None):
     """`{label: [row]}` -> `[(label, [row])]` in the keyword file's own order.
 
-    Two jobs, both of which decide what a channel is even shown:
+    Three jobs, all of which decide what a channel is even shown:
 
     - **Order.** `labels` is the group order the keyword file fixes, the same
       one the page renders in. A mapping's own order would shuffle the sections
@@ -111,18 +111,41 @@ def pick(rows_by_label, labels, keys=None):
       not been told about. `None` means send everything (`report.mode: current`);
       an *empty* set means everything has already been sent, which is not the
       same thing and must send nothing at all.
+    - **One story, one appearance.** A story matching two groups has a row in
+      each, and a message that prints it twice - same headline, same link, same
+      AI sentence - is the reader scrolling past their own report. It goes out
+      under the **first** group in `labels` that claims it, and the operator
+      controls which that is by ordering the groups in `frequency_words.txt`.
 
-    A group left empty by either job is dropped. The page prints the quiet
-    keyword because someone is looking for it; a phone should not buzz to say
-    nothing happened.
+    That last job is the one place a message deliberately diverges from the
+    page. The page is browsed by topic, so a story belonging to two topics
+    belongs in both sections; a message is read top to bottom once, so the
+    second copy is pure noise. Both channels get this for free - they are the
+    two callers of this function.
+
+    Marking follows: the accepted key goes into `reported` once, so the copy
+    that was dropped here is not owed a message next cycle either.
+
+    A group left empty by any of the three is dropped. The page prints the
+    quiet keyword because someone is looking for it; a phone should not buzz to
+    say nothing happened.
     """
     out = []
+    seen = set()
     for label in labels:
         rows = rows_by_label.get(label) or []
         if keys is not None:
             rows = [row for row in rows if row["dedup_key"] in keys]
-        if rows:
-            out.append((label, rows))
+
+        kept = []
+        for row in rows:
+            if row["dedup_key"] in seen:
+                continue
+            seen.add(row["dedup_key"])
+            kept.append(row)
+
+        if kept:
+            out.append((label, kept))
     return out
 
 

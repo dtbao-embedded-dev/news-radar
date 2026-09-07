@@ -30,6 +30,17 @@ one makes the file and the tags disagree.
   stop sending a fresh install to `http://localhost:8088` for a page that is
   not there.
 
+### Fixes
+
+- **ops**: with `report.html` off, the `ops.site_url` check is **skipped**
+  rather than run against a page that no longer exists. Left as it was, a
+  deployment that turned the report off would GET a 404 every cycle - which
+  withholds the heartbeat ping *and* counts as a failed cycle, so `ops.Health`
+  would alert after two of them and the dead-man's switch would trip on a radar
+  that was working perfectly. The url in `config.yaml` is left untouched, so
+  turning the page back on restores the check with nothing to remember; the log
+  says once per cycle that the check was skipped.
+
 ### Changed
 
 - **schedule**: the shipped `config.yaml.example` now polls every **10

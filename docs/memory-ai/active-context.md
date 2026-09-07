@@ -1,6 +1,6 @@
 ---
 title: Active Context
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 
 # Active Context
@@ -78,6 +78,29 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The repository stopped naming one deployment** (2026-09-07). `docker/cloudflared.yml`
+  carried this homelab's tunnel id and its hostname, so the two files a second
+  deployment would need were welded to the first one. The id is now
+  `NEWS_RADAR_TUNNEL_ID` in `.env`, passed as the argument to `run`; the hostname
+  is gone entirely, replaced by a single catch-all ingress to `caddy:8080` -
+  Cloudflare DNS already knows which hostname reaches this tunnel. Verified with
+  cloudflared itself rather than by reading: `tunnel ingress validate` answers
+  `OK`, and `tunnel ingress rule <url>` matches rule #0 to `http://caddy:8080`.
+  **Breaking for the running deployment** - the migration has to read the id out
+  of the old file before replacing it.
+- **cloudflared does not expand environment variables inside its own config**,
+  which is the whole reason the id could not just become `${...}` in that file.
+  Compose *does* expand them in `command:`, so that is where it went. Checked
+  before designing around it, not after.
+- **`updating-homelab.md` was split out of `setup-homelab.md`** (2026-09-07).
+  The latter had hit the bank's 300-line ceiling twice in two days because it was
+  covering two concepts - installing, and updating/migrating. `rule/` orders
+  shifted: release-flow 1, setup-homelab 2, updating-homelab 3,
+  reference-trendradar 4, changelog 5.
+- **A committed `.example` is a place a real value sneaks back in.** The first
+  version of the `NEWS_RADAR_TUNNEL_ID` comment used this deployment's actual id
+  as its example, putting back into git exactly what the change had just taken
+  out. It is a placeholder UUID now.
 - **Every "what could break" line was then checked, and four of six were wrong**
   (2026-09-06). Corrections landed in two commits across `.gitignore`,
   `docker/.env.example`, `docker/docker-compose.yml`, `CHANGELOG.md`,
@@ -311,11 +334,14 @@ loader and the design bank - see `progress.md`.
    `docker pull ghcr.io/dtbao-embedded-dev/news-radar:0.2.3`. Nothing can be
    migrated until that command works.
 3. **Migrate the homelab, phase 1 only.** `## Migrating an existing checkout` in
-   [[setup-homelab]]: `rm -rf .git .github`, re-fetch the compose file, `pull`,
+   [[updating-homelab]]: `rm -rf .git .github`, re-fetch the compose file, `pull`,
    then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays
    unset** - the compose file is still in `docker/`, so the default `..` is
    already `~/news-radar`. Do **not** `git checkout v0.2.3` out of habit: that
-   is the command that deletes `config/frequency_words.txt`.
+   is the command that deletes `config/frequency_words.txt`. **And read the
+   tunnel id out of `docker/cloudflared.yml` before that file is replaced**, then
+   put it in `docker/.env` as `NEWS_RADAR_TUNNEL_ID` - the new compose file takes
+   it from there, and without it the connector has no tunnel to run.
 4. **Edit `report.mode` on the homelab by hand, in the same visit.**
    `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
    no release can reach it, which is what

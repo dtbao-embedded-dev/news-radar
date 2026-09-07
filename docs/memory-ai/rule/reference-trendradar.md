@@ -7,7 +7,7 @@ updated: 2026-09-04
 source: https://github.com/sansan0/TrendRadar, docs/memory-ai/adr/adr-0001-clean-room-from-trendradar.md
 confidence: confirmed
 keywords: TrendRadar, reference, stuck, GPL-3.0, clean-room, copyleft, prior art, how to consult
-order: 3
+order: 4
 ---
 
 # TrendRadar Is the Reference Repo When You Get Stuck

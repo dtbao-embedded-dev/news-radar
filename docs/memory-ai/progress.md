@@ -1,6 +1,6 @@
 ---
 title: Progress
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 
 # Progress
@@ -273,9 +273,11 @@ finished-product definition all of it serves.
   and 42914 bytes, `GET /news.db` answered **404**, `GET /days/` answered
   **404**. That is P5's definition of done.
 - **The connector runs in the stack, not on the host.** A `cloudflared` service
-  in `docker/docker-compose.yml` carries the `news` tunnel
-  (`94fedb96-98c6-4683-8ae5-6addda3d9c9e`) and registered four edge connections
-  on first start (`hkg01`, `hkg09`, `hkg13` x2).
+  in `docker/docker-compose.yml` carries the `news` tunnel and registered four
+  edge connections on first start (`hkg01`, `hkg09`, `hkg13` x2). The id was
+  written into `docker/cloudflared.yml` at the time; it moved to
+  `NEWS_RADAR_TUNNEL_ID` in `.env` later, so no committed file names this
+  deployment.
 - **The bank had this topology wrong, and it is now corrected.** It said the
   homelab already ran a tunnel *container* for `mcp.dtbao.org` that this project
   would attach to. Reality: cloudflared runs here as a Windows service named

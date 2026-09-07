@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-06 - 19 durable doc(s)._
+_Generated 2026-09-07 - 20 durable doc(s)._
 
 ## State (transient)
 
@@ -283,9 +283,11 @@ finished-product definition all of it serves.
   and 42914 bytes, `GET /news.db` answered **404**, `GET /days/` answered
   **404**. That is P5's definition of done.
 - **The connector runs in the stack, not on the host.** A `cloudflared` service
-  in `docker/docker-compose.yml` carries the `news` tunnel
-  (`94fedb96-98c6-4683-8ae5-6addda3d9c9e`) and registered four edge connections
-  on first start (`hkg01`, `hkg09`, `hkg13` x2).
+  in `docker/docker-compose.yml` carries the `news` tunnel and registered four
+  edge connections on first start (`hkg01`, `hkg09`, `hkg13` x2). The id was
+  written into `docker/cloudflared.yml` at the time; it moved to
+  `NEWS_RADAR_TUNNEL_ID` in `.env` later, so no committed file names this
+  deployment.
 - **The bank had this topology wrong, and it is now corrected.** It said the
   homelab already ran a tunnel *container* for `mcp.dtbao.org` that this project
   would attach to. Reality: cloudflared runs here as a Windows service named
@@ -733,6 +735,29 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **The repository stopped naming one deployment** (2026-09-07). `docker/cloudflared.yml`
+  carried this homelab's tunnel id and its hostname, so the two files a second
+  deployment would need were welded to the first one. The id is now
+  `NEWS_RADAR_TUNNEL_ID` in `.env`, passed as the argument to `run`; the hostname
+  is gone entirely, replaced by a single catch-all ingress to `caddy:8080` -
+  Cloudflare DNS already knows which hostname reaches this tunnel. Verified with
+  cloudflared itself rather than by reading: `tunnel ingress validate` answers
+  `OK`, and `tunnel ingress rule <url>` matches rule #0 to `http://caddy:8080`.
+  **Breaking for the running deployment** - the migration has to read the id out
+  of the old file before replacing it.
+- **cloudflared does not expand environment variables inside its own config**,
+  which is the whole reason the id could not just become `${...}` in that file.
+  Compose *does* expand them in `command:`, so that is where it went. Checked
+  before designing around it, not after.
+- **`updating-homelab.md` was split out of `setup-homelab.md`** (2026-09-07).
+  The latter had hit the bank's 300-line ceiling twice in two days because it was
+  covering two concepts - installing, and updating/migrating. `rule/` orders
+  shifted: release-flow 1, setup-homelab 2, updating-homelab 3,
+  reference-trendradar 4, changelog 5.
+- **A committed `.example` is a place a real value sneaks back in.** The first
+  version of the `NEWS_RADAR_TUNNEL_ID` comment used this deployment's actual id
+  as its example, putting back into git exactly what the change had just taken
+  out. It is a placeholder UUID now.
 - **Every "what could break" line was then checked, and four of six were wrong**
   (2026-09-06). Corrections landed in two commits across `.gitignore`,
   `docker/.env.example`, `docker/docker-compose.yml`, `CHANGELOG.md`,
@@ -966,11 +991,14 @@ loader and the design bank - see `progress.md`.
    `docker pull ghcr.io/dtbao-embedded-dev/news-radar:0.2.3`. Nothing can be
    migrated until that command works.
 3. **Migrate the homelab, phase 1 only.** `## Migrating an existing checkout` in
-   [[setup-homelab]]: `rm -rf .git .github`, re-fetch the compose file, `pull`,
+   [[updating-homelab]]: `rm -rf .git .github`, re-fetch the compose file, `pull`,
    then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays
    unset** - the compose file is still in `docker/`, so the default `..` is
    already `~/news-radar`. Do **not** `git checkout v0.2.3` out of habit: that
-   is the command that deletes `config/frequency_words.txt`.
+   is the command that deletes `config/frequency_words.txt`. **And read the
+   tunnel id out of `docker/cloudflared.yml` before that file is replaced**, then
+   put it in `docker/.env` as `NEWS_RADAR_TUNNEL_ID` - the new compose file takes
+   it from there, and without it the connector has no tunnel to run.
 4. **Edit `report.mode` on the homelab by hand, in the same visit.**
    `~/news-radar/config/config.yaml` is gitignored and still says `incremental`;
    no release can reach it, which is what
@@ -1494,7 +1522,7 @@ Secrets — bot tokens, webhook URLs — live **only** in the environment layer.
 must be harmless.
 
 ### [architecture] Homelab Deployment
-*`architecture/deployment-homelab.md` - How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world. - status: active - source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, docker/.env.example, .github/workflows/image.yml, scripts/setup.py - keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, autoupdate profile, watchtower, ghcr, image, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, WATCHTOWER_POLL_INTERVAL, schedule, volumes, restart policy*
+*`architecture/deployment-homelab.md` - How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world. - status: active - source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, docker/.env.example, .github/workflows/image.yml, scripts/setup.py - keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, autoupdate profile, watchtower, ghcr, image, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_TUNNEL_ID, WATCHTOWER_POLL_INTERVAL, schedule, volumes, restart policy*
 
 # Homelab Deployment
 
@@ -1597,13 +1625,16 @@ against the live hostname, `https://news.dtbao.org/news.db` and
 
 ### The tunnel
 
-`news.dtbao.org` is carried by a dedicated Cloudflare Tunnel named `news`
-(`94fedb96-98c6-4683-8ae5-6addda3d9c9e`), whose connector runs **as a container
-in this compose project**:
+The published hostname is carried by a dedicated Cloudflare Tunnel whose
+connector runs **as a container in this compose project**. Nothing in the
+repository names either the tunnel or the hostname - that is deliberate, and it
+is what lets a second deployment use these files unchanged:
 
 | Piece | Where | Committed |
 |-------|-------|-----------|
-| Ingress: `news.dtbao.org` -> `http://caddy:8080`, else `http_status:404` | `docker/cloudflared.yml` | yes - a tunnel id is not a secret |
+| Ingress: one catch-all -> `http://caddy:8080` | `docker/cloudflared.yml` | yes - it names no deployment |
+| Tunnel id | `NEWS_RADAR_TUNNEL_ID` in `.env`, passed as the argument to `run` | no |
+| Hostname | Cloudflare DNS, put there by `cloudflared tunnel route dns` | no |
 | Connector credentials | `docker/tunnel-credentials.json`, mounted at `/etc/cloudflared/creds.json` | **no** - gitignored |
 | The service itself | `docker/docker-compose.yml`, `profiles: ["tunnel"]` | yes |
 
@@ -1684,6 +1715,7 @@ nothing outside the process will kill it.
 | `NEWS_RADAR_CONFIG` | compose, default `/app/config/config.yaml` | `config.py` |
 | `NEWS_RADAR_HOME` | `.env`, default `..` | compose only - the three data bind mounts |
 | `NEWS_RADAR_VERSION` | `.env`, default `latest` | compose only - which published image to run |
+| `NEWS_RADAR_TUNNEL_ID` | `.env`, no default | compose only - the argument to `cloudflared tunnel run`. Unset with the `tunnel` profile on means the connector has no tunnel and the site answers Cloudflare `1033` |
 | `NEWS_RADAR_HTTP_PORT` | `.env`, default `8088` | compose only - caddy's host port |
 | `WATCHTOWER_POLL_INTERVAL` | `.env`, default `86400` | compose only - watchtower, when its profile is on |
 
@@ -1964,7 +1996,7 @@ Two consequences worth knowing before changing this:
   asserts the rule is on the page.
 
 ### [interface] Config Keys, Keyword File and Environment
-*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_TUNNEL_ID, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER*
 
 # Config Keys, Keyword File and Environment
 
@@ -2120,6 +2152,7 @@ than a config error the code could report.
 | `NEWS_RADAR_HOME` | `..` | The directory holding `config/`, `output/` and `backups/`, resolved relative to the compose file. Unset is the repository root, which is a checkout's own layout; a deployment sets `.` and keeps its data beside the compose file with no git checkout on the machine |
 | `NEWS_RADAR_VERSION` | `latest` | Which published image the crawl service runs. Pinning it freezes a deployment or rolls one back, **on its own**: watchtower polls the tag the running container was created from, and a version tag does not move. Republishing that same tag is the one thing that gets past it |
 | `NEWS_RADAR_HTTP_PORT` | `8088` | Caddy's published host port, for local debugging only |
+| `NEWS_RADAR_TUNNEL_ID` | *(none)* | The Cloudflare Tunnel the connector runs, as the argument to `tunnel run`. It lives here rather than in `docker/cloudflared.yml` because that file is committed and would then name one deployment - and because **cloudflared does not expand environment variables inside its own config**, while Compose does expand them in `command:` |
 | `WATCHTOWER_POLL_INTERVAL` | `86400` | Seconds between GHCR polls, when the `autoupdate` profile is on |
 
 **`NEWS_RADAR_HOME` set wrong fails loudly, and leaves a mess.** Measured rather
@@ -3533,13 +3566,14 @@ Recovery is ordinary git. Find out which step failed from the output, then:
   reset the release commit; then re-run.
 
 ### [rule] Setting Up on the Homelab
-*`rule/setup-homelab.md` - The procedure from nothing to news.dtbao.org serving, for a deployment running the published image and for a development checkout. - status: active - source: docker/docker-compose.yml, docker/.env.example, docker/Caddyfile, docker/cloudflared.yml, .github/workflows/image.yml, scripts/setup.py, src/news_radar/__main__.py - keywords: deployment directory, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, ghcr, image, docker compose pull, watchtower, autoupdate profile, auto-update, migrating, upgrade, updating, --check, config drift, setup, setup.py, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088*
+*`rule/setup-homelab.md` - The procedure from nothing to a serving deployment running the published image, and to a development checkout. - status: active - source: docker/docker-compose.yml, docker/.env.example, docker/Caddyfile, docker/cloudflared.yml, .github/workflows/image.yml, scripts/setup.py, src/news_radar/__main__.py - keywords: deployment directory, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_TUNNEL_ID, ghcr, image, docker compose pull, watchtower, autoupdate profile, auto-update, migrating, upgrade, updating, --check, config drift, setup, setup.py, homelab, cloudflare tunnel, cloudflared, tunnel profile, tunnel-credentials.json, news.dtbao.org, .env, config.yaml, NEWS_RADAR_HTTP_PORT, 8088*
 
 # Setting Up on the Homelab
 
 > A **deployment** runs the published image and keeps no source. A **checkout**
 > is for developing. They share one `docker-compose.yml`, told apart by a single
-> variable, so there is no second file to drift.
+> variable, so there is no second file to drift. Updating one, and migrating an
+> existing checkout into one, is [[updating-homelab]].
 
 ## Two ways to run it
 
@@ -3549,7 +3583,7 @@ Recovery is ordinary git. Find out which step failed from the output, then:
 | `NEWS_RADAR_HOME` | `.` - data beside the compose file | unset (`..`) - data at the repo root |
 | Crawl image | pulled from GHCR | built from the local `Dockerfile` |
 | Install | `docker compose pull && up -d` | `python scripts/setup.py` |
-| Update | `docker compose pull && up -d`, or watchtower | `git pull`, rebuild |
+| Update | `docker compose pull && up -d`, or watchtower - see [[updating-homelab]] | `git pull`, rebuild |
 | Git | **none** | yes |
 
 **The absence of git on a deployment is the design, not a shortcut.** A tracked
@@ -3580,7 +3614,7 @@ come from the release, everything else is yours and nothing ever overwrites it.
   docker-compose.yml         from the release
   Caddyfile                  from the release
   cloudflared.yml            from the release
-  .env                       yours - secrets, and NEWS_RADAR_HOME=.
+  .env                       yours - secrets, NEWS_RADAR_HOME=., tunnel id
   tunnel-credentials.json    yours
   config/config.yaml         yours
   config/frequency_words.txt yours
@@ -3682,9 +3716,19 @@ behind the `tunnel` profile. Two steps, once per machine:
    it. Both write to the Cloudflare account, not to this repo.
 2. **Give the container its credentials.** Copy the tunnel's credentials JSON
    (`~/.cloudflared/<tunnel-id>.json`, written by `tunnel create`) to
-   `tunnel-credentials.json` beside the compose file. It is never committed; the
-   tunnel id in `cloudflared.yml` is not a secret and is. A different tunnel
-   means editing that id.
+   `tunnel-credentials.json` beside the compose file. It is never committed.
+3. **Put the tunnel id in `.env`** as `NEWS_RADAR_TUNNEL_ID`
+   (`cloudflared tunnel list` prints it; the credentials file carries the same
+   one). It is not a secret, but it names one deployment, so it does not live in
+   a committed file - and `cloudflared` will not read it from an environment
+   variable inside its own config, which is why it is the argument to `run` in
+   the compose command instead. Miss this and the connector starts with no
+   tunnel to run: the site answers Cloudflare `1033` while everything else looks
+   healthy.
+
+   `docker/cloudflared.yml` names neither the tunnel nor the hostname. Its
+   ingress is a single catch-all to `caddy:8080`, and only a hostname routed to
+   this tunnel in Cloudflare DNS ever arrives.
 
 **Do not add `news.dtbao.org` to a connector running on the host instead.** A
 host connector cannot resolve `caddy`, so it would have to be pointed at the
@@ -3711,6 +3755,19 @@ the operator's own remote access. See [[deployment-homelab]].
    read whether an update actually landed.
 6. Wait one `schedule.interval_minutes` and check that Telegram and Discord each
    received exactly one message.
+
+Updating a deployment, freezing or rolling back a version, and turning an
+existing checkout into a deployment are all [[updating-homelab]].
+
+### [rule] Updating and Migrating a Homelab Deployment
+*`rule/updating-homelab.md` - How a running deployment takes a new release, how to freeze or roll one back, and the one-time procedure that turns an existing git checkout into a deployment. - status: active - source: docker/docker-compose.yml, docker/.env.example, .github/workflows/image.yml, src/news_radar/__main__.py, src/news_radar/ops.py - keywords: updating, upgrade, docker compose pull, watchtower, autoupdate profile, auto-update, NEWS_RADAR_VERSION, NEWS_RADAR_TUNNEL_ID, freeze, rollback, pin version, ghcr private, package visibility, --check, config drift, migrating, migration, git checkout, ops.heartbeat_url, dead-man's switch*
+
+# Updating and Migrating a Homelab Deployment
+
+> A deployment takes a new release by pulling an image, never by checking out a
+> tag - that is what keeps `config/`, `output/` and `backups/` out of reach of
+> any command an update runs. Installing one in the first place is
+> [[setup-homelab]].
 
 ## Updating
 
@@ -3774,8 +3831,9 @@ For the homelab as it stands today: a detached checkout at `~/news-radar` with
 
 Cut and publish a version first - the image has to exist before anything can
 pull it. `python scripts/release.py <version>` from a development checkout, then
-watch the `Publish image` workflow go green, **then make the package public**
-(see above) and confirm from the homelab:
+watch the `Publish image` workflow go green, **then make the package public** -
+a workflow-published GHCR package is private even from a public repo, see
+[[setup-homelab]] - and confirm from the homelab:
 
 ```
 docker pull ghcr.io/dtbao-embedded-dev/news-radar:<version>
@@ -3789,13 +3847,30 @@ after it is tidying.
 ```
 cd ~/news-radar
 docker compose -f docker/docker-compose.yml --profile tunnel down
+
+# The tunnel id used to live in docker/cloudflared.yml, which this migration
+# replaces. Read it out before losing it - or from `cloudflared tunnel list`.
+grep '^tunnel:' docker/cloudflared.yml
+
 rm -rf .git .github
-curl -fsSL https://raw.githubusercontent.com/dtbao-embedded-dev/news-radar/v<version>/docker/docker-compose.yml \
-     -o docker/docker-compose.yml
+BASE=https://raw.githubusercontent.com/dtbao-embedded-dev/news-radar/v<version>
+curl -fsSL "$BASE/docker/docker-compose.yml" -o docker/docker-compose.yml
+curl -fsSL "$BASE/docker/cloudflared.yml"    -o docker/cloudflared.yml
+
+# The one line this migration cannot skip - see below.
+echo 'NEWS_RADAR_TUNNEL_ID=<the id printed above>' >> docker/.env
+
 docker compose -f docker/docker-compose.yml pull
 docker compose -f docker/docker-compose.yml --profile tunnel --profile autoupdate up -d
 docker compose -f docker/docker-compose.yml run --rm news-radar --check
 ```
+
+**`NEWS_RADAR_TUNNEL_ID` is the step this migration cannot skip.** The new
+`docker/cloudflared.yml` names no tunnel - the id is the argument to `run` now,
+read from `.env` - so a deployment that does not set it starts a connector with
+no tunnel, and the site answers Cloudflare `1033` while every other log line
+looks healthy. `cloudflared` cannot read it from an environment variable inside
+its own config, which is why it is not simply a `${...}` in that file.
 
 `NEWS_RADAR_HOME` stays **unset** here: the compose file sits in `docker/`, the
 default `..` is `~/news-radar`, and that is already where `config/`, `output/`
@@ -3819,7 +3894,8 @@ docker compose --profile tunnel --profile autoupdate up -d
 that list. They are the three directories this whole change exists to protect.
 
 Cutting the version in the first place is [[release-flow]]; what the stack looks
-like once it is running is [[deployment-homelab]].
+like once it is running is [[deployment-homelab]]; installing one from nothing is
+[[setup-homelab]].
 
 ### [rule] TrendRadar Is the Reference Repo When You Get Stuck
 *`rule/reference-trendradar.md` - When and how to consult TrendRadar for a problem news-radar hits, and exactly what may not be carried back. - status: active - source: https://github.com/sansan0/TrendRadar, docs/memory-ai/adr/adr-0001-clean-room-from-trendradar.md - keywords: TrendRadar, reference, stuck, GPL-3.0, clean-room, copyleft, prior art, how to consult*

@@ -3,10 +3,10 @@ title: Config Keys, Keyword File and Environment
 category: interface
 purpose: Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads.
 status: active
-updated: 2026-09-06
+updated: 2026-09-07
 source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py
 confidence: confirmed
-keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
+keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_TUNNEL_ID, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_topic, notify_at_hour, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, rank weights, GLOBAL_FILTER
 order: 1
 ---
 
@@ -164,6 +164,7 @@ than a config error the code could report.
 | `NEWS_RADAR_HOME` | `..` | The directory holding `config/`, `output/` and `backups/`, resolved relative to the compose file. Unset is the repository root, which is a checkout's own layout; a deployment sets `.` and keeps its data beside the compose file with no git checkout on the machine |
 | `NEWS_RADAR_VERSION` | `latest` | Which published image the crawl service runs. Pinning it freezes a deployment or rolls one back, **on its own**: watchtower polls the tag the running container was created from, and a version tag does not move. Republishing that same tag is the one thing that gets past it |
 | `NEWS_RADAR_HTTP_PORT` | `8088` | Caddy's published host port, for local debugging only |
+| `NEWS_RADAR_TUNNEL_ID` | *(none)* | The Cloudflare Tunnel the connector runs, as the argument to `tunnel run`. It lives here rather than in `docker/cloudflared.yml` because that file is committed and would then name one deployment - and because **cloudflared does not expand environment variables inside its own config**, while Compose does expand them in `command:` |
 | `WATCHTOWER_POLL_INTERVAL` | `86400` | Seconds between GHCR polls, when the `autoupdate` profile is on |
 
 **`NEWS_RADAR_HOME` set wrong fails loudly, and leaves a mess.** Measured rather

@@ -3,10 +3,10 @@ title: Homelab Deployment
 category: architecture
 purpose: How news-radar runs on the homelab and how https://news.dtbao.org reaches the outside world.
 status: active
-updated: 2026-09-06
+updated: 2026-09-07
 source: docker/docker-compose.yml, docker/cloudflared.yml, docker/Caddyfile, docker/.env.example, .github/workflows/image.yml, scripts/setup.py
 confidence: confirmed
-keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, autoupdate profile, watchtower, ghcr, image, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, WATCHTOWER_POLL_INTERVAL, schedule, volumes, restart policy
+keywords: news.dtbao.org, homelab, docker compose, caddy, cloudflared, cloudflare tunnel, tunnel profile, autoupdate profile, watchtower, ghcr, image, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_TUNNEL_ID, WATCHTOWER_POLL_INTERVAL, schedule, volumes, restart policy
 order: 3
 ---
 
@@ -111,13 +111,16 @@ against the live hostname, `https://news.dtbao.org/news.db` and
 
 ### The tunnel
 
-`news.dtbao.org` is carried by a dedicated Cloudflare Tunnel named `news`
-(`94fedb96-98c6-4683-8ae5-6addda3d9c9e`), whose connector runs **as a container
-in this compose project**:
+The published hostname is carried by a dedicated Cloudflare Tunnel whose
+connector runs **as a container in this compose project**. Nothing in the
+repository names either the tunnel or the hostname - that is deliberate, and it
+is what lets a second deployment use these files unchanged:
 
 | Piece | Where | Committed |
 |-------|-------|-----------|
-| Ingress: `news.dtbao.org` -> `http://caddy:8080`, else `http_status:404` | `docker/cloudflared.yml` | yes - a tunnel id is not a secret |
+| Ingress: one catch-all -> `http://caddy:8080` | `docker/cloudflared.yml` | yes - it names no deployment |
+| Tunnel id | `NEWS_RADAR_TUNNEL_ID` in `.env`, passed as the argument to `run` | no |
+| Hostname | Cloudflare DNS, put there by `cloudflared tunnel route dns` | no |
 | Connector credentials | `docker/tunnel-credentials.json`, mounted at `/etc/cloudflared/creds.json` | **no** - gitignored |
 | The service itself | `docker/docker-compose.yml`, `profiles: ["tunnel"]` | yes |
 
@@ -198,6 +201,7 @@ nothing outside the process will kill it.
 | `NEWS_RADAR_CONFIG` | compose, default `/app/config/config.yaml` | `config.py` |
 | `NEWS_RADAR_HOME` | `.env`, default `..` | compose only - the three data bind mounts |
 | `NEWS_RADAR_VERSION` | `.env`, default `latest` | compose only - which published image to run |
+| `NEWS_RADAR_TUNNEL_ID` | `.env`, no default | compose only - the argument to `cloudflared tunnel run`. Unset with the `tunnel` profile on means the connector has no tunnel and the site answers Cloudflare `1033` |
 | `NEWS_RADAR_HTTP_PORT` | `.env`, default `8088` | compose only - caddy's host port |
 | `WATCHTOWER_POLL_INTERVAL` | `.env`, default `86400` | compose only - watchtower, when its profile is on |
 

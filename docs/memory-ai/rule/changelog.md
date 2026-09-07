@@ -7,7 +7,7 @@ updated: 2026-09-05
 source: CHANGELOG.md, scripts/release.py, tests/test_release.py
 confidence: confirmed
 keywords: changelog, CHANGELOG.md, Unreleased, technical change, release notes, promote_unreleased, unreleased_body, entry, scope
-order: 4
+order: 5
 ---
 
 # What Goes in the Changelog

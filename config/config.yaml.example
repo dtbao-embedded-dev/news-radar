@@ -63,10 +63,18 @@ feeds:
     url: https://vnexpress.net/rss/so-hoa.rss
     enabled: true
     rank_weight: 0.7
+  # Off, and the reason is the feed's own, not a judgement on the site: GenK
+  # ships **no pubDate at all** - 0 of 61 entries carried one on 2026-09-07.
+  # `published_at = None` scores 0 for freshness, never a guess, so this source
+  # tops out at `0.5 x 0.6 = 0.30` while the lowest group cut measured in a full
+  # cycle was 0.40. It matched 11 items a cycle and placed none of them. Raising
+  # rank_weight to compensate would be the guess `rank.py` refuses to make, in a
+  # different key. Turn it back on the day GenK dates its entries - the other two
+  # Vietnamese feeds do (`vnexpress_sohoa` 60/60, `tinhte` 20/20) and both place.
   - id: genk
     name: GenK
     url: https://genk.vn/rss/home.rss
-    enabled: true
+    enabled: false
     rank_weight: 0.6
   - id: tinhte
     name: Tinh te

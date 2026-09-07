@@ -411,6 +411,13 @@ if example.is_file():
     check("the template ships the full source list",
           len(shipped.get("feeds") or []) == 13,
           "{} feed(s)".format(len(shipped.get("feeds") or [])))
+    # Kept in the list and switched off, so the reason travels with it: GenK
+    # ships no pubDate, which caps it at 0.5 x 0.6 = 0.30 against a lowest
+    # measured group cut of 0.40. Deleting the entry would lose the comment
+    # explaining why, and someone would add the feed back next year.
+    check("genk ships disabled - it dates nothing, so it can never place",
+          [f.get("enabled") for f in shipped.get("feeds") or []
+           if f.get("id") == "genk"] == [False])
     check("gh_trending is the one feed that reads its excerpt",
           [f.get("id") for f in shipped.get("feeds") or []
            if f.get("match_excerpt")] == ["gh_trending"],

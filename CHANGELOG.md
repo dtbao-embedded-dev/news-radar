@@ -75,6 +75,17 @@ one makes the file and the tags disagree.
 
 ### Changed
 
+- **sources**: `genk` ships **disabled**. It carries no `pubDate` - 0 of 61
+  entries had one on 2026-09-07 - and `published_at = None` scores 0 for
+  freshness by design, so the source tops out at `0.5 x 0.6 = 0.30` against a
+  lowest measured group cut of 0.40. It matched 11 items a cycle and placed
+  none: disabling it removed 61 fetched items and left the shortlist **byte for
+  byte the same**, 68 stories across the same seven groups. The entry stays in
+  the file, switched off, so the reason travels with it; raising `rank_weight`
+  to compensate was rejected as the same guess `rank.py` refuses to make about a
+  missing date. `vnexpress_sohoa` and `tinhte` are unaffected - both date every
+  entry and both place.
+
 - **schedule**: the shipped `config.yaml.example` now polls every **10
   minutes** instead of 30. The code default stays 30, so a config that never
   mentions `schedule` keeps the half-hour it already had - an upgrade must not

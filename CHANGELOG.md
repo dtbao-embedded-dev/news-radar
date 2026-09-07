@@ -16,15 +16,15 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
-### Breaking Changes
+### Changed
 
 - **keywords**: the `RTOS` group is **removed** from
   `config/frequency_words.txt.example`, and five model groups take its place -
-  `Claude`, `ChatGPT`, `GLM`, `Qwen`, `DeepSeek`, `@6` apiece. A deployment
-  keeps its own `config/frequency_words.txt` untouched (it is gitignored), so
-  nothing changes for an existing radar until that file is edited by hand.
-
-### Changed
+  `Claude`, `ChatGPT`, `GLM`, `Qwen`, `DeepSeek`, `@6` apiece. Not a breaking
+  change: a deployment's own `config/frequency_words.txt` is gitignored and
+  untouched, so an existing radar keeps hunting exactly what it hunted
+  yesterday. Only a fresh install, or a deployment that copies the new template
+  by hand, sees the difference.
 
 - **sources**: the `google_news` (hl=vi) template ships **disabled**. It pays a
   request per keyword group, and the keyword file now has eleven of them: over

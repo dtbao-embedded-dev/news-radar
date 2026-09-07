@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.5 - 2026-09-07
+
 ### Fixes
 
 - **release**: `release.py` tags the `chore(release): vX.Y.Z` commit instead of

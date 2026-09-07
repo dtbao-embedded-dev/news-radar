@@ -90,8 +90,21 @@ for name, idx in [("add", i_add), ("commit", i_commit), ("switch developing", i_
 check("stage before commit", i_add < i_commit)
 check("commit lands on the release branch, before any switch", i_commit < i_dev)
 check("developing is merged before main is touched", i_dev < i_main)
-check("tag is created while on main", i_main < i_tag)
+# Last, so a merge that broke halfway leaves no tag behind: the preflight
+# refuses a tag that exists, and a retry would then fail for a release that
+# never happened.
+check("the tag is the last thing created, after both merges", i_main < i_tag)
 check("chain returns to the release branch after tagging", i_tag < i_back)
+
+# The bug this pins, live from v0.1.0 through v0.2.4: `git tag` with no target
+# tags HEAD, which at this point in the chain is main's merge commit - so the
+# tag named a commit whose subject is "chore(release): merge developing into
+# main". The tree is identical either way, which is why it went unnoticed.
+tag_cmd = cmds[i_tag]
+check("the tag names a target rather than tagging HEAD",
+      len(tag_cmd) > 6, "got: {}".format(tag_cmd))
+check("...and the target is the release branch, whose tip is the release commit",
+      tag_cmd[-1] == "release/v0.1", "got: {}".format(tag_cmd))
 check("push is last", i_push == max(i_add, i_commit, i_dev, i_main, i_tag, i_back, i_push)
       or i_push > i_back)
 
@@ -106,6 +119,11 @@ check("push targets the configured remote", all("origin" in p for p in pushes))
 check("all three branches are pushed",
       all(any(b in p for p in pushes) for b in ["release/v0.1", "developing", "main"]))
 check("the tag is pushed", any("v0.1.0" in p for p in pushes))
+
+alt_tag = [c for c in release.release_commands("v9.9.9", "release/v9.9", "upstream")
+           if c[:2] == ["git", "tag"]][0]
+check("the tag target follows the release branch name",
+      alt_tag[-1] == "release/v9.9", "got: {}".format(alt_tag))
 
 alt = release.release_commands("v9.9.9", "release/v9.9", "upstream")
 check("remote is honoured", all("upstream" in c for c in alt if c[:2] == ["git", "push"]))

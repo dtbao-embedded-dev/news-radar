@@ -16,6 +16,20 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Features
+
+- **report**: new `report.html` key turns the HTML report off, and the shipped
+  `config.yaml.example` now ships it **off**. Off does not merely stop writing
+  the page: the next cycle **deletes** `output/index.html` and
+  `output/days/*.html`, so the web server has nothing left to serve. A frozen
+  page is worse than none - a reader cannot tell yesterday's report from a
+  working one. `output/news.db` and the backups are never touched, a `days/`
+  holding anything else is left alone, and a cycle that finds nothing to remove
+  logs nothing. The code default is `true`, so an upgrade that never mentions
+  the key keeps publishing exactly as before. `scripts/setup.py` and the README
+  stop sending a fresh install to `http://localhost:8088` for a page that is
+  not there.
+
 ### Changed
 
 - **schedule**: the shipped `config.yaml.example` now polls every **10

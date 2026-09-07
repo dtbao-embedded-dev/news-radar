@@ -79,9 +79,10 @@ For the homelab as it stands today: a detached checkout at `~/news-radar` with
 
 Cut and publish a version first - the image has to exist before anything can
 pull it. `python scripts/release.py <version>` from a development checkout, then
-watch the `Publish image` workflow go green, **then make the package public** -
-a workflow-published GHCR package is private even from a public repo, see
-[[setup-homelab]] - and confirm from the homelab:
+watch the `Publish image` workflow go green, then confirm from the homelab
+that the image is pullable - it came out public and needed no login the first
+time, but `denied` here means the package's visibility needs one click, see
+[[setup-homelab]]:
 
 ```
 docker pull ghcr.io/dtbao-embedded-dev/news-radar:<version>

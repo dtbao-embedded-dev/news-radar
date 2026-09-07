@@ -16,6 +16,22 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.4 - 2026-09-07
+
+### Fixes
+
+- **deploy**: the `watchtower` service runs the maintained fork,
+  `ghcr.io/nicholas-fedor/watchtower:1.22.0`, instead of
+  `containrrr/watchtower:1.7.1`. The latter is unmaintained and its Docker
+  client speaks API 1.25, which a modern daemon refuses - measured on Docker
+  29.6.0, it crash-looped 8 times on `client version 1.25 is too old. Minimum
+  supported API version is 1.40` before it was stopped. The fork reports
+  `using Docker API v1.55`, takes the same `WATCHTOWER_*` variables, and
+  `WATCHTOWER_LABEL_ENABLE` still narrows it to one container (`scanned=1` of
+  three). `tests/test_deploy.py` pins the fork and pins that the tag is exact,
+  which is all a YAML check can do - that an image can talk to a daemon is not
+  something a test file can know.
+
 ## v0.2.3 - 2026-09-07
 
 ### Breaking Changes

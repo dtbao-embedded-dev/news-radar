@@ -87,6 +87,28 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **v0.2.3 is cut, published and deployed** (2026-09-07) - the first release to
+  go out as an image, and the first time the whole pipeline ran for real.
+  `Release`, `Test` and `Publish image` all green on the tag; the homelab pulled
+  it with no login; phase 1 of the migration left `config/config.yaml`,
+  `config/frequency_words.txt` and `output/news.db` byte-identical. The message
+  line no longer carries the source id - that fix had been sitting unreleased on
+  the branch since 2026-09-06, which is the whole reason the deploy happened.
+- **`containrrr/watchtower` cannot talk to Docker 29, and only a real run said
+  so.** It pins Docker API 1.25; the daemon refuses below 1.40. The container
+  crash-looped 8 times on `client version 1.25 is too old` immediately after the
+  migration. Replaced with the maintained fork,
+  `ghcr.io/nicholas-fedor/watchtower:1.22.0`, which reports API v1.55, takes the
+  same `WATCHTOWER_*` variables, and still scans exactly one container. **A
+  compose file that parses, renders and passes every YAML assertion can still
+  ship an image that cannot start** - `tests/test_deploy.py` now pins the fork
+  and the exact tag, which is the most a test file can do about this class of
+  bug.
+- **A colon count is not a tag check.** The first version of that test asserted
+  two colons in the image reference, because `containrrr/watchtower:1.7.1` has
+  one and I extrapolated wrongly to a registry host - `ghcr.io` has no port. It
+  reads the last path segment now.
+
 - **The AI summary is live on OpenRouter** (2026-09-07), and P6-4's open
   question is answered: two sentences a topic reads as a summary, not a
   horoscope. `minimax/minimax-m3:free` was picked by POSTing today's real
@@ -189,9 +211,12 @@ starts when this branch merges.
 - **Docker creates a missing bind-mount path, as root.** A typo in
   `NEWS_RADAR_HOME` therefore leaves three root-owned directories the operator
   cannot `rm`. Found because the verification script's own cleanup failed on it.
-- **A GHCR package inherits the repo's access permissions but not its
-  visibility**, so it is private even from a public repo. One manual step, and
-  the migration cannot start without it.
+- **~~A GHCR package is private even from a public repo~~ - withdrawn.** Read
+  from a documentation summary, never tested, and wrong here: the first real
+  publish pulled from a machine with no docker credentials, and an anonymous
+  registry token fetched the manifest `200`. Second time in two days that a
+  "finding" turned out to be something I had only read - see
+  [[verify-closing-claims]] in spirit.
 - **The image and data-layout work landed in seven commits on `release/v0.2`**
   (2026-09-06): `docker/docker-compose.yml` (the four data mounts, the `image:`
   line, the watchtower service and the label), `docker/.env.example`
@@ -389,14 +414,12 @@ loader and the design bank - see `progress.md`.
    `--profile autoupdate`, not a nice-to-have: a release that fails to start is
    reported by nothing at all (see progress.md, Known issues). Auto-update
    without it means a bad release goes unnoticed until somebody opens the page.
-2. **Cut the version, watch the image publish, then make the package public.**
-   `python scripts/release.py 0.2.3`. Two workflows fire on that tag now: the
-   existing `Release`, and `Publish image`. **The package will be private** -
-   confirmed, a workflow-published package inherits the repo's access
-   permissions but not its visibility. Switch it to Public under the
-   repository's Packages, then prove it from the homelab:
-   `docker pull ghcr.io/dtbao-embedded-dev/news-radar:0.2.3`. Nothing can be
-   migrated until that command works.
+2. ~~**Cut the version, publish the image, migrate the homelab.**~~ **Done
+   2026-09-07.** v0.2.3 is cut, `Publish image` went green on its first run, the
+   package came out public, and phase 1 of the migration ran with all three data
+   files byte-identical. The homelab runs `news-radar 0.2.3` from
+   `ghcr.io/dtbao-embedded-dev/news-radar:latest`, watchtower is scheduled, and
+   `--check` reports the config up to date.
 3. **Migrate the homelab, phase 1 only.** `## Migrating an existing checkout` in
    [[updating-homelab]]: `rm -rf .git .github`, re-fetch the compose file, `pull`,
    then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays

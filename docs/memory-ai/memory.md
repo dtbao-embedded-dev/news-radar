@@ -170,7 +170,7 @@ back to the code and to a real docker daemon rather than left as prose:
 | A wrong `NEWS_RADAR_HOME` "comes up clean, publishes no history" | **false** - it crash-loops on the missing config, and leaves root-owned directories |
 | A bad release is reported by P6 within two cycles | **false for the shape that matters** - a container that will not start never builds `ops.Health` |
 | Pinning `NEWS_RADAR_VERSION` alone loses to the next poll | **false** - watchtower follows the tag the container runs, and a version tag does not move |
-| *(not previously claimed)* the GHCR package is public | **false** - private by default, even from a public repo |
+| *(not previously claimed)* the GHCR package is public | **the claim was wrong, and so was its correction.** This row read "false - private by default" for a day, taken from a search summary. The first real publish came out public: pulled from a machine with no docker credentials at all, and an anonymous token fetched the manifest `200` |
 
 Nine statements across `.gitignore`, `docker/.env.example`,
 `docker/docker-compose.yml`, `CHANGELOG.md` and five bank docs were corrected as
@@ -664,21 +664,27 @@ the ops layer and the summary - and the whole thing is reachable at
   dead-man's switch, and `ops.heartbeat_url` still ships empty. Arm a monitor
   before `--profile autoupdate`, or accept that a bad release goes unnoticed
   until somebody opens the page.
-- **A new GHCR package is private, even from a public repo.** A package
-  published by a workflow inherits the repository's access permissions but
-  **not** its visibility, so the first `docker compose pull` on the homelab will
-  answer `denied` until the package is switched to Public by hand. One-time, and
-  a step the migration cannot skip.
+- **~~A new GHCR package is private~~ - it was not.** Withdrawn 2026-09-07 on
+  the first real publish: the homelab pulled `:0.2.3` with no
+  `~/.docker/config.json`, and an anonymous registry token fetched the manifest
+  `200`. The claim came from a documentation summary that was never tested. Kept
+  here rather than deleted because the shape is the lesson: a "finding" that was
+  only ever read is a hypothesis.
 - **A wrong `NEWS_RADAR_HOME` leaves root-owned directories behind.** Docker
   creates a bind-mount path that does not exist, as `root`. The container then
   crash-loops on the missing config - which is the loud, easy half - but the
   three empty directories on the host cannot be removed without `sudo`. Found
   while verifying, when the cleanup step of the test itself failed on it.
-- **Nothing published to GHCR yet, so nothing can be pulled.** The workflow
-  exists and is tested as far as a workflow can be tested without running; the
-  first real evidence is the `Publish image` run going green after the next
-  `release.py`. Until then `docker compose pull` has nothing to fetch, and the
-  homelab migration cannot start. Cut the version first, in that order.
+- **v0.2.3 is published and deployed** (2026-09-07). `Publish image` went green
+  on its first ever run, `ghcr.io/dtbao-embedded-dev/news-radar:0.2.3` pulled
+  from the homelab with no login, and the migration's phase 1 ran: the checkout
+  is no longer one (`.git` and `.github` removed), the compose file came from the
+  tag, the last two tunnel files are gone, and **`config/config.yaml`,
+  `config/frequency_words.txt` and `output/news.db` came out byte-identical by
+  `sha256sum`**. `news-radar 0.2.3 starting`, and
+  `docker compose run --rm news-radar --check` answered `config is up to date
+  with /app/config-templates/config.yaml.example` - which is the image branch of
+  `template_path()` proven on a real image rather than pinned by a test.
 - **v0.2.2 is cut and pushed but not deployed.** The homelab still runs
   `v0.2.1`. The tunnel in front of it is gone as of 2026-09-07, but **its
   compose file still defines the `cloudflared` service** - only the container
@@ -856,6 +862,28 @@ starts when this branch merges.
 
 ## Recent changes
 
+- **v0.2.3 is cut, published and deployed** (2026-09-07) - the first release to
+  go out as an image, and the first time the whole pipeline ran for real.
+  `Release`, `Test` and `Publish image` all green on the tag; the homelab pulled
+  it with no login; phase 1 of the migration left `config/config.yaml`,
+  `config/frequency_words.txt` and `output/news.db` byte-identical. The message
+  line no longer carries the source id - that fix had been sitting unreleased on
+  the branch since 2026-09-06, which is the whole reason the deploy happened.
+- **`containrrr/watchtower` cannot talk to Docker 29, and only a real run said
+  so.** It pins Docker API 1.25; the daemon refuses below 1.40. The container
+  crash-looped 8 times on `client version 1.25 is too old` immediately after the
+  migration. Replaced with the maintained fork,
+  `ghcr.io/nicholas-fedor/watchtower:1.22.0`, which reports API v1.55, takes the
+  same `WATCHTOWER_*` variables, and still scans exactly one container. **A
+  compose file that parses, renders and passes every YAML assertion can still
+  ship an image that cannot start** - `tests/test_deploy.py` now pins the fork
+  and the exact tag, which is the most a test file can do about this class of
+  bug.
+- **A colon count is not a tag check.** The first version of that test asserted
+  two colons in the image reference, because `containrrr/watchtower:1.7.1` has
+  one and I extrapolated wrongly to a registry host - `ghcr.io` has no port. It
+  reads the last path segment now.
+
 - **The AI summary is live on OpenRouter** (2026-09-07), and P6-4's open
   question is answered: two sentences a topic reads as a summary, not a
   horoscope. `minimax/minimax-m3:free` was picked by POSTing today's real
@@ -958,9 +986,12 @@ starts when this branch merges.
 - **Docker creates a missing bind-mount path, as root.** A typo in
   `NEWS_RADAR_HOME` therefore leaves three root-owned directories the operator
   cannot `rm`. Found because the verification script's own cleanup failed on it.
-- **A GHCR package inherits the repo's access permissions but not its
-  visibility**, so it is private even from a public repo. One manual step, and
-  the migration cannot start without it.
+- **~~A GHCR package is private even from a public repo~~ - withdrawn.** Read
+  from a documentation summary, never tested, and wrong here: the first real
+  publish pulled from a machine with no docker credentials, and an anonymous
+  registry token fetched the manifest `200`. Second time in two days that a
+  "finding" turned out to be something I had only read - see
+  [[verify-closing-claims]] in spirit.
 - **The image and data-layout work landed in seven commits on `release/v0.2`**
   (2026-09-06): `docker/docker-compose.yml` (the four data mounts, the `image:`
   line, the watchtower service and the label), `docker/.env.example`
@@ -1158,14 +1189,12 @@ loader and the design bank - see `progress.md`.
    `--profile autoupdate`, not a nice-to-have: a release that fails to start is
    reported by nothing at all (see progress.md, Known issues). Auto-update
    without it means a bad release goes unnoticed until somebody opens the page.
-2. **Cut the version, watch the image publish, then make the package public.**
-   `python scripts/release.py 0.2.3`. Two workflows fire on that tag now: the
-   existing `Release`, and `Publish image`. **The package will be private** -
-   confirmed, a workflow-published package inherits the repo's access
-   permissions but not its visibility. Switch it to Public under the
-   repository's Packages, then prove it from the homelab:
-   `docker pull ghcr.io/dtbao-embedded-dev/news-radar:0.2.3`. Nothing can be
-   migrated until that command works.
+2. ~~**Cut the version, publish the image, migrate the homelab.**~~ **Done
+   2026-09-07.** v0.2.3 is cut, `Publish image` went green on its first run, the
+   package came out public, and phase 1 of the migration ran with all three data
+   files byte-identical. The homelab runs `news-radar 0.2.3` from
+   `ghcr.io/dtbao-embedded-dev/news-radar:latest`, watchtower is scheduled, and
+   `--check` reports the config up to date.
 3. **Migrate the homelab, phase 1 only.** `## Migrating an existing checkout` in
    [[updating-homelab]]: `rm -rf .git .github`, re-fetch the compose file, `pull`,
    then `up -d` with both profiles. **No data moves and `NEWS_RADAR_HOME` stays
@@ -3815,13 +3844,18 @@ docker compose run --rm news-radar --check
 **The report is now reachable on `http://<host>:8088` and nowhere else.** There
 is no tunnel and no reverse proxy in this stack - see the section below.
 
-**The GHCR package is private until somebody makes it public.** A package
-published by a workflow inherits the repository's *access permissions* but
-**not** its visibility, so a new one is private even from a public repo and the
-`pull` above answers `denied`. Fix it once, on the package's page under the
-repository's **Packages** - Package settings - Change visibility - Public. The
-alternative is `docker login ghcr.io` on the homelab with a read:packages token,
-which is a credential on the deployment for no benefit.
+**The GHCR package came out public, and no login was needed.** This file used
+to say the opposite - that a workflow-published package is private and the
+`pull` would answer `denied` - on the strength of a documentation summary rather
+than a test. Measured on the first real publish: the homelab pulled
+`:0.2.3` with **no `~/.docker/config.json` at all**, and an anonymous registry
+token fetched the manifest with `HTTP 200`.
+
+If a future publish *is* private, the symptom is `denied` on `pull` and the fix
+is one click - the package's page under the repository's **Packages**, Package
+settings, Change visibility, Public. Prefer that to
+`docker login ghcr.io` with a read:packages token, which puts a credential on
+the deployment for no benefit.
 
 **`pull` first, always.** The compose file carries `image:` and `build:` both,
 and `up` **does not fall back to pulling** - measured, it goes straight to the
@@ -3989,9 +4023,10 @@ For the homelab as it stands today: a detached checkout at `~/news-radar` with
 
 Cut and publish a version first - the image has to exist before anything can
 pull it. `python scripts/release.py <version>` from a development checkout, then
-watch the `Publish image` workflow go green, **then make the package public** -
-a workflow-published GHCR package is private even from a public repo, see
-[[setup-homelab]] - and confirm from the homelab:
+watch the `Publish image` workflow go green, then confirm from the homelab
+that the image is pullable - it came out public and needed no login the first
+time, but `denied` here means the package's visibility needs one click, see
+[[setup-homelab]]:
 
 ```
 docker pull ghcr.io/dtbao-embedded-dev/news-radar:<version>

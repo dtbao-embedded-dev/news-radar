@@ -678,19 +678,38 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **A story in two groups is one message line now, but still two page
+  entries** (2026-09-07, unreleased). `notify.pick()` collapses it; the page
+  does not, and its per-group counts still count it twice. That is deliberate -
+  a page is browsed by topic - but it means the page's "78 story(ies)" and the
+  number of distinct stories are not the same number, and nothing on the page
+  says so.
 - **The OpenRouter key is on the free tier, so the model can 429 at any time.**
   `is_free_tier: true`, no credits, and only `:free` models resolve at all -
   a paid model id would answer `402`. A rate-limited cycle is already the
   designed failure mode (`summarize()` returns `None`, one WARNING, the page is
   written without the block, the cycle still counts as healthy), so nothing
   breaks - but the summary is best-effort until the account has credit.
-- **The `RTOS` keyword group is polluted by Indian transport offices.** `RTOS`
-  matches `RTOs` after folding, so three of the group's five top stories on
-  2026-09-07 were about Regional Transport Offices and e-rickshaw enforcement.
-  The AI summary routed around it by omitting the topic; the page does not. The
-  fix is a case-sensitive regex in `frequency_words.txt` - a `/RTOS/` term runs
-  against the **original** title, not the folded one - but that is a local file
-  on the deployment, so it is an operator edit rather than a release.
+- **~~The `RTOS` keyword group is polluted by Indian transport offices~~ -
+  fixed, unreleased.** Kept here because the *first* fix this file recorded was
+  wrong, and the shape of that mistake is the lesson: it was read, not run.
+  Adding `/RTOS/` beside the plain term changes nothing, because
+  `filter.group_matches()` ORs plain terms with regexes - **a regex can only
+  ever widen a group, never narrow it**. Proven against the seven real titles:
+  plain term alone keeps 3 of 3 noise, plain term plus `/RTOS/` keeps 3 of 3.
+
+  The real defect was that `group.primary` did two jobs - the string every
+  search template queries *and* a loose local match term - so a term could not
+  be searched for without also being matched loosely. `keywords._finish()` now
+  accepts a group with no plain term when it has a regex and a `=> Label`, and
+  queries the label. The shipped group became three word-boundary regexes with
+  the query still `RTOS`: **0 of 3 noise kept, 4 of 4 real stories kept**,
+  end to end through `filter.select()` on the real titles.
+
+  `config/frequency_words.txt` is a local file on the deployment, so the
+  homelab needs the same edit by hand after the release lands - the code change
+  only makes it expressible.
+
 - **Auto-update has no safety net, and this is the one to weigh before turning
   it on.** A release whose *cycles* fail is reported - `ops.Health` sends one
   message on the second consecutive failure. A release that **will not start**

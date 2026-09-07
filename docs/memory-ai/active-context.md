@@ -9,31 +9,32 @@ updated: 2026-09-07
 
 ## Current focus
 
-**The summary moved from the topic to the story (2026-09-07, unreleased on
-`release/v0.2`).** The day used to be described twice: a paragraph per keyword
-group at the top of the page, the same paragraphs as one message a local day,
-and then the list of links the reader was going to read anyway. It is now one
-sentence under each story, in the same position on the page and in both
-channels, and there is no separate summary message at all.
+**Search quality, reviewed against TrendRadar and measured (2026-09-07,
+unreleased after v0.2.5).** The search *mechanics* came out clean - every claim
+in `config.yaml`'s comments was re-run and held: `when:7d` cuts the oldest hit
+from 2167 days to 6, `typoTolerance=false` cuts HN Algolia from 41,630 hits to
+246 and turns the top result from an Ask HN thread into an RTOS story, and the
+`hl=vi` template still returns 100 hits for the AI group and 0-1 for every
+other. One comment overstates: a quoted phrase is honoured by Google News
+(25 entries to 6) and is **inert on HN Algolia** (12,841 to 12,404, identical
+top four, `advancedSyntax=true` no different).
 
-Six changes, all unreleased: `NewsItem.excerpt` carries the feed's own
-`<description>` (parsed in `feeds.py`, thrown away until now); `items.excerpt`
-and `items.ai_summary` are schema **version 2**, with the project's first real
-migration in `open_db()`; `summarize.py` asks about a numbered batch of stories
-and parses the numbers back; `store.unsummarised()` / `save_summaries()` make it
-once per story rather than once per cycle; `render._summary()` and
-`section.summary` are gone, replaced by `p.gist` inside each `li.story`; and
-`ai.max_per_run` replaced `ai.max_per_topic` and `ai.notify_at_hour`.
+**Two real defects, both fixed and both unreleased.** A story matching two
+groups arrived twice in one Telegram message; `notify.pick()` now sends it once
+under the first group that claims it. And the keyword file could not express a
+narrow match at all - see [[progress]] for the RTOS case and the wrong fix that
+was on file for a day.
 
-**The cost shape is the point.** One completion per cycle, capped at
-`ai.max_per_run` new stories, and never re-asked - verified on a three-story
-smoke run with the cap at 2: one completion, then one, then zero.
+**TrendRadar's answer did not transfer directly, which was the useful part.**
+Its keyword file allows a regex-only group and carries regex flags, and its
+README teaches `\b` as the fix for exactly this class of false positive - but
+it has no search step at all, so it never needed a term to build a query URL.
+The mandatory-plain-term rule is news-radar's own, and taking the query from
+`=> Label` is news-radar's own way out.
 
-**What is not yet known:** whether a free model writes a *useful* Vietnamese
-sentence from a headline plus a feed teaser. The per-topic version was judged on
-a real run against OpenRouter; this one has only been run against a stub. The
-first homelab cycle after deploy is the evidence. Also unmeasured: how many more
-messages three-line stories make on Discord's 1900-character budget.
+**Next:** cut and deploy, then edit `config/frequency_words.txt` on the homelab
+by hand - the code change only makes the fix expressible, it does not apply it
+to a deployment's own file.
 
 **The tunnel is gone (2026-09-07).** The `cloudflared` service,
 `docker/cloudflared.yml`, `NEWS_RADAR_TUNNEL_ID` and the credentials-file

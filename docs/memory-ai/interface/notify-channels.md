@@ -33,7 +33,7 @@ with nothing installed and nothing configured.
 
 | Signature | Returns | Notes |
 |-----------|---------|-------|
-| `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order + the seen-set diff. Empty groups dropped |
+| `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order, the seen-set diff, and one appearance per story. Empty groups dropped |
 | `chunk(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. Every text under `limit` |
 | `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
 | `stamp(moment, tz)` | `str` | `published_at` as `TIME_FMT` (`%H:%M %d/%m`), or `NO_TIME` (`--`) |
@@ -43,12 +43,28 @@ with nothing installed and nothing configured.
 that one absurd title plus its link cannot on its own overflow the smaller of the
 two budgets and cost the story its message.
 
-**`pick()` does the two things that decide what a channel is even shown.**
+**`pick()` does the three things that decide what a channel is even shown.**
 `labels` is the group order the keyword file fixes - the same order the page
 renders in, because a mapping's own order would shuffle the sections between runs
 for no reason a reader could follow. `keys` is the seen-set answer: `None` sends
 everything (`report.mode: current`), while an **empty set** means everything has
 already gone out - not the same thing, and it must send nothing at all.
+
+**And a story goes out once, under the first group in `labels` that claims it.**
+The store is right to hold a row per (story, group) - see [[storage-layer]] -
+but a message is read top to bottom once, so the second copy is the reader
+scrolling past their own report. Reported from a real Telegram message on
+2026-09-07: one Nvidia/Hugging Face story matched both `AI` and `AI Repos` and
+arrived twice, identical headline, link, AI sentence and timestamp. Which group
+wins is the operator's call, made by ordering `frequency_words.txt`; there is no
+score tiebreak to reason about. The dedup runs **after** the seen-set diff, so a
+story the diff already excluded never consumes the slot its duplicate would use.
+
+**This is the one place a message deliberately diverges from the page.** The
+page is browsed by topic, so a story belonging to two topics still appears in
+both of its sections and both counts; only the message collapses it. Marking
+follows the message: the key enters `reported` once, so the copy dropped here is
+not owed a message next cycle either.
 
 **`chunk()` splits on a group boundary first and an item boundary second**, and a
 single story is never split across two messages: half a headline with no link is

@@ -16,6 +16,18 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Fixes
+
+- **release**: `release.py` tags the `chore(release): vX.Y.Z` commit instead of
+  `main`'s merge commit. `git tag` with no target tags `HEAD`, which at that
+  point in the chain is the merge - so every tag from `v0.1.0` to `v0.2.4`
+  names a commit whose subject is `chore(release): merge developing into main`.
+  Nothing broke, because the two commits have identical trees, but
+  `git describe`, the GitHub Release page and `git log --decorate` on the
+  release branch all named the merge. The tag is still created **last**, after
+  both merges, so a merge that fails halfway leaves no tag behind for the
+  preflight to refuse on the retry. Existing tags are not moved.
+
 ### Changed
 
 - **ai**: the summary is now **one sentence under each story** instead of one

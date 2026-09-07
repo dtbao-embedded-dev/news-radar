@@ -133,10 +133,14 @@ check_raises("a file with no group at all is rejected",
 
 # --- the committed file ---------------------------------------------------
 
-shipped = pathlib.Path(__file__).resolve().parent.parent / "config" / "frequency_words.txt"
+# The template, not the working copy. `config/frequency_words.txt` is a local
+# file a deployment is free to tune and is gitignored for exactly that reason,
+# so it is not in a CI checkout at all - `.example` is what ships.
+shipped = (pathlib.Path(__file__).resolve().parent.parent
+           / "config" / "frequency_words.txt.example")
 if shipped.is_file():
     sgroups, sfilter = mod.parse(shipped)
-    eq("config/frequency_words.txt parses into 6 groups", len(sgroups), 6)
+    eq("the shipped keyword template parses into 6 groups", len(sgroups), 6)
     eq("its primary terms are the ones the search templates will query",
        [g.primary for g in sgroups],
        ["ESP32", "firmware", "RTOS", "RISC-V", "artificial intelligence",
@@ -166,7 +170,8 @@ if shipped.is_file():
     check("...but not a Show HN with nothing to do with AI",
           not repos.regexes[0].search("Show HN: Md2pdf - Markdown to PDF"))
 else:
-    FAILURES.append("config/frequency_words.txt is missing from the checkout")
+    FAILURES.append(
+        "config/frequency_words.txt.example is missing from the checkout")
 
 
 # --------------------------------------------------------------------------

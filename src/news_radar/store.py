@@ -110,11 +110,30 @@ def from_db(text):
 
 
 def open_db(data_dir):
-    """Connect to `<data_dir>/news.db`, creating and migrating it as needed.
+    """Connect to `<data_dir>/news.db`. Creates a missing one; refuses a stale one.
 
     The directory is created too: on a fresh homelab `output/` does not exist
     until the first run, and failing there would cost the whole cycle for a
     `mkdir`.
+
+    Three versions are understood and the fourth case is the point of this
+    docstring:
+
+    - equal to `SCHEMA_VERSION` - open it.
+    - `0` - no file, or an empty one. Create the schema.
+    - higher - refuse. Another copy of this store is being written by a newer
+      build, and dropping columns it needs is not a recovery.
+    - **anything in between - refuse, loudly.** There is no migration code in
+      this project yet, and returning a connection to a store whose shape this
+      build does not match is how a query silently reads a column that means
+      something else now.
+
+    **Bumping `SCHEMA_VERSION` means writing the migration here**, in the branch
+    that currently raises. Until then that branch is unreachable - `1` is the
+    only version - and it exists so the day it becomes reachable is a loud one.
+    The cycle survives either way: every caller of this function is inside a
+    guard, so a refused store costs the page and the notifications, logs a
+    traceback, withholds the heartbeat ping and alerts after two cycles.
     """
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -138,7 +157,14 @@ def open_db(data_dir):
         conn.commit()
         log.info("created %s at schema version %d",
                  data_dir / DB_NAME, SCHEMA_VERSION)
-    return conn
+        return conn
+
+    conn.close()
+    raise StoreError(
+        "{} is at schema version {}, this build expects {} - and there is no "
+        "migration from {} to {}. Add one to open_db() before bumping "
+        "SCHEMA_VERSION".format(data_dir / DB_NAME, version, SCHEMA_VERSION,
+                                version, SCHEMA_VERSION))
 
 
 def start_run(conn, started_at):

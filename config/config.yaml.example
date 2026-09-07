@@ -138,9 +138,10 @@ ops:
   heartbeat_url: ""
 
   # Checked immediately before the ping. A non-200 withholds the ping and counts
-  # as a failed cycle - this is what notices the tunnel connector going away
-  # while the crawl itself keeps running perfectly.
-  #   site_url: https://news.dtbao.org/
+  # as a failed cycle - it is what notices the web server having stopped serving
+  # while the crawl itself keeps running perfectly. `caddy` resolves over the
+  # compose network, so this needs nothing published and no name outside.
+  #   site_url: http://caddy:8080/
   site_url: ""
 
   # Never under data_dir: that directory is served to the public web.

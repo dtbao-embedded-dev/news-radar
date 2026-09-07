@@ -3,10 +3,10 @@ title: Crawl CLI - python -m news_radar
 category: interface
 purpose: The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process.
 status: active
-updated: 2026-09-05
+updated: 2026-09-07
 source: src/news_radar/__main__.py, src/news_radar/ops.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile
 confidence: confirmed
-keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --config, --debug, entrypoint, schedule loop, SIGTERM, exit codes, crawl
+keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --check, --config, --debug, config drift, config-templates, missing_keys, template_path, entrypoint, schedule loop, SIGTERM, exit codes, crawl
 order: 4
 ---
 
@@ -16,20 +16,46 @@ order: 4
 > loop and nothing else; every stage it calls lives in its own module.
 
 ```
-python -m news_radar [--once] [--config PATH] [--debug]
+python -m news_radar [--once] [--check] [--config PATH] [--debug]
 ```
 
 | Flag | Effect |
 |------|--------|
 | *(none)* | Loop forever on `schedule.interval_minutes`, crawling immediately unless `schedule.run_on_start` is `false` |
 | `--once` | One cycle, then exit. This is the command a phase is verified with - P1 is done when it prints N raw items |
+| `--check` | Name every key the shipped template has and this config does not, then exit. Crawls nothing |
 | `--config PATH` | Config file to read. Default: `$NEWS_RADAR_CONFIG`, then `config/config.yaml` |
 | `--debug` | `DEBUG` logging. `advanced.debug: true` in the config does the same |
 
 | Exit code | Meaning |
 |-----------|---------|
-| `0` | The cycle ran, or the loop was stopped by a signal |
-| `1` | The configuration is unusable; every problem is listed, and nothing was started |
+| `0` | The cycle ran, the loop was stopped by a signal, or `--check` found no drift |
+| `1` | The configuration is unusable; every problem is listed, and nothing was started. Also `--check` finding at least one key, or no template in the build |
+
+**`--check` is the drift check that survives losing the checkout.**
+`scripts/setup.py --check` answers the same question, but production runs the
+published image and keeps no `scripts/` - so the guarantee had to travel into
+the image with the code. From a deployment directory:
+
+```
+docker compose run --rm news-radar --check
+```
+
+It reads `config.yaml.example` from `/app/config-templates/` (baked in by the
+`Dockerfile`, deliberately **not** under `/app/config`, which the deployment's
+own directory is mounted over), falling back to `config/config.yaml.example` on
+a checkout. The rules match `setup.py`'s exactly: missing keys only, never a
+differing value - `ops.site_url` and the `ai.*` endpoint are meant to differ on
+a real deployment - and never a key inside a list item, because `feeds[].id`
+differs per deployment by design.
+
+The two implementations stay separate on purpose. `setup.py` runs before
+anything is installed and may not `import yaml`, so it scans indentation; the
+image has PyYAML and parses properly. See [[cli-scripts]].
+
+It runs **after** `load()`, so a config that cannot start at all is reported by
+`load()` first - that is the louder finding, and `--check` never reaches a
+config the crawl would refuse anyway.
 
 ## Behaviour that matters
 
@@ -61,6 +87,28 @@ The list then drives two things, in this order: an empty list licenses the
 heartbeat ping, and `ops.Health` turns two non-empty ones in a row into one
 alert. See [[notify-channels]] for the alert itself and [[config-and-env]] for
 `ops.*`.
+
+**A cycle that fails and a process that will not start are reported completely
+differently, and only one of them is reported at all.** `health = ops.Health()`
+is built inside `run()`, so it exists once per process and its counter dies with
+that process. A config the loader refuses never gets there: `main()` returns `1`
+from the `ConfigError` branch, before `run()` is called. With
+`restart: unless-stopped` in front of it, every restart is a fresh process with
+a fresh counter, so **two consecutive failures never accumulate and nothing is
+ever sent**.
+
+| Failure | `ops.Health` | What reaches a phone |
+|---------|--------------|----------------------|
+| A cycle raises or reports problems | counts up, alerts at `ALERT_AFTER` | one message on the second cycle, one on recovery |
+| The config cannot load at all | never constructed | **nothing** |
+
+Measured against a container whose config directory was empty: 9 restarts in 45
+seconds, `news-radar <version> starting` logged **zero** times, `consecutive
+failed cycle(s)` logged **zero** times. Loud in `docker logs`, silent everywhere
+else. The dead-man's switch is what is meant to cover this shape - `heartbeat()`
+is not reached either, so the ping simply stops - which is why
+`ops.heartbeat_url` being empty matters more once auto-update is on. See
+[[deployment-homelab]].
 
 **Logging goes to stdout, unbuffered.** The image sets `PYTHONUNBUFFERED=1`; a
 service that logs once every 30 minutes would otherwise sit in a block buffer and
@@ -144,7 +192,7 @@ still attempted.
 only then. Measured on 2026-09-05:
 
 ```
-INFO  heartbeat: https://news.dtbao.org/ answered
+INFO  heartbeat: http://caddy:8080/ answered
 INFO  heartbeat: pinged
 ```
 

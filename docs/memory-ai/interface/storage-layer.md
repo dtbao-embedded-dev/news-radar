@@ -3,10 +3,10 @@ title: Storage and Render Layer Contracts
 category: interface
 purpose: Every public signature of the store and render modules - what each writes, what the page is built from, and the row shape that travels between them.
 status: active
-updated: 2026-09-05
+updated: 2026-09-06
 source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py
 confidence: confirmed
-keywords: backup, restore, open_db, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot
+keywords: backup, restore, open_db, migration, schema version, user_version, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot
 order: 7
 ---
 
@@ -24,7 +24,7 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 
 | Signature | Returns | Notes |
 |-----------|---------|-------|
-| `open_db(data_dir)` | `sqlite3.Connection` | Creates `data_dir`, connects to `news.db`, migrates on `user_version`. `row_factory` is `sqlite3.Row` |
+| `open_db(data_dir)` | `sqlite3.Connection` | Creates `data_dir`, connects to `news.db`, dispatches on `user_version`. `row_factory` is `sqlite3.Row` |
 | `start_run(conn, started_at)` | `run_id: str` | Opens the `runs` row. Id is the UTC start as `%Y%m%dT%H%M%SZ`, with a `-2`, `-3`… suffix if that second is taken |
 | `finish_run(conn, run_id, finished_at, items_fetched, items_matched, errors)` | `None` | Closes the row; `errors` is JSON-encoded as a list of pairs |
 | `save(conn, run_id, ranked, now)` | `int` | `{label: [Story]}` in, number of `matches` rows written out |
@@ -36,9 +36,25 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `prune(conn, data_dir, retention_days, now)` | `(rows, files)` | `retention_days <= 0` deletes nothing and returns `(0, 0)`. The shipped `config.yaml` sets `90`; the fallback for an **absent** key stays `0` |
 | `to_db(moment)` / `from_db(text)` | `str \| None` / `datetime \| None` | The one serialisation, both ways |
 
-`StoreError` is raised only when the file's `user_version` is **higher** than
-`SCHEMA_VERSION`: the store migrates forward and refuses to downgrade. A missing
-file is not an error - it is the first run.
+**`open_db()` understands four cases, and only two of them open the file.**
+
+| `user_version` | What happens |
+|----------------|--------------|
+| `== SCHEMA_VERSION` | Opened |
+| `0` | No file, or an empty one. The schema is created and the version stamped. Not an error - it is the first run |
+| `> SCHEMA_VERSION` | `StoreError`. Another copy of this store is written by a newer build, and dropping columns it needs is not a recovery |
+| anything in between | `StoreError`, naming both versions. **There is no migration code in this project yet** |
+
+The last row is currently unreachable - `SCHEMA_VERSION` is `1`, so there is no
+integer between `0` and it - and it exists so that the day it becomes reachable
+is a loud one. Until v0.2.3 that case fell through every branch and `open_db()`
+returned a connection to a store whose shape the build did not match, which is
+how a query silently reads a column that means something else now.
+
+**Bumping `SCHEMA_VERSION` means writing the migration in that branch**, in the
+same commit. The cycle survives a refusal either way: every caller is inside a
+guard, so a refused store costs the page and the notifications, logs a
+traceback, withholds the heartbeat ping, and alerts after two cycles.
 
 ### Tables
 
@@ -95,7 +111,7 @@ page does not earn a dependency.
 |-----------|---------|-------|
 | `local_tz(name)` | `tzinfo` | Never raises - see the fallback below |
 | `day_bounds(now, tz)` | `(start_utc, end_utc)` | The local day containing `now`, half-open, expressed in UTC |
-| `write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html` with identical bodies. `summary` is the AI summary, one topic per line; falsy renders no block at all, which is the shipped case |
+| `write(data_dir, labels, day_rows, meta, tz, threshold=5, summary=None)` | `[Path, Path]` | Writes `index.html` and `days/<local date>.html`. Same body except `nav.days`, which is written for the depth of the file carrying it - see [[news-item]]. `summary` is the AI summary, one topic per line; falsy renders no block at all, which is the shipped case |
 
 `labels` fixes the group order **and** is what keeps an empty group on the page:
 a keyword that has gone quiet looks identical to a keyword nobody wrote about,

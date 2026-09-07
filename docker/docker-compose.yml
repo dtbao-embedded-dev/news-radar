@@ -5,14 +5,24 @@
 # Secrets come from docker/.env, which Compose loads automatically because it
 # sits next to this file. scripts/setup.py creates it from .env.example.
 #
-# The `cloudflared` service is behind the `tunnel` profile, so the two lines
-# above start the crawl loop and the web server and nothing else. Publishing
-# news.dtbao.org is opt-in:
+# One file, two layouts, switched by NEWS_RADAR_HOME - the directory holding
+# config/, output/ and backups/, resolved relative to this file:
 #
-#   docker compose -f docker/docker-compose.yml --profile tunnel up -d
+#   unset (-> `..`)  a dev checkout: the repository root, exactly as before
+#   `.`              a deployment directory: compose file, .env, Caddyfile and
+#                    the data side by side, with no git anywhere near them
 #
-# scripts/setup.py adds that flag by itself once docker/tunnel-credentials.json
-# is in place.
+# That is the whole of "user data an update cannot reach": production keeps no
+# checkout, so there is no `git checkout` on that machine to delete anything.
+#
+# The report is served on the LAN and published nowhere. There is no tunnel and
+# no reverse proxy in this file: reaching it from outside is a decision for
+# whatever fronts it, made outside this project.
+#
+# The `watchtower` service is behind the `autoupdate` profile, so the two lines
+# above start the crawl loop and the web server and nothing else:
+#
+#   docker compose -f docker/docker-compose.yml --profile autoupdate up -d
 
 name: news-radar
 
@@ -20,11 +30,23 @@ services:
   # Fetch -> filter -> rank -> store -> render -> notify, on an internal loop.
   # Exposes no port: it talks out, nothing talks in.
   news-radar:
+    # Production runs this image; it never builds. `build:` is kept beside it so
+    # a dev checkout still compiles what it is editing - compose only builds
+    # when the image is absent locally, and on production `pull` has already put
+    # it there. The one footgun: `up -d` before `pull` on a deployment directory
+    # tries to build and dies on the missing Dockerfile. Pull first.
+    image: ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}
     build:
       context: ..
       dockerfile: Dockerfile
     container_name: news-radar
     restart: unless-stopped
+    # The only container watchtower is allowed to replace. caddy is `2-alpine`
+    # and cloudflared is pinned to an exact version - letting either upgrade
+    # itself would be an unreviewed change to the two things standing between
+    # the report and the public internet.
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
@@ -42,16 +64,17 @@ services:
       - 1.1.1.1
       - 8.8.8.8
     volumes:
-      - ../config:/app/config:ro
-      - ../output:/app/output
+      - "${NEWS_RADAR_HOME:-..}/config:/app/config:ro"
+      - "${NEWS_RADAR_HOME:-..}/output:/app/output"
       # Store backups, and deliberately NOT under output/. Caddy serves that
       # directory to the public web; a dated copy of the whole archive sitting
       # in it would be one Caddyfile line away from being downloadable. This
       # mount is on the crawl service only - caddy never sees the path at all.
-      - ../backups:/app/backups
+      - "${NEWS_RADAR_HOME:-..}/backups:/app/backups"
 
-  # Serves ../output as static files. Reached from outside through the
-  # existing homelab Cloudflare Tunnel, routed to http://caddy:8080.
+  # Serves the deployment's output/ as static files. The published host port is
+  # how anyone reaches it; nothing in this stack carries it further than the
+  # LAN.
   caddy:
     image: caddy:2-alpine
     container_name: news-radar-caddy
@@ -59,38 +82,58 @@ services:
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
     volumes:
+      # ./Caddyfile ships beside this compose file and is the same file in both
+      # layouts; output/ belongs to the deployment and follows NEWS_RADAR_HOME.
+      # Leaving this one behind is how the crawl publishes to one directory and
+      # the web server serves another - the site 404s while every log line in
+      # the crawl says success.
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ../output:/srv:ro
+      - "${NEWS_RADAR_HOME:-..}/output:/srv:ro"
       - caddy_data:/data
-    # Host port is for local debugging only - the Cloudflare Tunnel reaches
-    # caddy:8080 over the docker network and does not need a published port.
+    # This is now the only way in, so it is not "debugging only" any more.
     # 8088 rather than 8080 by choice: a port of our own does not have to be
     # renegotiated the next time something else on the host wants 8080.
     ports:
       - "${NEWS_RADAR_HTTP_PORT:-8088}:8080"
 
-  # Publishes caddy as https://news.dtbao.org through the `news` Cloudflare
-  # Tunnel. Outbound-only: nothing is port-forwarded and no inbound rule
-  # exists, which is the whole reason for a tunnel rather than a public port.
+  # Auto-update. Polls GHCR for a newer `:latest`, pulls it, and recreates the
+  # one container carrying the label above - the bind mounts come back exactly
+  # as they were, so nothing under NEWS_RADAR_HOME is touched by an update.
   #
-  # Behind a profile because the credentials file is not in the repo: a fresh
-  # clone would otherwise get a container crash-looping on a missing mount.
-  # Start it with --profile tunnel, or let scripts/setup.py notice the file.
-  cloudflared:
-    image: cloudflare/cloudflared:2026.8.3
-    container_name: news-radar-tunnel
-    profiles: ["tunnel"]
+  # Behind a profile for the same reason the tunnel is: on a dev checkout this
+  # would pull `:latest` straight over the image the developer just built.
+  # Production opts in:
+  #
+  #   docker compose --profile tunnel --profile autoupdate up -d
+  #
+  # Watchtower follows the tag the container was created from, not `:latest` in
+  # general - so pinning NEWS_RADAR_VERSION freezes a deployment even with this
+  # profile on, because a version tag does not move. Republishing that same tag
+  # is the one thing that would get past it.
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    container_name: news-radar-watchtower
+    profiles: ["autoupdate"]
     restart: unless-stopped
-    # No `tunnel run <name>`: the name would be looked up over the API, and
-    # this connector should need nothing but the two files it is handed.
-    command: tunnel --config /etc/cloudflared/config.yml run
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      # Without this watchtower updates every container on the host, including
+      # ones that have nothing to do with this stack.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # Drop the image the update replaced; otherwise every release leaves a
+      # dangling copy on a homelab disk nobody is watching.
+      WATCHTOWER_CLEANUP: "true"
+      # Seconds. Once a day: this project cuts releases by hand, and a tighter
+      # poll only spends registry requests.
+      WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-86400}
     volumes:
-      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
-      - ./tunnel-credentials.json:/etc/cloudflared/creds.json:ro
-    depends_on:
-      - caddy
+      # `:ro` here is not a sandbox and must not be read as one: a socket is a
+      # socket, and the flag only stops the socket *file* being replaced - every
+      # Docker API call still goes through, which is exactly how watchtower
+      # recreates a container. Access to this socket is root on the host. The
+      # real narrowing is WATCHTOWER_LABEL_ENABLE above, plus the profile that
+      # keeps this container from running anywhere it is not wanted.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
 volumes:
   caddy_data:

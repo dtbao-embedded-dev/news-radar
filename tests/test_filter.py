@@ -167,7 +167,10 @@ eq("the item itself comes back untouched",
 
 # --- the shipped keyword file ---------------------------------------------
 
-SHIPPED = pathlib.Path(__file__).resolve().parent.parent / "config" / "frequency_words.txt"
+# The template, not the working copy: `config/frequency_words.txt` is a local
+# file a deployment tunes and git ignores, so a CI checkout only has `.example`.
+SHIPPED = (pathlib.Path(__file__).resolve().parent.parent
+           / "config" / "frequency_words.txt.example")
 if SHIPPED.is_file():
     sgroups, sfilter = keywords.parse(SHIPPED)
     picked = mod.select([
@@ -196,7 +199,8 @@ if SHIPPED.is_file():
     check("an unrelated story is dropped",
           "Ranked: the best coffee in Hanoi" not in titles)
 else:
-    FAILURES.append("config/frequency_words.txt is missing from the checkout")
+    FAILURES.append(
+        "config/frequency_words.txt.example is missing from the checkout")
 
 
 # --------------------------------------------------------------------------

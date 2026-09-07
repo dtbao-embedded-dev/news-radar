@@ -3,10 +3,10 @@ title: Script CLIs - setup.py and release.py
 category: interface
 purpose: The command-line contract of the two standalone scripts, including exit codes and what each flag guarantees.
 status: active
-updated: 2026-09-05
+updated: 2026-09-07
 source: scripts/setup.py, scripts/release.py
 confidence: confirmed
-keywords: setup.py, release.py, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI
+keywords: setup.py, release.py, checkout only, missing_config_keys, template_keys, config drift, --dry-run, --yes, --force, --non-interactive, --remote, exit codes, CLI
 order: 2
 ---
 
@@ -22,10 +22,19 @@ order: 2
 python scripts/setup.py [--dry-run] [--force] [--non-interactive] [--check]
 ```
 
-Bootstraps a homelab checkout and starts it: verifies the toolchain, creates the
+Bootstraps a **checkout** and starts it: verifies the toolchain, creates the
 real config and env files from their templates, validates the notification
 secrets, then brings the stack up. A successful run leaves nothing for the
 operator to type afterwards.
+
+**A checkout, not a deployment.** Production runs the published image and keeps
+no `scripts/`, so this script is not there to be run. The half of it a
+deployment still needs - naming the keys a release added - travelled into the
+image as `python -m news_radar --check`; see [[crawl-cli]]. The two
+implementations are deliberately separate: this one runs before anything is
+installed and may not `import yaml`, so it scans indentation, while the image
+has PyYAML and parses properly. They answer the same question by the same rules,
+and each has its own test.
 
 | Flag | Guarantee |
 |------|-----------|
@@ -33,7 +42,7 @@ operator to type afterwards.
 | `--dry-run` | **Writes nothing, prompts for nothing, starts nothing.** Prints the checks, the files it would create and the compose command it would run, then exits |
 | `--force` | Overwrite files that already exist. Without it, an existing file is reported and left alone |
 | `--non-interactive` | Never prompt; leave a missing secret blank and report it. For unattended provisioning |
-| `--check` | Verify only: toolchain present, required files exist, **required secrets non-empty**. Creates nothing, starts nothing, exits non-zero on a gap |
+| `--check` | Verify only: toolchain present, required files exist, **required secrets non-empty**, and **no key the template has that the local `config.yaml` lacks**. Creates nothing, starts nothing, exits non-zero on a gap |
 
 Steps, in order:
 
@@ -43,17 +52,24 @@ Steps, in order:
 4. Create `docker/.env` from `docker/.env.example` if absent.
 5. For each notification channel enabled in the config, ensure its variables are
    present and non-empty in `docker/.env`; prompt unless `--non-interactive`.
-6. `docker compose -f docker/docker-compose.yml up -d`, with docker's own output
-   inherited rather than captured. `--profile tunnel` is inserted before `up`
-   when `docker/tunnel-credentials.json` exists, so the `cloudflared` service
-   starts on a machine that publishes `news.dtbao.org` and stays out of the way
-   on one that does not. While no `Dockerfile` is present in the
+6. Compare the key paths in `config/config.yaml.example` with those in
+   `config/config.yaml` and name every one the template has and the local file
+   does not. Reported in every mode, **fatal only under `--check`**: a missing
+   key falls back to the code's own default, so the stack starts either way - it
+   simply starts on a decision nobody made. This is the step an upgrade needs
+   and the one nothing offered before v0.2.3, which is how `report.mode` stayed
+   `incremental` through a release that had moved on.
+7. `docker compose -f docker/docker-compose.yml up -d`, with docker's own output
+   inherited rather than captured. **No compose profile is ever added** - it
+   used to insert `--profile tunnel` when a credentials file was present, and
+   both the tunnel and that detection are gone; `autoupdate` is production's
+   decision to make by hand. While no `Dockerfile` is present in the
    checkout the crawl service cannot build, so only `caddy` is named; the
    narrowing lifts by itself once the file exists.
-7. Print the URL the page is served on, taking `NEWS_RADAR_HTTP_PORT` from
+8. Print the URL the page is served on, taking `NEWS_RADAR_HTTP_PORT` from
    `docker/.env` and falling back to `8088`.
 
-Steps 6 and 7 are skipped by `--dry-run` and by `--check`.
+Steps 7 and 8 are skipped by `--dry-run` and by `--check`.
 
 `--dry-run` and `--check` differ at step 5. A dry run describes a checkout that
 does not exist yet, so it only lists the secrets it would ask for. `--check`
@@ -63,7 +79,7 @@ it would call an install ready that cannot start.
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | Everything needed is in place (or, under `--dry-run`, would be) |
-| `1` | A prerequisite is missing, a required secret is still empty, or `docker compose up` failed |
+| `1` | A prerequisite is missing, a required secret is still empty, `--check` found a config key the template has and the local config does not, or `docker compose up` failed |
 | `2` | Bad usage - unknown flag, or a template file is missing from the checkout |
 
 ## scripts/release.py
@@ -117,5 +133,9 @@ chain it drives.
   external call goes through `subprocess.run` with an argument list.
 - Both print one line per step, prefixed `[ok]`, `[new]`, `[skip]`, `[warn]` or
   `[dry]`, so the output is scannable and greppable.
-- Neither imports anything from `src/news_radar`, and neither needs PyYAML: the
-  config template is copied verbatim, not parsed.
+- Neither imports anything from `src/news_radar`, and neither needs PyYAML. The
+  config template is copied verbatim; `setup.py`'s drift check reads key paths
+  off the indentation with a deliberate non-parser (`template_keys()`), because
+  the script has to run on a bare Python before anything is installed. It knows
+  which keys a file mentions, not what they mean - which is the whole question
+  it is asked.

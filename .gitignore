@@ -2,9 +2,18 @@
 .claude/gitconfig.yml
 .claude/commit-backup.json
 
-# Real config and secrets - templates are committed, these are not
+# Real config and secrets - templates are committed, these are not.
+# frequency_words.txt is here for a different reason than the two below it: not
+# because it holds a secret, but because a tracked file a deployment edits makes
+# every upgrade go one of two bad ways, both measured on a throwaway clone:
+# untouched, `git checkout <tag>` deletes it; edited, git refuses the checkout
+# outright ("Your local changes ... would be overwritten", Aborting) and the
+# whole upgrade stops. Untracking it removes both.
 config/config.yaml
+config/frequency_words.txt
 docker/.env
+# Left in place after the tunnel was removed: a machine that still has one of
+# these must never be able to commit it by accident.
 docker/tunnel-credentials.json
 
 # Derived data: crawl output, rendered pages, SQLite store

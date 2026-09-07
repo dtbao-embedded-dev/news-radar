@@ -27,6 +27,14 @@ RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 COPY VERSION ./
 COPY src/ ./src/
 
+# The config template, for `python -m news_radar --check`. Production runs this
+# image and keeps no checkout, so `scripts/setup.py --check` is not there to say
+# which keys a release added - and a key nobody copied across means the stack
+# runs on a default nobody chose. Deliberately NOT under ./config: that path is
+# bind-mounted over by the deployment's own directory at runtime, and anything
+# baked there would be hidden the moment the container starts.
+COPY config/config.yaml.example ./config-templates/
+
 # ponytail: runs as root. The container exposes no port and only fetches feeds,
 # and a non-root uid would have to match the owner of the bind-mounted output/
 # on the host - which differs between this Windows homelab and a Linux one.

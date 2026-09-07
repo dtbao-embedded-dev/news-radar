@@ -129,9 +129,13 @@ awesome-llm
 # its own and nothing at all once the description was appended, which cost
 # this group every one of its entries the first time it ran.
 #
-# The label is the search query, so the templates ask for "GitHub Trending":
-# three requests a cycle whose answers this same regex then throws away, and
-# that is the price of giving the feed a group of its own.
+# The label is the search query, so the templates ask for "GitHub Trending" -
+# three extra requests a cycle. Their answers never reach *this* group, because
+# an article about trending repos is not titled `owner/repo`, but they are not
+# wasted either: measured 2026-09-07, the two Google News queries returned 3
+# items and 0 matches, while HN Algolia returned 20 of which 4 matched - all of
+# them into AI and AI Repos, `Show HN: Understand GitHub Trending with AI` among
+# them. Budget the three requests, do not expect them back as trending repos.
 /^[\w.-]+\/[\w.-]+(?=\n|$)/
 @8
 => GitHub Trending

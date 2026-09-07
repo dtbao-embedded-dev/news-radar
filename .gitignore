@@ -12,6 +12,8 @@
 config/config.yaml
 config/frequency_words.txt
 docker/.env
+# Left in place after the tunnel was removed: a machine that still has one of
+# these must never be able to commit it by accident.
 docker/tunnel-credentials.json
 
 # Derived data: crawl output, rendered pages, SQLite store

@@ -46,10 +46,6 @@ TEMPLATES = [
 ENV_FILE = Path("docker/.env")
 COMPOSE_FILE = Path("docker/docker-compose.yml")
 
-# Gitignored, placed by hand from the Cloudflare Tunnel's credentials. Its
-# presence is what turns the `tunnel` compose profile on - see compose_argv().
-TUNNEL_CREDENTIALS = Path("docker/tunnel-credentials.json")
-
 # Mirrors the fallback in docker-compose.yml; 8080 is commonly taken already.
 DEFAULT_HTTP_PORT = "8088"
 
@@ -321,25 +317,22 @@ def ensure_secrets(dry_run, interactive, verify=False):
 def compose_argv(root=None):
     """The `up -d` argv for whatever can actually start in this checkout.
 
-    Two narrowings, both read off the filesystem rather than asked about:
+    One narrowing, read off the filesystem rather than asked about: no
+    `Dockerfile` means the crawl service cannot build and a full `up -d` would
+    die on it, so bring up the web half alone.
 
-    - No `Dockerfile` means the crawl service cannot build and a full `up -d`
-      would die on it, so bring up the web half alone.
-    - The `cloudflared` service sits behind the `tunnel` compose profile and
-      mounts a credentials file that is never committed. The profile goes on
-      only when that file is there; a checkout without one starts exactly what
-      it started before rather than a container crash-looping on the mount.
+    No compose profile is ever added. `autoupdate` is production's decision to
+    make by hand, and the `tunnel` profile this used to detect a credentials
+    file for no longer exists - the report is served on the LAN and published
+    nowhere.
 
-    `root` exists so the rules can be exercised against a throwaway tree - see
+    `root` exists so the rule can be exercised against a throwaway tree - see
     tests/test_setup.py. It defaults to this checkout.
     """
     root = ROOT if root is None else root
     # as_posix(): the same printed command works when pasted into any shell,
     # including a Windows one, instead of growing backslashes there.
-    argv = ["docker", "compose", "-f", COMPOSE_FILE.as_posix()]
-    if (root / TUNNEL_CREDENTIALS).is_file():
-        argv += ["--profile", "tunnel"]
-    argv += ["up", "-d"]
+    argv = ["docker", "compose", "-f", COMPOSE_FILE.as_posix(), "up", "-d"]
     if not (root / "Dockerfile").is_file():
         argv.append("caddy")
     return argv

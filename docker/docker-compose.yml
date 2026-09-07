@@ -15,14 +15,14 @@
 # That is the whole of "user data an update cannot reach": production keeps no
 # checkout, so there is no `git checkout` on that machine to delete anything.
 #
-# The `cloudflared` service is behind the `tunnel` profile, so the two lines
-# above start the crawl loop and the web server and nothing else. Publishing
-# news.dtbao.org is opt-in:
+# The report is served on the LAN and published nowhere. There is no tunnel and
+# no reverse proxy in this file: reaching it from outside is a decision for
+# whatever fronts it, made outside this project.
 #
-#   docker compose -f docker/docker-compose.yml --profile tunnel up -d
+# The `watchtower` service is behind the `autoupdate` profile, so the two lines
+# above start the crawl loop and the web server and nothing else:
 #
-# scripts/setup.py adds that flag by itself once docker/tunnel-credentials.json
-# is in place.
+#   docker compose -f docker/docker-compose.yml --profile autoupdate up -d
 
 name: news-radar
 
@@ -72,8 +72,9 @@ services:
       # mount is on the crawl service only - caddy never sees the path at all.
       - "${NEWS_RADAR_HOME:-..}/backups:/app/backups"
 
-  # Serves ../output as static files. Reached from outside through the
-  # existing homelab Cloudflare Tunnel, routed to http://caddy:8080.
+  # Serves the deployment's output/ as static files. The published host port is
+  # how anyone reaches it; nothing in this stack carries it further than the
+  # LAN.
   caddy:
     image: caddy:2-alpine
     container_name: news-radar-caddy
@@ -89,38 +90,11 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - "${NEWS_RADAR_HOME:-..}/output:/srv:ro"
       - caddy_data:/data
-    # Host port is for local debugging only - the Cloudflare Tunnel reaches
-    # caddy:8080 over the docker network and does not need a published port.
+    # This is now the only way in, so it is not "debugging only" any more.
     # 8088 rather than 8080 by choice: a port of our own does not have to be
     # renegotiated the next time something else on the host wants 8080.
     ports:
       - "${NEWS_RADAR_HTTP_PORT:-8088}:8080"
-
-  # Publishes caddy as https://news.dtbao.org through the `news` Cloudflare
-  # Tunnel. Outbound-only: nothing is port-forwarded and no inbound rule
-  # exists, which is the whole reason for a tunnel rather than a public port.
-  #
-  # Behind a profile because the credentials file is not in the repo: a fresh
-  # clone would otherwise get a container crash-looping on a missing mount.
-  # Start it with --profile tunnel, or let scripts/setup.py notice the file.
-  cloudflared:
-    image: cloudflare/cloudflared:2026.8.3
-    container_name: news-radar-tunnel
-    profiles: ["tunnel"]
-    restart: unless-stopped
-    # The id, not the name: a name would be looked up over the API, and this
-    # connector should need nothing but its config, its credentials and one
-    # variable. It is an argument rather than a line in cloudflared.yml because
-    # Compose expands variables here and cloudflared does not expand them in
-    # its own config file - see docker/cloudflared.yml.
-    command: tunnel --config /etc/cloudflared/config.yml run ${NEWS_RADAR_TUNNEL_ID}
-    environment:
-      TZ: ${TZ:-Asia/Ho_Chi_Minh}
-    volumes:
-      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
-      - ./tunnel-credentials.json:/etc/cloudflared/creds.json:ro
-    depends_on:
-      - caddy
 
   # Auto-update. Polls GHCR for a newer `:latest`, pulls it, and recreates the
   # one container carrying the label above - the bind mounts come back exactly

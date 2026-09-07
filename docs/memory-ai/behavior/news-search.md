@@ -3,10 +3,10 @@ title: How News Is Searched, Matched and Ranked
 category: behavior
 purpose: The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered.
 status: active
-updated: 2026-09-05
+updated: 2026-09-07
 source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py
 confidence: confirmed
-keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases
+keywords: crawl, search algorithm, matching, match_excerpt, excerpt, _haystack, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases
 order: 1
 ---
 
@@ -28,9 +28,11 @@ order: 1
 4. The result is one flat list of `(url, source_id, keyword_group | None)`.
 
 Cost is predictable and worth stating out loud: `len(feeds) + len(groups) x
-len(enabled templates)`. Measured on the shipped config: eight feeds, seven
-groups and two enabled templates is **22 requests and 35-57 s per run**, not
-eight requests. `build_urls()` is pure, so that number is known before the first
+len(enabled templates)`. Measured on the shipped config: thirteen feeds, seven
+groups and three enabled templates is **34 requests and ~59 s per run**, not
+thirteen requests. Adding a keyword group therefore costs one request per
+enabled template, every cycle - the `GitHub Trending` group's three are spent
+on queries whose answers its own regex then discards. `build_urls()` is pure, so that number is known before the first
 byte goes out.
 
 ## Stage 2 - fetch
@@ -60,6 +62,30 @@ For each item, for each group:
 2. **Any-of.** At least one plain term or `/regex/` of the group must match.
 3. **Required.** Every `+` term of the group must also match.
 4. **Excluded.** No `!` term of the group may match.
+
+**Which text is matched is a property of the source.** By default it is the
+title alone. A source carrying `match_excerpt: true` is matched on
+`title + newline + excerpt` instead - all four rules above, the regexes
+included. `__main__._excerpt_sources()` collects those ids and hands the set to
+`select()`; `filter._haystack()` does the joining.
+
+It is opt-in, and the measurement is why. Reading the excerpt for **every**
+source was tried on 2026-09-07 across twelve live sources: 1031 matches became
+1460, and the extras were stories that mention a keyword once in the body -
+`An Alien Mind` from Hacker News, `Kernel prepatch 7.3-rc2` from LWN. One source
+needs it: GitHub trending titles every entry `owner/repo`, so title-only
+matching passed 1 of 18 entries and the excerpt passed 10.
+
+Two consequences worth knowing before setting the flag:
+
+- **The exclusions widen with it.** A `!` term and `[GLOBAL_FILTER]` read the
+  same joined text, or noise admitted through the excerpt could not be filtered
+  back out.
+- **An anchored regex needs a lookahead, not `$`.** The regex is shown the
+  joined text, so `/^owner/repo$/` matches the title alone and nothing once a
+  description follows it. The shipped `GitHub Trending` group ends
+  `(?=\n|$)` for exactly this reason - a `$` cost it every one of its
+  entries the first time it ran.
 
 Matching is done on a folded form of the title: lowercased, Unicode NFD, combining
 marks removed, whitespace collapsed. So `Điện tử` matches `dien tu`, and `ESP32`
@@ -136,7 +162,7 @@ costs an afternoon to rediscover.
 | **A feed with no `pubDate`** | Freshness term undefined | `published_at = None`, freshness term `0`, never "now" |
 | **The same story from an AMP or syndicated URL** | Two rows, two notifications | Accepted limit - canonicalisation does not resolve it, and title clustering is not implemented |
 | **Google News returns its own redirector links** | Items come back as `news.google.com/rss/articles/CBMi...`, never the publisher URL, so the same story from Google News and from Hacker News does **not** collapse on `canonical_url` | Accepted limit of the same class as the AMP case. Resolving it means following each redirect - one extra request per item, against a host that already throttles |
-| **The Reddit sources are unreachable on this network** | Not a 403: `www.reddit.com` fails DNS resolution (`Name or service not known`) both on the homelab host and inside the container | Failure isolation covers it - one warning line, the run keeps the other 21 sources. The User-Agent requirement above is still correct wherever Reddit does resolve |
+| **Reddit is unreachable from some networks** | Not a 403: `www.reddit.com` fails DNS resolution (`Name or service not known`). It is a property of the network, not of the deployment - on 2026-09-07 `r_embedded` returned **25 items on the homelab** while failing to resolve from a Windows workstation on a different network | Failure isolation covers it - one warning line, the run keeps every other source. Do not disable the feed on the strength of one machine's result, and the User-Agent requirement above still holds wherever Reddit does resolve |
 | **An Algolia hit with an empty title** | `new_item()` raises and the hit is dropped | Counted at DEBUG per source, so a feed that suddenly ships titleless entries is visible instead of silently shrinking |
 | **A source hangs** | The whole run hangs; nothing outside the process kills it | `request_timeout_s` is the only bound that exists - it must always be set |
 | **Clock skew on the host** | Freshness ranking inverts | `TZ` is pinned in the container; ages are computed in UTC |

@@ -19,6 +19,38 @@ _Generated 2026-09-07 - 20 durable doc(s)._
 
 ## What works
 
+### Matching can read an excerpt, one source at a time (2026-09-07, unreleased)
+
+Four numbers carry this whole change, all measured against live sources rather
+than reasoned about:
+
+- **1 of 18 -> 10 of 18.** GitHub trending titles every entry `owner/repo` and
+  puts the description in the excerpt, so title-only matching passed one entry.
+  `feeds[].match_excerpt` is the switch; `filter._haystack()` does the joining.
+- **1031 -> 1460 matches, and the extras were noise.** Reading the excerpt for
+  every source was tried across twelve live sources before the design was
+  chosen: `An Alien Mind` from Hacker News, `Kernel prepatch 7.3-rc2` from LWN.
+  That measurement is why the switch is per source rather than global.
+- **18 of 18, and 0 of 2,300.** The regex-only `GitHub Trending` group matches a
+  bare `owner/repo` and nothing across the other eleven sources. It exists
+  because a dateless feed scores `0.5 x weight` at best, and 9 of the 10
+  trending repos landed in the `AI` group only to be cut at its 0.55 line. On
+  their own they fill their `@8`.
+- **34 requests, ~59 s a cycle**, up from 26 and ~48 s: five new feeds plus
+  three more search requests for the new group.
+
+Two things this cost, both worth remembering. An anchored regex breaks under
+`match_excerpt` - `/^owner/repo$/` matched the title alone and nothing once the
+description was appended, and the group ran empty until it became `(?=
+|$)`.
+And `arxiv_cs_ai` was dropped after being added: 93 of 298 entries matched, but
+its ceiling was `0.5 x 0.5 + 0.2 x freshness = 0.45` against the AI group's 0.55
+cut, so it could never place a story while costing 298 parsed items a cycle.
+
+`esp_idf_releases` shows nothing on a quiet week **by design**: the feed always
+holds the same ten releases and none of them is fresh, so at weight 0.8 only a
+genuinely new release clears the cut.
+
 ### The page can be turned off, and turning it off unpublishes it (2026-09-07, unreleased)
 
 `report.html` is the switch that did not exist. Three facts worth keeping:
@@ -874,6 +906,24 @@ the ops layer and the summary - and the whole thing is reachable at
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**Sources widened for AI, GitHub trending and Espressif (2026-09-07,
+unreleased after v0.2.7).** A survey of 44 candidate feeds, each verified with
+the project's own `read_source()`, ended in three changes: per-source excerpt
+matching (`feeds[].match_excerpt`), five new shipped feeds, and a regex-only
+`GitHub Trending` keyword group. Every number behind them is in [[progress]].
+
+**What the survey settled that guesswork would not have.** Blanket excerpt
+matching looked obvious and was wrong - 42% more matches, all noise. `arxiv_cs_ai`
+looked valuable and could never place a story. `esp_idf_releases` looked broken
+at weight 0.8 and was correct. `r_embedded` looked dead from the Windows box and
+returns 25 items on the homelab.
+
+**Next:** cut a release, then edit the homelab's own `config.yaml` **and**
+`config/frequency_words.txt` by hand - both are gitignored there, so neither the
+new feeds nor the new group reach production on their own. Then watch whether
+Google News starts throttling: the cycle now makes 34 requests every ten
+minutes.
 
 **The page is off and the radar polls three times an hour (2026-09-07,
 unreleased after v0.2.6).** Three changes, all on `release/v0.2`:
@@ -2079,7 +2129,7 @@ Python in this project. See [[config-and-env]] for the full key list.
 | `NEWS_RADAR_HOME` set to a path that does not exist | Docker **creates** it, as `root`, and the container gets empty directories | Loud, not silent: `config file not found: /app/config/config.yaml`, exit `1`, restart loop. But it also leaves root-owned directories on the host that the operator cannot `rm` without `sudo` - measured |
 
 ### [data] News Sources and Search Paths
-*`data/news-sources.md` - Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns. - status: active - source: config/config.yaml.example, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py - keywords: sources, feeds, RSS, Atom, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent*
+*`data/news-sources.md` - Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns. - status: active - source: config/config.yaml.example, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py - keywords: sources, feeds, RSS, Atom, match_excerpt, gh_trending, openai, huggingface, esp_idf_releases, cnx_esp32, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent*
 
 # News Sources and Search Paths
 
@@ -2103,6 +2153,11 @@ one is a config edit, never a code edit.
 | `vnexpress_sohoa` | VnExpress So hoa | `https://vnexpress.net/rss/so-hoa.rss` | RSS 2.0 | vi | Description carries an `<img>` tag - strip HTML before matching |
 | `genk` | GenK | `https://genk.vn/rss/home.rss` | RSS 2.0 | vi | Mixed tech and consumer news |
 | `tinhte` | Tinh te | `https://tinhte.vn/rss` | RSS 2.0 | vi | Forum-flavoured; heavier duplicate rate than the others |
+| `gh_trending` | GitHub Trending | `https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml` | RSS 2.0 | en | Third-party mirror - GitHub publishes no trending feed. **The only source with `match_excerpt: true`**: every entry is titled `owner/repo` and the description is the only matchable text (1 of 18 matched on the title, 10 with the excerpt). Carries **no dates at all**, so its freshness term is always 0 and `rank_weight` is its whole score. Its own `GitHub Trending` keyword group is what keeps it out of the AI group's way |
+| `openai` | OpenAI News | `https://openai.com/news/rss.xml` | RSS 2.0 | en | The full archive, ~1,170 entries every fetch, ~700 kB. A primary source: weighted 1.0 |
+| `huggingface` | Hugging Face Blog | `https://huggingface.co/blog/feed.xml` | RSS 2.0 | en | ~860 entries every fetch. **Carries no descriptions at all**, so `match_excerpt` would be inert here even if set |
+| `esp_idf_releases` | ESP-IDF Releases | `https://github.com/espressif/esp-idf/releases.atom` | Atom | en | Always the same ten releases, old point releases included, and none of them ages out. At a 12 h half-life anything older than ~2 days scores 0 for freshness, so all ten score identically - weight 1.0 put ten of them in the ESP32 group's twelve slots. Weighted 0.8, only a genuinely fresh release clears the cut, which is the wanted behaviour and means the source shows nothing on a quiet week |
+| `cnx_esp32` | CNX Software (ESP32) | `https://www.cnx-software.com/tag/esp32/feed/` | RSS 2.0 | en | Already narrowed by the source's own tag: 27 of 32 entries matched a shipped group on 2026-09-07 |
 
 Each entry in `config.yaml` carries an `id`, a `name`, a `url`, `enabled`, and an
 optional `rank_weight` (default `1.0`) that feeds the ranking in
@@ -2338,7 +2393,7 @@ Two consequences worth knowing before changing this:
   asserts the rule is on the page.
 
 ### [interface] Config Keys, Keyword File and Environment
-*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER*
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, match_excerpt, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER*
 
 # Config Keys, Keyword File and Environment
 
@@ -2364,18 +2419,21 @@ someone chose it.
 | `app.timezone` | str | `Asia/Ho_Chi_Minh` | Timezone used when rendering timestamps; storage stays UTC |
 | `schedule.interval_minutes` | int | `30` *(template ships `10`)* | Sleep between crawls in the in-process loop. The default stays at the half-hour an upgrade inherits - an absent `schedule` section must not triple a running deployment's request rate. A cycle costs 35-57 s for the shipped 22 requests, so ten minutes still leaves the process idle most of the interval; what it does change is the traffic at the two hosts that throttle first, Google News and HN Algolia |
 | `schedule.run_on_start` | bool | `true` | Crawl immediately on container start instead of waiting one interval |
-| `feeds[]` | list | `[]` *(template ships 8)* | Fixed feeds - see [[news-sources]] |
+| `feeds[]` | list | `[]` *(template ships 13)* | Fixed feeds - see [[news-sources]] |
 | `feeds[].id` | str | - | Stable id; used in `sources`, in the report, and as the `reported` key |
 | `feeds[].name` | str | - | Display name on the page |
 | `feeds[].url` | str | - | Feed URL |
 | `feeds[].enabled` | bool | `true` | Skip without deleting the entry |
 | `feeds[].rank_weight` | float | `1.0` | Per-source multiplier in the source term of the score |
+| `feeds[].match_excerpt` | bool | `false` | Match this source on `title + excerpt` instead of the title alone - the group's `!` terms and `[GLOBAL_FILTER]` widen with it. Opt-in per source because reading the excerpt everywhere was measured at **42% more matches, all noise** (1031 -> 1460 across twelve live sources). One shipped feed sets it, `gh_trending`, whose titles are bare `owner/repo`. An anchored regex in a group that sees such a source needs `(?=
+|$)` rather than `$` - see [[news-search]] |
 | `search_templates[]` | list | `[]` *(template ships 3)* | Keyword-driven searches - see [[news-sources]] |
 | `search_templates[].id` | str | - | Stable id |
 | `search_templates[].url` | str | - | Must contain `{kw}`; the only substitution performed |
 | `search_templates[].format` | str | `rss` | `rss`, `atom`, or `hn_algolia_json` |
 | `search_templates[].enabled` | bool | `true` | `reddit_search` ships **disabled** in the template - it duplicates the fixed Reddit feed heavily |
 | `search_templates[].rank_weight` | float | `1.0` *(template ships `0.8`)* | Search hits rank below front-page hits in the shipped template |
+| `search_templates[].match_excerpt` | bool | `false` | The same switch as `feeds[].match_excerpt`; no shipped template sets it |
 | `keywords.file` | str | `config/frequency_words.txt` | Path to the keyword file. Gitignored and created by `setup.py` from `frequency_words.txt.example`, so `git checkout <tag>` cannot revert a deployment's tuning |
 | `report.mode` | str | `incremental` **(template ships `daily`)** | `incremental` (this run's new matches), `current` (this run's whole shortlist, every cycle), `daily` (the whole local day minus what the channel already got). The template ships `daily` because it reads the same window the page renders, so a phone and the page agree on which stories exist - and a story missed by one refused cycle is offered again instead of lost |
 | `report.max_per_group` | int | `0` | Global cap per group, `0` = unlimited; a group's own `@n` overrides it |
@@ -3318,7 +3376,7 @@ read_search_feeds(fetcher, cfg, groups, fetched_at=None) -> (items, errors)
   cost the other groups their results.
 
 ### [interface] Selection Layer Contracts
-*`interface/selection-layer.md` - Every public signature of the filter and rank modules - what each returns, what it never reads, and the plain dicts the caller has to build for it. - status: active - source: src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: blocked, group_matches, select, Story, collapse, score, rank_groups, source_weights, weights, default_cap, SATURATION_SPAN, DEFAULT_SOURCE_WEIGHT, global filter, cap*
+*`interface/selection-layer.md` - Every public signature of the filter and rank modules - what each returns, what it never reads, and the plain dicts the caller has to build for it. - status: active - source: src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: blocked, group_matches, select, excerpt_sources, match_excerpt, Story, collapse, score, rank_groups, source_weights, weights, default_cap, SATURATION_SPAN, DEFAULT_SOURCE_WEIGHT, global filter, cap*
 
 # Selection Layer Contracts
 
@@ -3332,9 +3390,9 @@ read_search_feeds(fetcher, cfg, groups, fetched_at=None) -> (items, errors)
 
 | Signature | Returns |
 |-----------|---------|
-| `blocked(item, global_terms)` | `True` when a `[GLOBAL_FILTER]` exclusion matches the folded title. An empty `global_terms` blocks nothing |
-| `group_matches(item, group)` | `True` when the item belongs to this `KeywordGroup`: any-of, then required, then excluded |
-| `select(items, groups, global_terms)` | `[(NewsItem, [label, ...])]` - input order preserved. Items that are blocked, or that match no group, are **dropped** rather than carried with an empty label list |
+| `blocked(item, global_terms, excerpt=False)` | `True` when a `[GLOBAL_FILTER]` exclusion matches the folded title - and the excerpt too when `excerpt`. An empty `global_terms` blocks nothing |
+| `group_matches(item, group, excerpt=False)` | `True` when the item belongs to this `KeywordGroup`: any-of, then required, then excluded. `excerpt` extends all three rules, and the regexes, to `title + excerpt` |
+| `select(items, groups, global_terms, excerpt_sources=())` | `[(NewsItem, [label, ...])]` - input order preserved. Items that are blocked, or that match no group, are **dropped** rather than carried with an empty label list |
 
 Plain terms and `+`/`!` terms are compared on `fold(item.title)`; a `/regex/` is
 run with `re.search` against the **original** title. Labels come back in the
@@ -3800,7 +3858,7 @@ ships inert: `ai.enabled` is `false`, so a config that says nothing about `ai`
 upgrades into this version and behaves exactly as it did before.
 
 ### [behavior] How News Is Searched, Matched and Ranked
-*`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*
+*`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, match_excerpt, excerpt, _haystack, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*
 
 # How News Is Searched, Matched and Ranked
 
@@ -3820,9 +3878,11 @@ upgrades into this version and behaves exactly as it did before.
 4. The result is one flat list of `(url, source_id, keyword_group | None)`.
 
 Cost is predictable and worth stating out loud: `len(feeds) + len(groups) x
-len(enabled templates)`. Measured on the shipped config: eight feeds, seven
-groups and two enabled templates is **22 requests and 35-57 s per run**, not
-eight requests. `build_urls()` is pure, so that number is known before the first
+len(enabled templates)`. Measured on the shipped config: thirteen feeds, seven
+groups and three enabled templates is **34 requests and ~59 s per run**, not
+thirteen requests. Adding a keyword group therefore costs one request per
+enabled template, every cycle - the `GitHub Trending` group's three are spent
+on queries whose answers its own regex then discards. `build_urls()` is pure, so that number is known before the first
 byte goes out.
 
 ## Stage 2 - fetch
@@ -3852,6 +3912,30 @@ For each item, for each group:
 2. **Any-of.** At least one plain term or `/regex/` of the group must match.
 3. **Required.** Every `+` term of the group must also match.
 4. **Excluded.** No `!` term of the group may match.
+
+**Which text is matched is a property of the source.** By default it is the
+title alone. A source carrying `match_excerpt: true` is matched on
+`title + newline + excerpt` instead - all four rules above, the regexes
+included. `__main__._excerpt_sources()` collects those ids and hands the set to
+`select()`; `filter._haystack()` does the joining.
+
+It is opt-in, and the measurement is why. Reading the excerpt for **every**
+source was tried on 2026-09-07 across twelve live sources: 1031 matches became
+1460, and the extras were stories that mention a keyword once in the body -
+`An Alien Mind` from Hacker News, `Kernel prepatch 7.3-rc2` from LWN. One source
+needs it: GitHub trending titles every entry `owner/repo`, so title-only
+matching passed 1 of 18 entries and the excerpt passed 10.
+
+Two consequences worth knowing before setting the flag:
+
+- **The exclusions widen with it.** A `!` term and `[GLOBAL_FILTER]` read the
+  same joined text, or noise admitted through the excerpt could not be filtered
+  back out.
+- **An anchored regex needs a lookahead, not `$`.** The regex is shown the
+  joined text, so `/^owner/repo$/` matches the title alone and nothing once a
+  description follows it. The shipped `GitHub Trending` group ends
+  `(?=\n|$)` for exactly this reason - a `$` cost it every one of its
+  entries the first time it ran.
 
 Matching is done on a folded form of the title: lowercased, Unicode NFD, combining
 marks removed, whitespace collapsed. So `Điện tử` matches `dien tu`, and `ESP32`
@@ -3928,7 +4012,7 @@ costs an afternoon to rediscover.
 | **A feed with no `pubDate`** | Freshness term undefined | `published_at = None`, freshness term `0`, never "now" |
 | **The same story from an AMP or syndicated URL** | Two rows, two notifications | Accepted limit - canonicalisation does not resolve it, and title clustering is not implemented |
 | **Google News returns its own redirector links** | Items come back as `news.google.com/rss/articles/CBMi...`, never the publisher URL, so the same story from Google News and from Hacker News does **not** collapse on `canonical_url` | Accepted limit of the same class as the AMP case. Resolving it means following each redirect - one extra request per item, against a host that already throttles |
-| **The Reddit sources are unreachable on this network** | Not a 403: `www.reddit.com` fails DNS resolution (`Name or service not known`) both on the homelab host and inside the container | Failure isolation covers it - one warning line, the run keeps the other 21 sources. The User-Agent requirement above is still correct wherever Reddit does resolve |
+| **Reddit is unreachable from some networks** | Not a 403: `www.reddit.com` fails DNS resolution (`Name or service not known`). It is a property of the network, not of the deployment - on 2026-09-07 `r_embedded` returned **25 items on the homelab** while failing to resolve from a Windows workstation on a different network | Failure isolation covers it - one warning line, the run keeps every other source. Do not disable the feed on the strength of one machine's result, and the User-Agent requirement above still holds wherever Reddit does resolve |
 | **An Algolia hit with an empty title** | `new_item()` raises and the hit is dropped | Counted at DEBUG per source, so a feed that suddenly ships titleless entries is visible instead of silently shrinking |
 | **A source hangs** | The whole run hangs; nothing outside the process kills it | `request_timeout_s` is the only bound that exists - it must always be set |
 | **Clock skew on the host** | Freshness ranking inverts | `TZ` is pinned in the container; ages are computed in UTC |

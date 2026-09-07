@@ -6,7 +6,7 @@ status: active
 updated: 2026-09-05
 source: src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py
 confidence: confirmed
-keywords: blocked, group_matches, select, Story, collapse, score, rank_groups, source_weights, weights, default_cap, SATURATION_SPAN, DEFAULT_SOURCE_WEIGHT, global filter, cap
+keywords: blocked, group_matches, select, excerpt_sources, match_excerpt, Story, collapse, score, rank_groups, source_weights, weights, default_cap, SATURATION_SPAN, DEFAULT_SOURCE_WEIGHT, global filter, cap
 order: 6
 ---
 
@@ -22,9 +22,9 @@ order: 6
 
 | Signature | Returns |
 |-----------|---------|
-| `blocked(item, global_terms)` | `True` when a `[GLOBAL_FILTER]` exclusion matches the folded title. An empty `global_terms` blocks nothing |
-| `group_matches(item, group)` | `True` when the item belongs to this `KeywordGroup`: any-of, then required, then excluded |
-| `select(items, groups, global_terms)` | `[(NewsItem, [label, ...])]` - input order preserved. Items that are blocked, or that match no group, are **dropped** rather than carried with an empty label list |
+| `blocked(item, global_terms, excerpt=False)` | `True` when a `[GLOBAL_FILTER]` exclusion matches the folded title - and the excerpt too when `excerpt`. An empty `global_terms` blocks nothing |
+| `group_matches(item, group, excerpt=False)` | `True` when the item belongs to this `KeywordGroup`: any-of, then required, then excluded. `excerpt` extends all three rules, and the regexes, to `title + excerpt` |
+| `select(items, groups, global_terms, excerpt_sources=())` | `[(NewsItem, [label, ...])]` - input order preserved. Items that are blocked, or that match no group, are **dropped** rather than carried with an empty label list |
 
 Plain terms and `+`/`!` terms are compared on `fold(item.title)`; a `/regex/` is
 run with `re.search` against the **original** title. Labels come back in the

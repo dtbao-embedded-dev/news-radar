@@ -9,6 +9,24 @@ updated: 2026-09-07
 
 ## Current focus
 
+**Sources widened for AI, GitHub trending and Espressif (2026-09-07,
+unreleased after v0.2.7).** A survey of 44 candidate feeds, each verified with
+the project's own `read_source()`, ended in three changes: per-source excerpt
+matching (`feeds[].match_excerpt`), five new shipped feeds, and a regex-only
+`GitHub Trending` keyword group. Every number behind them is in [[progress]].
+
+**What the survey settled that guesswork would not have.** Blanket excerpt
+matching looked obvious and was wrong - 42% more matches, all noise. `arxiv_cs_ai`
+looked valuable and could never place a story. `esp_idf_releases` looked broken
+at weight 0.8 and was correct. `r_embedded` looked dead from the Windows box and
+returns 25 items on the homelab.
+
+**Next:** cut a release, then edit the homelab's own `config.yaml` **and**
+`config/frequency_words.txt` by hand - both are gitignored there, so neither the
+new feeds nor the new group reach production on their own. Then watch whether
+Google News starts throttling: the cycle now makes 34 requests every ten
+minutes.
+
 **The page is off and the radar polls three times an hour (2026-09-07,
 unreleased after v0.2.6).** Three changes, all on `release/v0.2`:
 

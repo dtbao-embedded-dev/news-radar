@@ -9,6 +9,38 @@ updated: 2026-09-07
 
 ## What works
 
+### Matching can read an excerpt, one source at a time (2026-09-07, unreleased)
+
+Four numbers carry this whole change, all measured against live sources rather
+than reasoned about:
+
+- **1 of 18 -> 10 of 18.** GitHub trending titles every entry `owner/repo` and
+  puts the description in the excerpt, so title-only matching passed one entry.
+  `feeds[].match_excerpt` is the switch; `filter._haystack()` does the joining.
+- **1031 -> 1460 matches, and the extras were noise.** Reading the excerpt for
+  every source was tried across twelve live sources before the design was
+  chosen: `An Alien Mind` from Hacker News, `Kernel prepatch 7.3-rc2` from LWN.
+  That measurement is why the switch is per source rather than global.
+- **18 of 18, and 0 of 2,300.** The regex-only `GitHub Trending` group matches a
+  bare `owner/repo` and nothing across the other eleven sources. It exists
+  because a dateless feed scores `0.5 x weight` at best, and 9 of the 10
+  trending repos landed in the `AI` group only to be cut at its 0.55 line. On
+  their own they fill their `@8`.
+- **34 requests, ~59 s a cycle**, up from 26 and ~48 s: five new feeds plus
+  three more search requests for the new group.
+
+Two things this cost, both worth remembering. An anchored regex breaks under
+`match_excerpt` - `/^owner/repo$/` matched the title alone and nothing once the
+description was appended, and the group ran empty until it became `(?=
+|$)`.
+And `arxiv_cs_ai` was dropped after being added: 93 of 298 entries matched, but
+its ceiling was `0.5 x 0.5 + 0.2 x freshness = 0.45` against the AI group's 0.55
+cut, so it could never place a story while costing 298 parsed items a cycle.
+
+`esp_idf_releases` shows nothing on a quiet week **by design**: the feed always
+holds the same ten releases and none of them is fresh, so at weight 0.8 only a
+genuinely new release clears the cut.
+
 ### The page can be turned off, and turning it off unpublishes it (2026-09-07, unreleased)
 
 `report.html` is the switch that did not exist. Three facts worth keeping:

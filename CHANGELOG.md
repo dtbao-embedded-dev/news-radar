@@ -29,6 +29,16 @@ one makes the file and the tags disagree.
   7.3-rc2` from LWN). The exclusion half widens with it: a source whose matching
   reads the excerpt but whose `!` terms and `[GLOBAL_FILTER]` do not could not
   filter back out what the wider reading let in.
+- **sources**: the shipped template gains five feeds - `gh_trending` (GitHub
+  trending, the one feed with `match_excerpt: true`), `openai`, `huggingface`,
+  `esp_idf_releases` and `cnx_esp32` - and `frequency_words.txt.example` gains a
+  regex-only **GitHub Trending** group that matches a bare `owner/repo` title
+  and nothing else (18 of 18 trending entries, 0 of 2,300 items across the other
+  eleven sources). The group exists because a dateless feed scores at most
+  `0.5 x weight` and the AI group cuts at 0.55, so trending repos matched there
+  and were then dropped every cycle; on their own they now fill their `@8`. Caps
+  widened with the supply: `ESP32` and `AI` to 12, `AI Repos` to 10. Cost is
+  measured: 34 requests and ~59s a cycle, up from 26 and ~48s.
 - **config**: `feeds[].match_excerpt` and `search_templates[].match_excerpt`
   (bool, default `false`) switch the above on for one source.
   `__main__._excerpt_sources()` collects the ids and hands them to

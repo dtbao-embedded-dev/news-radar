@@ -32,6 +32,15 @@ one makes the file and the tags disagree.
   cut runs on the whole pool before groups are filled, so a section stays at its
   cap while fresh candidates remain and only empties when a keyword really has
   nothing recent.
+- **config**: `rank.max_age_days` switches the above on. The code default is
+  `0`, no cut, so an upgrade that never mentioned `rank` reports exactly what it
+  did before; the template ships **14**. Measured end to end on a real cycle:
+  the oldest story reaching the store went from **27,466 h to 284 h** and
+  nothing over 336 h survived, while `AI`, `AI Repos`, `ESP32`, `Firmware`,
+  `RISC-V` and `GitHub Trending` all stayed at their caps - only `RTOS` shrank,
+  8 stories to 4, because four of its eight really were over a fortnight old.
+  That is the section going quiet, which the report has always been built to
+  show.
 
 - **filter**: matching can now read an item's **excerpt** as well as its title,
   **per source**. `group_matches()`, `blocked()` and `select()` take the switch;

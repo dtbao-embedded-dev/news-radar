@@ -206,6 +206,17 @@ rank:
   weight_freshness: 0.2
   freshness_half_life_hours: 12
 
+  # Stories older than this are dropped before anything is ranked. 0 = no cut,
+  # which is the code default so an upgrade never starts discarding on its own;
+  # 14 is what ships. The half-life above cannot do this job: freshness reaches
+  # 0 after about two days, so past that a three-day-old story and a
+  # three-year-old one score the same, and a group short of fresh matches fills
+  # its cap from whatever archive a feed happens to carry. Measured before this
+  # existed: 12 of 68 shortlisted stories were over 30 days old, five of them
+  # Hugging Face posts taking half of AI Repos, the oldest 27,466 hours.
+  # An entry with no date is always kept - gh_trending dates nothing at all.
+  max_age_days: 14
+
 storage:
   data_dir: output
   # 0 = keep everything. 90 is what ships: the store and output/days/ otherwise

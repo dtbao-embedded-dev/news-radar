@@ -496,7 +496,8 @@ def crawl(cfg):
     stories = collapse(matched)
     ranked = rank_groups(stories, groups, cfg.get("rank") or {},
                          _source_weights(cfg), fetched_at,
-                         default_cap=cfg.get("report.max_per_group", 0))
+                         default_cap=cfg.get("report.max_per_group", 0),
+                         max_age_days=cfg.get("rank.max_age_days", 0))
 
     log.info("matched %d item(s) -> %d story(ies) after dedup -> %d kept "
              "across %d group(s)", len(matched), len(stories),

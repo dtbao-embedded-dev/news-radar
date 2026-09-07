@@ -46,11 +46,15 @@ DEFAULTS = {
     # config that never mentions the key must keep the page it has.
     "report": {"mode": "incremental", "max_per_group": 0, "rank_threshold": 5,
                "html": True},
+    # `max_age_days` is 0 - no cut - for the usual reason: an upgrade that never
+    # mentioned `rank` must not start dropping stories it reported yesterday.
+    # The template chooses a fortnight; see `rank.fresh_enough()`.
     "rank": {
         "weight_source": 0.5,
         "weight_frequency": 0.3,
         "weight_freshness": 0.2,
         "freshness_half_life_hours": 12.0,
+        "max_age_days": 0,
     },
     "storage": {"data_dir": "output", "retention_days": 0},
     # Everything that keeps the radar alive without being watched. All four ship

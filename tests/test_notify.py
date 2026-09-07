@@ -121,6 +121,66 @@ eq("an empty key set is not the same as no diff at all",
    len(notify.pick(BY_LABEL, LABELS, None)), 2)
 
 
+# --- one story, one appearance in a message -------------------------------
+
+# Reported from a real Telegram message on 2026-09-07: the Nvidia/Hugging Face
+# story matched both `AI` and `AI Repos`, so it arrived twice in one message -
+# same headline, same link, same AI sentence, same timestamp. The store is
+# right to hold a row per (story, group); a linear message is the wrong place
+# to print both.
+SHARED = row("NVIDIA Acquires Hugging Face for $13 Billion", "shared",
+             url="https://example.com/hf")
+BOTH = {
+    "AI": [row("Nvidia buys the home shelf of Open AI", "ai1"), SHARED],
+    "AI Repos": [SHARED, row("Show HN: an agent runtime", "repo1")],
+    "ESP32": [row("A retro clock on an ESP32", "esp1")],
+}
+ORDER = ["ESP32", "AI", "AI Repos"]
+
+deduped = notify.pick(BOTH, ORDER)
+flat = [(label, [r["dedup_key"] for r in rows]) for label, rows in deduped]
+eq("a story matching two groups is sent once, under the first group that claims it",
+   flat, [("ESP32", ["esp1"]), ("AI", ["ai1", "shared"]),
+          ("AI Repos", ["repo1"])])
+eq("no key appears twice across the whole message",
+   len([k for _, ks in flat for k in ks]),
+   len({k for _, ks in flat for k in ks}))
+check("the group that lost the duplicate keeps its own stories",
+      ["repo1"] == flat[2][1], flat)
+
+# The operator decides which group wins, by ordering `frequency_words.txt` -
+# there is no scoring tiebreak to reason about.
+reversed_order = notify.pick(BOTH, ["AI Repos", "AI", "ESP32"])
+eq("reversing the group order moves the story with it",
+   [(l, [r["dedup_key"] for r in rs]) for l, rs in reversed_order],
+   [("AI Repos", ["shared", "repo1"]), ("AI", ["ai1"]),
+    ("ESP32", ["esp1"])])
+
+# A group emptied by the dedup disappears, like one emptied by the diff.
+only_shared = notify.pick({"AI": [SHARED], "AI Repos": [SHARED]},
+                          ["AI", "AI Repos"])
+eq("a group whose every story was a duplicate is dropped entirely",
+   [l for l, _ in only_shared], ["AI"])
+
+# The dedup runs after the seen-set diff, not before: a story excluded by the
+# diff must not consume the slot its duplicate would have used.
+diffed_dupe = notify.pick(BOTH, ORDER, {"shared", "repo1"})
+eq("the diff still decides what is eligible at all",
+   [(l, [r["dedup_key"] for r in rs]) for l, rs in diffed_dupe],
+   [("AI", ["shared"]), ("AI Repos", ["repo1"])])
+
+# And it reaches both channels, because both build from pick().
+tg_once = telegram.build(deduped, VN)
+dc_once = discord.build(deduped, VN)
+for name, chunks in (("telegram", tg_once), ("discord", dc_once)):
+    text = "\n".join(t for t, _ in chunks)
+    eq("{}: the shared headline appears exactly once".format(name),
+       text.count("Hugging Face"), 1)
+    keys = [k for _, ks in chunks for k in ks]
+    eq("{}: and its key is carried exactly once".format(name),
+       keys.count("shared"), 1)
+
+
 # --- the shared chunker ---------------------------------------------------
 
 # Two small groups belong in one message; the split exists for size, not for

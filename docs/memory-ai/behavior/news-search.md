@@ -20,6 +20,7 @@ order: 1
 
 1. Read every `feeds[]` entry with `enabled: true`. Each contributes one URL.
 2. Parse `frequency_words.txt` into groups. Take each group's **primary term**
+   - its first plain term, or its `=> Label` when the group is regex-only -
    (its first plain line), skipping `[GLOBAL_FILTER]`.
 3. For every enabled `search_templates[]` entry, substitute each primary term into
    `{kw}`, percent-encoded. A multi-word term is wrapped in quotes first so the
@@ -64,6 +65,20 @@ Matching is done on a folded form of the title: lowercased, Unicode NFD, combini
 marks removed, whitespace collapsed. So `Điện tử` matches `dien tu`, and `ESP32`
 matches `esp32`. `/regex/` lines are applied to the **original** title, not the
 folded one, because a regex author is entitled to write their own case rules.
+
+**A regex can only widen a group, never narrow it**, because step 2 above is an
+any-of across plain terms *and* regexes. That is worth knowing before reaching
+for one to fix a false positive: it will not.
+
+The way to narrow a group is therefore to give it **no plain term** and let its
+regexes be the whole of its matching, taking the search query from `=> Label`
+instead. The shipped `RTOS` group is the worked example. Folding is what forces
+it: `fold("RTOs") == fold("RTOS") == "rtos"`, so a plain term cannot separate an
+RTOS story from an Indian Regional Transport Office, and 4 of that group's 10
+stories were e-rickshaw enforcement and licence backlogs on 2026-09-07.
+`/\bRTOS\b/` on the original title separates them exactly - measured 0 of 3
+noise kept, 4 of 4 real stories kept - and the query stays the short `RTOS`
+that `typoTolerance=false` made work in the first place.
 
 An item may belong to several groups. It is counted once per group it matches,
 and `select()` returns its labels in the keyword file's own group order.

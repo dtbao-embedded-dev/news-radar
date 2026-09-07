@@ -688,19 +688,38 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **A story in two groups is one message line now, but still two page
+  entries** (2026-09-07, unreleased). `notify.pick()` collapses it; the page
+  does not, and its per-group counts still count it twice. That is deliberate -
+  a page is browsed by topic - but it means the page's "78 story(ies)" and the
+  number of distinct stories are not the same number, and nothing on the page
+  says so.
 - **The OpenRouter key is on the free tier, so the model can 429 at any time.**
   `is_free_tier: true`, no credits, and only `:free` models resolve at all -
   a paid model id would answer `402`. A rate-limited cycle is already the
   designed failure mode (`summarize()` returns `None`, one WARNING, the page is
   written without the block, the cycle still counts as healthy), so nothing
   breaks - but the summary is best-effort until the account has credit.
-- **The `RTOS` keyword group is polluted by Indian transport offices.** `RTOS`
-  matches `RTOs` after folding, so three of the group's five top stories on
-  2026-09-07 were about Regional Transport Offices and e-rickshaw enforcement.
-  The AI summary routed around it by omitting the topic; the page does not. The
-  fix is a case-sensitive regex in `frequency_words.txt` - a `/RTOS/` term runs
-  against the **original** title, not the folded one - but that is a local file
-  on the deployment, so it is an operator edit rather than a release.
+- **~~The `RTOS` keyword group is polluted by Indian transport offices~~ -
+  fixed, unreleased.** Kept here because the *first* fix this file recorded was
+  wrong, and the shape of that mistake is the lesson: it was read, not run.
+  Adding `/RTOS/` beside the plain term changes nothing, because
+  `filter.group_matches()` ORs plain terms with regexes - **a regex can only
+  ever widen a group, never narrow it**. Proven against the seven real titles:
+  plain term alone keeps 3 of 3 noise, plain term plus `/RTOS/` keeps 3 of 3.
+
+  The real defect was that `group.primary` did two jobs - the string every
+  search template queries *and* a loose local match term - so a term could not
+  be searched for without also being matched loosely. `keywords._finish()` now
+  accepts a group with no plain term when it has a regex and a `=> Label`, and
+  queries the label. The shipped group became three word-boundary regexes with
+  the query still `RTOS`: **0 of 3 noise kept, 4 of 4 real stories kept**,
+  end to end through `filter.select()` on the real titles.
+
+  `config/frequency_words.txt` is a local file on the deployment, so the
+  homelab needs the same edit by hand after the release lands - the code change
+  only makes it expressible.
+
 - **Auto-update has no safety net, and this is the one to weigh before turning
   it on.** A release whose *cycles* fail is reported - `ops.Health` sends one
   message on the second consecutive failure. A release that **will not start**
@@ -833,31 +852,32 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Current focus
 
-**The summary moved from the topic to the story (2026-09-07, unreleased on
-`release/v0.2`).** The day used to be described twice: a paragraph per keyword
-group at the top of the page, the same paragraphs as one message a local day,
-and then the list of links the reader was going to read anyway. It is now one
-sentence under each story, in the same position on the page and in both
-channels, and there is no separate summary message at all.
+**Search quality, reviewed against TrendRadar and measured (2026-09-07,
+unreleased after v0.2.5).** The search *mechanics* came out clean - every claim
+in `config.yaml`'s comments was re-run and held: `when:7d` cuts the oldest hit
+from 2167 days to 6, `typoTolerance=false` cuts HN Algolia from 41,630 hits to
+246 and turns the top result from an Ask HN thread into an RTOS story, and the
+`hl=vi` template still returns 100 hits for the AI group and 0-1 for every
+other. One comment overstates: a quoted phrase is honoured by Google News
+(25 entries to 6) and is **inert on HN Algolia** (12,841 to 12,404, identical
+top four, `advancedSyntax=true` no different).
 
-Six changes, all unreleased: `NewsItem.excerpt` carries the feed's own
-`<description>` (parsed in `feeds.py`, thrown away until now); `items.excerpt`
-and `items.ai_summary` are schema **version 2**, with the project's first real
-migration in `open_db()`; `summarize.py` asks about a numbered batch of stories
-and parses the numbers back; `store.unsummarised()` / `save_summaries()` make it
-once per story rather than once per cycle; `render._summary()` and
-`section.summary` are gone, replaced by `p.gist` inside each `li.story`; and
-`ai.max_per_run` replaced `ai.max_per_topic` and `ai.notify_at_hour`.
+**Two real defects, both fixed and both unreleased.** A story matching two
+groups arrived twice in one Telegram message; `notify.pick()` now sends it once
+under the first group that claims it. And the keyword file could not express a
+narrow match at all - see [[progress]] for the RTOS case and the wrong fix that
+was on file for a day.
 
-**The cost shape is the point.** One completion per cycle, capped at
-`ai.max_per_run` new stories, and never re-asked - verified on a three-story
-smoke run with the cap at 2: one completion, then one, then zero.
+**TrendRadar's answer did not transfer directly, which was the useful part.**
+Its keyword file allows a regex-only group and carries regex flags, and its
+README teaches `\b` as the fix for exactly this class of false positive - but
+it has no search step at all, so it never needed a term to build a query URL.
+The mandatory-plain-term rule is news-radar's own, and taking the query from
+`=> Label` is news-radar's own way out.
 
-**What is not yet known:** whether a free model writes a *useful* Vietnamese
-sentence from a headline plus a feed teaser. The per-topic version was judged on
-a real run against OpenRouter; this one has only been run against a stub. The
-first homelab cycle after deploy is the evidence. Also unmeasured: how many more
-messages three-line stories make on Discord's 1900-character budget.
+**Next:** cut and deploy, then edit `config/frequency_words.txt` on the homelab
+by hand - the code change only makes the fix expressible, it does not apply it
+to a deployment's own file.
 
 **The tunnel is gone (2026-09-07).** The `cloudflared` service,
 `docker/cloudflared.yml`, `NEWS_RADAR_TUNNEL_ID` and the credentials-file
@@ -2373,9 +2393,17 @@ group is counted, capped and displayed independently.
 | `+word` | **Required**: the title must contain this as well, on top of matching the group |
 | `!word` | **Excluded**: a title containing this never matches the group |
 | `@n` | Cap this group at `n` items after ranking |
-| `/pattern/` | Match by regular expression instead of substring |
+| `/pattern/` | Match by regular expression, against the **original** title |
 | `=> Label` | Display name for the group on the page and in messages |
 | `# comment` | Ignored |
+
+A group may have **no plain term at all**, provided it has at least one
+`/pattern/` and a `=> Label`; the label is then what the search templates query.
+That is the only way to hunt for a term without also matching it loosely, and
+the reason it exists is in [[news-search]]: a plain term is compared on the
+folded title, so `RTOS` and `RTOs` are the same string to it, and a regex placed
+*beside* a plain term cannot help because the two are OR-ed. A group with
+neither a plain term nor a labelled regex is refused.
 
 The **first plain term** of a group is the group's *primary term*: it is what gets
 substituted into the search templates. Later plain terms widen the local match but
@@ -2621,7 +2649,7 @@ with nothing installed and nothing configured.
 
 | Signature | Returns | Notes |
 |-----------|---------|-------|
-| `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order + the seen-set diff. Empty groups dropped |
+| `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order, the seen-set diff, and one appearance per story. Empty groups dropped |
 | `chunk(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. Every text under `limit` |
 | `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
 | `stamp(moment, tz)` | `str` | `published_at` as `TIME_FMT` (`%H:%M %d/%m`), or `NO_TIME` (`--`) |
@@ -2631,12 +2659,28 @@ with nothing installed and nothing configured.
 that one absurd title plus its link cannot on its own overflow the smaller of the
 two budgets and cost the story its message.
 
-**`pick()` does the two things that decide what a channel is even shown.**
+**`pick()` does the three things that decide what a channel is even shown.**
 `labels` is the group order the keyword file fixes - the same order the page
 renders in, because a mapping's own order would shuffle the sections between runs
 for no reason a reader could follow. `keys` is the seen-set answer: `None` sends
 everything (`report.mode: current`), while an **empty set** means everything has
 already gone out - not the same thing, and it must send nothing at all.
+
+**And a story goes out once, under the first group in `labels` that claims it.**
+The store is right to hold a row per (story, group) - see [[storage-layer]] -
+but a message is read top to bottom once, so the second copy is the reader
+scrolling past their own report. Reported from a real Telegram message on
+2026-09-07: one Nvidia/Hugging Face story matched both `AI` and `AI Repos` and
+arrived twice, identical headline, link, AI sentence and timestamp. Which group
+wins is the operator's call, made by ordering `frequency_words.txt`; there is no
+score tiebreak to reason about. The dedup runs **after** the seen-set diff, so a
+story the diff already excluded never consumes the slot its duplicate would use.
+
+**This is the one place a message deliberately diverges from the page.** The
+page is browsed by topic, so a story belonging to two topics still appears in
+both of its sections and both counts; only the message collapses it. Marking
+follows the message: the key enters `reported` once, so the copy dropped here is
+not owed a message next cycle either.
 
 **`chunk()` splits on a group boundary first and an item boundary second**, and a
 single story is never split across two messages: half a headline with no link is
@@ -3693,6 +3737,7 @@ upgrades into this version and behaves exactly as it did before.
 
 1. Read every `feeds[]` entry with `enabled: true`. Each contributes one URL.
 2. Parse `frequency_words.txt` into groups. Take each group's **primary term**
+   - its first plain term, or its `=> Label` when the group is regex-only -
    (its first plain line), skipping `[GLOBAL_FILTER]`.
 3. For every enabled `search_templates[]` entry, substitute each primary term into
    `{kw}`, percent-encoded. A multi-word term is wrapped in quotes first so the
@@ -3737,6 +3782,20 @@ Matching is done on a folded form of the title: lowercased, Unicode NFD, combini
 marks removed, whitespace collapsed. So `Điện tử` matches `dien tu`, and `ESP32`
 matches `esp32`. `/regex/` lines are applied to the **original** title, not the
 folded one, because a regex author is entitled to write their own case rules.
+
+**A regex can only widen a group, never narrow it**, because step 2 above is an
+any-of across plain terms *and* regexes. That is worth knowing before reaching
+for one to fix a false positive: it will not.
+
+The way to narrow a group is therefore to give it **no plain term** and let its
+regexes be the whole of its matching, taking the search query from `=> Label`
+instead. The shipped `RTOS` group is the worked example. Folding is what forces
+it: `fold("RTOs") == fold("RTOS") == "rtos"`, so a plain term cannot separate an
+RTOS story from an Indian Regional Transport Office, and 4 of that group's 10
+stories were e-rickshaw enforcement and licence backlogs on 2026-09-07.
+`/\bRTOS\b/` on the original title separates them exactly - measured 0 of 3
+noise kept, 4 of 4 real stories kept - and the query stays the short `RTOS`
+that `typoTolerance=false` made work in the first place.
 
 An item may belong to several groups. It is counted once per group it matches,
 and `select()` returns its labels in the keyword file's own group order.

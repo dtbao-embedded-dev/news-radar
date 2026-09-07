@@ -117,11 +117,73 @@ eq("a comment line inside a group does not end the group",
    ["ESP32", "ESP-IDF"])
 
 
+# --- a regex-only group, and why it exists --------------------------------
+
+# `fold("RTOs") == fold("RTOS")`, so a plain term can never separate an RTOS
+# story from an Indian Regional Transport Office. A regex can - it runs on the
+# original title - but `filter.group_matches()` ORs terms with regexes, so a
+# regex only ever *widens* a group. The loose plain term therefore has to go,
+# and the search query has to come from somewhere else: the label.
+rx_groups, _ = mod.parse(write("/\\bRTOS\\b/\n/\\bZephyr\\b/\n@8\n=> RTOS\n"))
+rx = rx_groups[0]
+eq("a regex-only group parses", len(rx_groups), 1)
+eq("it has no plain term at all", rx.terms, [])
+eq("both regexes survive", len(rx.regexes), 2)
+eq("its search query comes from the label", rx.primary, "RTOS")
+eq("...and the label is still the label", rx.label, "RTOS")
+eq("the cap survives too", rx.cap, 8)
+
+# The point of the whole exercise, checked end to end through the real filter.
+from news_radar.filter import group_matches  # noqa: E402
+from news_radar.item import new_item  # noqa: E402
+import datetime as _dt  # noqa: E402
+
+_NOW = _dt.datetime(2026, 9, 7, tzinfo=_dt.timezone.utc)
+
+
+def _matches(group, title):
+    return group_matches(new_item(title, "https://e.invalid/x", "hn", _NOW), group)
+
+
+check("the real RTOS story still matches",
+      _matches(rx, "Async Rust vs RTOS showdown (2022)"))
+check("...and so does the Zephyr one",
+      _matches(rx, "Simplifying Embedded System Design with Zephyr RTOS - EE Times"))
+check("the Indian transport office does not",
+      not _matches(rx, "Ahmedabad RTOs hit by technical glitches, 12K pending"))
+check("...nor the bribery story",
+      not _matches(rx, "Former transport commissioner alleges RTOs pocket Rs 1,700 crore"))
+
+# The thing that made the old advice a no-op: adding a regex beside the loose
+# plain term changes nothing, because the two are OR-ed.
+loose, _ = mod.parse(write("RTOS\n/\\bRTOS\\b/\n@8\n=> RTOS\n"))
+check("a regex beside a loose plain term cannot narrow a group - it only widens",
+      _matches(loose[0], "Ahmedabad RTOs hit by technical glitches, 12K pending"))
+eq("...and that group's query is still the plain term", loose[0].primary, "RTOS")
+
+# A label is a display string doing a second job here, so a space in it travels
+# into the query as a quoted phrase. Pinned so that stays a decision.
+spaced, _ = mod.parse(write("/\\bTinyML\\b/\n=> tiny ml\n"))
+eq("a spaced label becomes the query verbatim", spaced[0].primary, "tiny ml")
+from news_radar.fetch.search import build_urls  # noqa: E402
+
+_url = build_urls(spaced, [{"id": "t", "url": "https://e.invalid/?q={kw}"}])[0][0]
+check("...and search quotes it as a phrase", "%22tiny+ml%22" in _url, _url)
+
+
 # --- the errors that would otherwise be silent ----------------------------
 
-msg = check_raises("a group with no plain term is rejected",
+msg = check_raises("a group with neither a plain term nor a labelled regex "
+                   "is rejected",
                    write("ESP32\n\n!only-an-exclusion\n@5\n"))
 check("the rejection names the line number", ":3" in msg or "line 3" in msg, msg)
+check("...and says both ways out", "regex" in msg and "Label" in msg, msg)
+
+# An unlabelled regex-only group has nothing to search for and nothing to
+# call itself, so it is still refused - the label is doing double duty as
+# the query.
+check_raises("a regex-only group with no => label is rejected",
+             write("ESP32\n\n/\\\\bRTOS\\\\b/\n@5\n"))
 
 check_raises("a non-numeric cap is rejected", write("ESP32\n@many\n"))
 check_raises("an unterminated regex is rejected", write("ESP32\n/CVE-\\d+\n"))

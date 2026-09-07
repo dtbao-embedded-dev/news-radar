@@ -65,8 +65,12 @@ Updating is `docker compose pull && docker compose up -d`, or nothing at all —
 `--profile autoupdate` runs a watchtower container that does it for you once a
 day. `docker compose run --rm news-radar --check` names any config key a release
 added and your `config.yaml` has not got. See
-[docs/memory-ai/rule/setup-homelab.md](docs/memory-ai/rule/setup-homelab.md) for
-the tunnel, the migration from an older checkout, and how to pin a version.
+[docs/memory-ai/rule/updating-homelab.md](docs/memory-ai/rule/updating-homelab.md)
+for the migration from an older checkout and how to pin a version.
+
+The report is served on the LAN and **published nowhere** — there is no tunnel
+and no reverse proxy in this stack. Putting it on the internet is a decision for
+whatever you choose to front it with, made outside this project.
 
 ## Developing it
 

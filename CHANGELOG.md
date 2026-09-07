@@ -18,6 +18,22 @@ one makes the file and the tags disagree.
 
 ### Breaking Changes
 
+- **deploy**: the Cloudflare Tunnel is gone. The `cloudflared` service,
+  `docker/cloudflared.yml`, `NEWS_RADAR_TUNNEL_ID` and the credentials-file
+  detection that used to switch on the `tunnel` compose profile
+  (`scripts/setup.py`) are all removed. **The report is served on the LAN and
+  published nowhere**: `NEWS_RADAR_HTTP_PORT` (8088) is the only way in, and it
+  is no longer "for local debugging". Anything that used to answer on the public
+  hostname stops answering the moment the connector is stopped. `--profile
+  tunnel` still parses and is now a no-op - it starts exactly what `up -d`
+  starts - so an old command in somebody's shell history does nothing
+  surprising. Two follow-ups for an existing deployment: point `ops.site_url` at
+  `http://caddy:8080/` (it resolves over the compose network and needs no
+  published port), and delete `docker/tunnel-credentials.json`. `.gitignore`
+  keeps ignoring that path deliberately, so a machine that still has one cannot
+  commit it by accident. Putting the report back on the internet is now a
+  decision for whatever fronts it, made outside this project.
+
 - **deploy**: `docker/cloudflared.yml` no longer names this deployment. The
   tunnel id moved to `NEWS_RADAR_TUNNEL_ID` in `.env` and is passed as the
   argument to `run`, and the ingress hostname is gone entirely - a single

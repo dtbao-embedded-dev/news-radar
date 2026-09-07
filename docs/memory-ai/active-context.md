@@ -9,6 +9,17 @@ updated: 2026-09-07
 
 ## Current focus
 
+**Topics reshaped to what the user actually reads (2026-09-07, unreleased
+after v0.2.7).** `RTOS` out, five model groups in - `Claude`, `ChatGPT`, `GLM`,
+`Qwen`, `DeepSeek` - and the `google_news` (hl=vi) template disabled to keep the
+cycle at 34 requests. Numbers in [[progress]].
+
+**Next:** cut a release. Then the homelab needs **both** of its gitignored files
+edited by hand or none of this reaches production: `config.yaml` for the new
+feeds, `rank.max_age_days`, the disabled `genk`/`google_news`, and
+`config/frequency_words.txt` for the five model groups plus `GitHub Trending`.
+That file is the one the deployment tunes, so it will not merge on its own.
+
 **Report quality, measured rather than argued (2026-09-07, unreleased after
 v0.2.7).** Auditing the shipped sources end to end turned up three defects and
 all three are fixed: `genk` disabled (0 of 61 entries carry a date, so it could

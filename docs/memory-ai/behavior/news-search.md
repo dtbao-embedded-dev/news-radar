@@ -27,12 +27,13 @@ order: 1
    search engine treats it as a phrase.
 4. The result is one flat list of `(url, source_id, keyword_group | None)`.
 
-Cost is predictable and worth stating out loud: `len(feeds) + len(groups) x
-len(enabled templates)`. Measured on the shipped config: thirteen feeds, seven
-groups and three enabled templates is **34 requests and ~59 s per run**, not
-thirteen requests. Adding a keyword group therefore costs one request per
-enabled template, every cycle - the `GitHub Trending` group's three are spent
-on queries whose answers its own regex then discards. `build_urls()` is pure, so that number is known before the first
+Cost is predictable and worth stating out loud: `len(enabled feeds) +
+len(groups) x len(enabled templates)`. Measured on the shipped config: twelve
+enabled feeds, eleven groups and two enabled templates is **34 requests per
+run**. That number is the reason `genk` and the `google_news` (hl=vi) template
+both ship disabled - adding the five model groups would otherwise have taken the
+cycle from 33 requests to 45, a 36% rise at the two hosts already known to
+throttle first. `build_urls()` is pure, so that number is known before the first
 byte goes out.
 
 ## Stage 2 - fetch
@@ -98,13 +99,28 @@ for one to fix a false positive: it will not.
 
 The way to narrow a group is therefore to give it **no plain term** and let its
 regexes be the whole of its matching, taking the search query from `=> Label`
-instead. The shipped `RTOS` group is the worked example. Folding is what forces
+instead. The `RTOS` group was the worked example until it was removed on
+2026-09-07; `GitHub Trending` is the one that ships now. Folding is what forced
 it: `fold("RTOs") == fold("RTOS") == "rtos"`, so a plain term cannot separate an
 RTOS story from an Indian Regional Transport Office, and 4 of that group's 10
 stories were e-rickshaw enforcement and licence backlogs on 2026-09-07.
 `/\bRTOS\b/` on the original title separates them exactly - measured 0 of 3
 noise kept, 4 of 4 real stories kept - and the query stays the short `RTOS`
 that `typoTolerance=false` made work in the first place.
+
+**One group is one search query, and that decides how groups are cut.** A
+group's primary term is its only query, so five model names in one group would
+have searched for one of them. Measured 2026-09-07 on the fixed feeds alone,
+`GLM` appeared once, `Qwen` twice and `DeepSeek` seven times in 2,239 items;
+with a query each they return 8, 20 and 67. A single group behind one broad
+query was tried and rejected - `"chatbot"` surfaced 36 vendor mentions but only
+ChatGPT and Claude, `"LLM"` six. Hence five groups, and hence the request budget
+below: adding a group costs one request per enabled template, every cycle.
+
+**Group order in the keyword file is load-bearing beyond the page.** A story
+matching two groups appears in both sections, but `notify.pick()` sends it once
+under the **first** group that claims it. The five model groups therefore sit
+ahead of the `AI` group, so a Claude story arrives labelled `Claude`.
 
 An item may belong to several groups. It is counted once per group it matches,
 and `select()` returns its labels in the keyword file's own group order.
@@ -155,7 +171,7 @@ Two properties decided by measurement rather than taste:
 - **Groups refill; they do not shrink.** The cut applies to the whole pool
   before any group is filled. Measured on a real cycle at 14 days: the oldest
   stored story went from 27,466 h to 284 h, nothing over 336 h survived, and
-  six of the seven groups stayed at their caps. Only `RTOS` shrank, 8 to 4,
+  six of the seven groups then shipped stayed at their caps. Only `RTOS` shrank, 8 to 4,
   because four of its eight really were over a fortnight old - which is the
   section going quiet, the signal this report is built to show.
 

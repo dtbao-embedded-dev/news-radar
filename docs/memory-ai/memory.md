@@ -19,6 +19,35 @@ _Generated 2026-09-07 - 20 durable doc(s)._
 
 ## What works
 
+### Five model groups replace RTOS (2026-09-07, unreleased)
+
+`Claude`, `ChatGPT`, `GLM`, `Qwen`, `DeepSeek`, `@6` apiece, sitting ahead of
+the `AI` group; the `RTOS` group is gone. Measured on a real cycle: **90
+stories across 11 groups**, and all five new groups filled their cap.
+
+Three measurements shaped it, and two of them overturned the obvious answer:
+
+- **Five groups, not one.** A group's first plain term is its only search
+  query, so one group would have searched for `Claude` and nothing else. On the
+  fixed feeds alone `GLM` appeared once, `Qwen` twice, `DeepSeek` seven times in
+  2,239 items; with a query each they return 8, 20 and 67.
+- **A broad query does not substitute.** One regex-only group behind a wide
+  query was the cheap idea and it failed the test: `"chatbot"` surfaced 36
+  vendor mentions but only ChatGPT and Claude, `"LLM"` six, `"AI model"` three.
+  GLM, Qwen and DeepSeek never appeared.
+- **Plain terms beat regexes here, against expectation.** `Claude` (Monet,
+  Shannon) and `GLM` (the OpenGL maths library, the generalized linear model)
+  looked like the RTOS trap all over again. Across 2,655 live items: 135 Claude
+  hits and 11 GLM hits, **every one about the model**, and a word-boundary regex
+  matched exactly the same set. The corpus is tech news, not the whole web.
+
+**The budget was held, not blown.** Eleven groups x three templates would have
+been 45 requests a cycle against 33. Disabling the `google_news` (hl=vi)
+template - which had returned 49 of its 53 usable stories into the AI group and
+0 for ESP32, RTOS and GitHub Trending - brings it to **34**. Group order is
+load-bearing: `notify.pick()` sends a story under the first group that claims
+it, so `Claude` ahead of `AI` is what makes a message say `Claude`.
+
 ### The report has an absolute age floor (2026-09-07, unreleased)
 
 `rank.max_age_days` drops a story past the limit before anything is scored.
@@ -947,6 +976,17 @@ the ops layer and the summary - and the whole thing is reachable at
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**Topics reshaped to what the user actually reads (2026-09-07, unreleased
+after v0.2.7).** `RTOS` out, five model groups in - `Claude`, `ChatGPT`, `GLM`,
+`Qwen`, `DeepSeek` - and the `google_news` (hl=vi) template disabled to keep the
+cycle at 34 requests. Numbers in [[progress]].
+
+**Next:** cut a release. Then the homelab needs **both** of its gitignored files
+edited by hand or none of this reaches production: `config.yaml` for the new
+feeds, `rank.max_age_days`, the disabled `genk`/`google_news`, and
+`config/frequency_words.txt` for the five model groups plus `GitHub Trending`.
+That file is the one the deployment tunes, so it will not merge on its own.
 
 **Report quality, measured rather than argued (2026-09-07, unreleased after
 v0.2.7).** Auditing the shipped sources end to end turned up three defects and
@@ -2230,8 +2270,8 @@ group with three templates enabled produces three requests per run.
 
 | id | Template | Returns | Substitution |
 |----|----------|---------|--------------|
-| `google_news` | `https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:7d` is not optional - without it the engine answers relevance-first and returns hits aged months |
-| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. Both are kept so Vietnamese AI coverage stays on the page |
+| `google_news` | `https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | **Ships disabled since the keyword file reached eleven groups** - see the row below. `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:7d` is not optional - without it the engine answers relevance-first and returns hits aged months |
+| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. A template costs one request **per keyword group**, so at eleven groups `hl=vi` would spend eleven requests a cycle at the host most likely to throttle, for coverage the five model groups replace - it is switched off, and `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news |
 | `hn_algolia` | `https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story&typoTolerance=false` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID`. `search_by_date` orders chronologically, so the window needs no epoch computing; `tags=story` drops comment hits, whose title is not a headline. **`typoTolerance=false` is required, not cosmetic**: with it on, Algolia matches 41,612 stories for `RTOS` and `FreeToken` for `FreeRTOS`, and a date sort then returns the most recent of that noise - `RTOS` yielded 0 usable of 20. Off, it is strictly better on every shipped group: 97 usable a cycle instead of 77 |
 | `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement, and the same resolver requirement |
 
@@ -3938,12 +3978,13 @@ upgrades into this version and behaves exactly as it did before.
    search engine treats it as a phrase.
 4. The result is one flat list of `(url, source_id, keyword_group | None)`.
 
-Cost is predictable and worth stating out loud: `len(feeds) + len(groups) x
-len(enabled templates)`. Measured on the shipped config: thirteen feeds, seven
-groups and three enabled templates is **34 requests and ~59 s per run**, not
-thirteen requests. Adding a keyword group therefore costs one request per
-enabled template, every cycle - the `GitHub Trending` group's three are spent
-on queries whose answers its own regex then discards. `build_urls()` is pure, so that number is known before the first
+Cost is predictable and worth stating out loud: `len(enabled feeds) +
+len(groups) x len(enabled templates)`. Measured on the shipped config: twelve
+enabled feeds, eleven groups and two enabled templates is **34 requests per
+run**. That number is the reason `genk` and the `google_news` (hl=vi) template
+both ship disabled - adding the five model groups would otherwise have taken the
+cycle from 33 requests to 45, a 36% rise at the two hosts already known to
+throttle first. `build_urls()` is pure, so that number is known before the first
 byte goes out.
 
 ## Stage 2 - fetch
@@ -4009,13 +4050,28 @@ for one to fix a false positive: it will not.
 
 The way to narrow a group is therefore to give it **no plain term** and let its
 regexes be the whole of its matching, taking the search query from `=> Label`
-instead. The shipped `RTOS` group is the worked example. Folding is what forces
+instead. The `RTOS` group was the worked example until it was removed on
+2026-09-07; `GitHub Trending` is the one that ships now. Folding is what forced
 it: `fold("RTOs") == fold("RTOS") == "rtos"`, so a plain term cannot separate an
 RTOS story from an Indian Regional Transport Office, and 4 of that group's 10
 stories were e-rickshaw enforcement and licence backlogs on 2026-09-07.
 `/\bRTOS\b/` on the original title separates them exactly - measured 0 of 3
 noise kept, 4 of 4 real stories kept - and the query stays the short `RTOS`
 that `typoTolerance=false` made work in the first place.
+
+**One group is one search query, and that decides how groups are cut.** A
+group's primary term is its only query, so five model names in one group would
+have searched for one of them. Measured 2026-09-07 on the fixed feeds alone,
+`GLM` appeared once, `Qwen` twice and `DeepSeek` seven times in 2,239 items;
+with a query each they return 8, 20 and 67. A single group behind one broad
+query was tried and rejected - `"chatbot"` surfaced 36 vendor mentions but only
+ChatGPT and Claude, `"LLM"` six. Hence five groups, and hence the request budget
+below: adding a group costs one request per enabled template, every cycle.
+
+**Group order in the keyword file is load-bearing beyond the page.** A story
+matching two groups appears in both sections, but `notify.pick()` sends it once
+under the **first** group that claims it. The five model groups therefore sit
+ahead of the `AI` group, so a Claude story arrives labelled `Claude`.
 
 An item may belong to several groups. It is counted once per group it matches,
 and `select()` returns its labels in the keyword file's own group order.
@@ -4066,7 +4122,7 @@ Two properties decided by measurement rather than taste:
 - **Groups refill; they do not shrink.** The cut applies to the whole pool
   before any group is filled. Measured on a real cycle at 14 days: the oldest
   stored story went from 27,466 h to 284 h, nothing over 336 h survived, and
-  six of the seven groups stayed at their caps. Only `RTOS` shrank, 8 to 4,
+  six of the seven groups then shipped stayed at their caps. Only `RTOS` shrank, 8 to 4,
   because four of its eight really were over a fortnight old - which is the
   section going quiet, the signal this report is built to show.
 

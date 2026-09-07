@@ -9,6 +9,35 @@ updated: 2026-09-07
 
 ## What works
 
+### Five model groups replace RTOS (2026-09-07, unreleased)
+
+`Claude`, `ChatGPT`, `GLM`, `Qwen`, `DeepSeek`, `@6` apiece, sitting ahead of
+the `AI` group; the `RTOS` group is gone. Measured on a real cycle: **90
+stories across 11 groups**, and all five new groups filled their cap.
+
+Three measurements shaped it, and two of them overturned the obvious answer:
+
+- **Five groups, not one.** A group's first plain term is its only search
+  query, so one group would have searched for `Claude` and nothing else. On the
+  fixed feeds alone `GLM` appeared once, `Qwen` twice, `DeepSeek` seven times in
+  2,239 items; with a query each they return 8, 20 and 67.
+- **A broad query does not substitute.** One regex-only group behind a wide
+  query was the cheap idea and it failed the test: `"chatbot"` surfaced 36
+  vendor mentions but only ChatGPT and Claude, `"LLM"` six, `"AI model"` three.
+  GLM, Qwen and DeepSeek never appeared.
+- **Plain terms beat regexes here, against expectation.** `Claude` (Monet,
+  Shannon) and `GLM` (the OpenGL maths library, the generalized linear model)
+  looked like the RTOS trap all over again. Across 2,655 live items: 135 Claude
+  hits and 11 GLM hits, **every one about the model**, and a word-boundary regex
+  matched exactly the same set. The corpus is tech news, not the whole web.
+
+**The budget was held, not blown.** Eleven groups x three templates would have
+been 45 requests a cycle against 33. Disabling the `google_news` (hl=vi)
+template - which had returned 49 of its 53 usable stories into the AI group and
+0 for ESP32, RTOS and GitHub Trending - brings it to **34**. Group order is
+load-bearing: `notify.pick()` sends a story under the first group that claims
+it, so `Claude` ahead of `AI` is what makes a message say `Claude`.
+
 ### The report has an absolute age floor (2026-09-07, unreleased)
 
 `rank.max_age_days` drops a story past the limit before anything is scored.

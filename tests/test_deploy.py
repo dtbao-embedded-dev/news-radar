@@ -148,6 +148,20 @@ def labels(service):
 watchtower = services.get("watchtower", {})
 check("there is a watchtower service", bool(watchtower))
 
+# `containrrr/watchtower` is unmaintained: its Docker client speaks API 1.25 and
+# Docker 29 refuses anything below 1.40, so it crash-loops on a modern daemon.
+# Nothing in a YAML check can prove an image talks to a daemon - this only pins
+# that the known-broken one does not come back.
+check("watchtower is the maintained fork, not containrrr's",
+      str(watchtower.get("image", "")).startswith("ghcr.io/nicholas-fedor/watchtower:"),
+      repr(watchtower.get("image")))
+# The tag is whatever follows the colon in the last path segment - counting
+# colons in the whole reference is wrong, because a registry host may or may not
+# carry a port.
+wt_tag = str(watchtower.get("image", "")).rsplit("/", 1)[-1].partition(":")[2]
+check("the watchtower image is pinned to an exact version",
+      wt_tag not in ("", "latest"), repr(watchtower.get("image")))
+
 # Opt-in, the same way the tunnel is. On a dev checkout watchtower would pull
 # `:latest` from GHCR straight over the image the developer just built - the
 # profile is what keeps `docker compose up -d` on this machine harmless.

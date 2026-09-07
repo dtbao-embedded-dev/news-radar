@@ -91,13 +91,18 @@ docker compose run --rm news-radar --check
 **The report is now reachable on `http://<host>:8088` and nowhere else.** There
 is no tunnel and no reverse proxy in this stack - see the section below.
 
-**The GHCR package is private until somebody makes it public.** A package
-published by a workflow inherits the repository's *access permissions* but
-**not** its visibility, so a new one is private even from a public repo and the
-`pull` above answers `denied`. Fix it once, on the package's page under the
-repository's **Packages** - Package settings - Change visibility - Public. The
-alternative is `docker login ghcr.io` on the homelab with a read:packages token,
-which is a credential on the deployment for no benefit.
+**The GHCR package came out public, and no login was needed.** This file used
+to say the opposite - that a workflow-published package is private and the
+`pull` would answer `denied` - on the strength of a documentation summary rather
+than a test. Measured on the first real publish: the homelab pulled
+`:0.2.3` with **no `~/.docker/config.json` at all**, and an anonymous registry
+token fetched the manifest with `HTTP 200`.
+
+If a future publish *is* private, the symptom is `denied` on `pull` and the fix
+is one click - the package's page under the repository's **Packages**, Package
+settings, Change visibility, Public. Prefer that to
+`docker login ghcr.io` with a read:packages token, which puts a credential on
+the deployment for no benefit.
 
 **`pull` first, always.** The compose file carries `image:` and `build:` both,
 and `up` **does not fall back to pulling** - measured, it goes straight to the

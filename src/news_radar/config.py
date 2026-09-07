@@ -151,6 +151,24 @@ class Config:
         channels = self.get("notification.channels", {}) or {}
         return [n for n, c in channels.items() if (c or {}).get("enabled", True)]
 
+    def site_check_url(self):
+        """The url the heartbeat should GET, or `""` when there is no page.
+
+        `ops.site_url` asks one question - is the report this cycle wrote
+        actually reachable from outside? With `report.html` off there is no
+        report to reach, and the honest answer is not "404": a non-200 withholds
+        the ping *and* counts as a failed cycle, so leaving the url set would
+        alert after two cycles and every ten minutes' worth of cycles after
+        that, about a page nobody asked for.
+
+        The value in the file is deliberately left alone. Turning the page back
+        on must restore the check without the operator having to remember what
+        the url used to be.
+        """
+        if not self.get("report.html", True):
+            return ""
+        return self.get("ops.site_url") or ""
+
     def user_agent(self):
         template = self.get("advanced.user_agent") or ""
         return template.replace("{version}", __version__)

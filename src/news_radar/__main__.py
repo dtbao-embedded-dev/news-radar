@@ -503,7 +503,12 @@ def crawl(cfg):
 
     # Last, and with the verdict on everything above it: the ping is a claim
     # that this cycle worked, so it is only ever made once that is known.
-    problems += ops.heartbeat(fetcher, cfg.get("ops.site_url"),
+    site_url = cfg.site_check_url()
+    if not site_url and cfg.get("ops.site_url"):
+        # Said out loud rather than skipped quietly: an operator who set that
+        # url is entitled to know why nothing is checking it.
+        log.info("heartbeat: site check skipped, the HTML report is off")
+    problems += ops.heartbeat(fetcher, site_url,
                               cfg.get("ops.heartbeat_url"),
                               healthy=not problems)
     return ranked, problems

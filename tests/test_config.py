@@ -271,6 +271,27 @@ check("backup_keep 0 is legal - it means back nothing up",
 check("setting one ops key keeps the siblings",
       ops_on.get("ops.backup_dir") == "backups")
 
+# The site check asks whether the published page is reachable. With the page
+# turned off there is no page to reach, so the question has no honest answer:
+# a 404 every cycle would be counted as a failed cycle and alert after two.
+check("the site is checked while the page is published",
+      ops_on.site_check_url() == "https://news.invalid/",
+      repr(ops_on.site_check_url()))
+
+no_page = cfgmod.load(write(MINIMAL + """
+report:
+  html: false
+ops:
+  site_url: https://news.invalid/
+"""), env=SECRETS)
+check("no page means no site check, whatever the url says",
+      no_page.site_check_url() == "", repr(no_page.site_check_url()))
+check("...and ops.site_url itself is left exactly as written",
+      no_page.get("ops.site_url") == "https://news.invalid/")
+check("no page and no url is still no site check",
+      cfgmod.load(write(MINIMAL + "\nreport:\n  html: false\n"),
+                  env=SECRETS).site_check_url() == "")
+
 
 # --------------------------------------------------------------------------
 # the ai section - P6-4

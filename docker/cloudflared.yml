@@ -1,23 +1,36 @@
-# Cloudflare Tunnel connector for news.dtbao.org.
+# Cloudflare Tunnel connector for whatever hostname this deployment publishes.
 #
-# This is the `news` tunnel, created on the Cloudflare account that owns
-# dtbao.org. The tunnel id is not a secret - the credentials file beside it is,
-# which is why that one is gitignored and this one is committed.
+# This file is committed, so anything written into it is a fact about *one*
+# deployment welded into the repository. Two things used to be here and are not
+# any more:
+#
+#   the tunnel id  -> NEWS_RADAR_TUNNEL_ID in .env, passed as the argument to
+#                     `run` in docker-compose.yml. Compose expands variables in
+#                     `command:`; cloudflared does **not** expand them inside
+#                     this file, which is why the id cannot live here as one.
+#                     It is not a secret either way - the credentials file
+#                     beside it is, and that one is never committed. (It also
+#                     carries the same id, so nothing is duplicated by hand.)
+#
+#   the hostname   -> Cloudflare DNS, where `cloudflared tunnel route dns` put
+#                     it when the tunnel was created. Only a hostname routed to
+#                     this tunnel ever arrives here, so naming it again would
+#                     only be a second place to keep in sync.
 #
 # The connector runs as a container in this compose project, so it reaches the
-# web server by its service name over the docker network. The published host
-# port (NEWS_RADAR_HTTP_PORT, 8088) stays what it always was: local debugging.
-#
-# Running it here rather than adding a hostname to a host-level cloudflared
-# means the origin can be `caddy:8080` at all - a tunnel running on the host
-# cannot resolve a docker service name - and that restarting the news route
-# never touches whatever else the host tunnel is carrying.
-tunnel: 94fedb96-98c6-4683-8ae5-6addda3d9c9e
+# web server by its service name over the docker network. A tunnel running on
+# the host cannot resolve a docker service name, which is the whole reason the
+# origin can be `caddy:8080` at all - and it means restarting the news route
+# never touches whatever else a host tunnel is carrying.
 credentials-file: /etc/cloudflared/creds.json
 
 ingress:
-  - hostname: news.dtbao.org
-    service: http://caddy:8080
-
-  # Anything else arriving on this tunnel is not ours to answer.
-  - service: http_status:404
+  # One catch-all rule: everything arriving on this tunnel goes to the web
+  # server. Cloudflare requires the last rule to be a catch-all, and with the
+  # hostname gone this is also the first.
+  #
+  # What this gives up: there used to be a `http_status:404` rule behind the
+  # named one, so a hostname routed here by mistake got a 404 instead of the
+  # report. That guard was only ever against the account owner's own
+  # misconfiguration, and caddy serves nothing but the published output/.
+  - service: http://caddy:8080

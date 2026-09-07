@@ -108,9 +108,12 @@ services:
     container_name: news-radar-tunnel
     profiles: ["tunnel"]
     restart: unless-stopped
-    # No `tunnel run <name>`: the name would be looked up over the API, and
-    # this connector should need nothing but the two files it is handed.
-    command: tunnel --config /etc/cloudflared/config.yml run
+    # The id, not the name: a name would be looked up over the API, and this
+    # connector should need nothing but its config, its credentials and one
+    # variable. It is an argument rather than a line in cloudflared.yml because
+    # Compose expands variables here and cloudflared does not expand them in
+    # its own config file - see docker/cloudflared.yml.
+    command: tunnel --config /etc/cloudflared/config.yml run ${NEWS_RADAR_TUNNEL_ID}
     environment:
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
     volumes:

@@ -124,7 +124,8 @@ check("the crawl service can still be built locally",
 # .env.example documents both new variables
 # --------------------------------------------------------------------------
 
-for key in ("NEWS_RADAR_HOME", "NEWS_RADAR_VERSION", "WATCHTOWER_POLL_INTERVAL"):
+for key in ("NEWS_RADAR_HOME", "NEWS_RADAR_VERSION", "WATCHTOWER_POLL_INTERVAL",
+            "NEWS_RADAR_TUNNEL_ID"):
     check("{} is in .env.example".format(key), key + "=" in env_example)
 
 
@@ -214,6 +215,40 @@ if build:
     check("both the version tag and latest are published",
           len([t for t in str(with_.get("tags", "")).splitlines() if t.strip()]) == 2,
           repr(with_.get("tags")))
+
+
+# --------------------------------------------------------------------------
+# the tunnel config names no deployment
+# --------------------------------------------------------------------------
+
+# The whole point: docker/cloudflared.yml is committed, so anything in it is a
+# fact about *one* homelab welded into the repository. The tunnel id moves to
+# the compose command (Compose substitutes there; cloudflared does **not**
+# substitute inside its own config file), and the hostname disappears entirely -
+# it already lives in Cloudflare DNS, put there by `cloudflared tunnel route
+# dns`.
+TUNNEL_CFG = ROOT / "docker" / "cloudflared.yml"
+tunnel_cfg = yaml.safe_load(TUNNEL_CFG.read_text(encoding="utf-8"))
+
+check("the tunnel config pins no tunnel id",
+      "tunnel" not in tunnel_cfg, repr(tunnel_cfg.get("tunnel")))
+check("the tunnel config still points at its credentials",
+      tunnel_cfg.get("credentials-file") == "/etc/cloudflared/creds.json",
+      repr(tunnel_cfg.get("credentials-file")))
+
+rules = tunnel_cfg.get("ingress") or []
+named = [r for r in rules if "hostname" in r]
+check("no ingress rule names a hostname", not named, repr(named))
+check("the ingress is a single catch-all to the web server",
+      [r.get("service") for r in rules] == ["http://caddy:8080"], repr(rules))
+
+# The id has to arrive from somewhere, and `command` is the one place Compose
+# will expand it.
+cmd = str(services.get("cloudflared", {}).get("command", ""))
+check("the compose command carries the tunnel id variable",
+      "${NEWS_RADAR_TUNNEL_ID}" in cmd, repr(cmd))
+check("the id is the argument to `run`",
+      cmd.rstrip().endswith("run ${NEWS_RADAR_TUNNEL_ID}"), repr(cmd))
 
 
 # --------------------------------------------------------------------------

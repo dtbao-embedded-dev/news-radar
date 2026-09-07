@@ -16,6 +16,31 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.6 - 2026-09-07
+
+### Fixes
+
+- **notify**: a story matching two keyword groups is sent **once**, under the
+  first group in the keyword file's own order. Reported from a real Telegram
+  message: one Nvidia/Hugging Face story matched both `AI` and `AI Repos` and
+  arrived twice in the same message - identical headline, link, AI sentence and
+  timestamp. Fixed in `notify.pick()`, so both channels get it; the dedup runs
+  after the seen-set diff, and the key still enters `reported` once. The
+  **page** is deliberately unchanged: it is browsed by topic, so a story
+  belonging to two topics still appears in both sections.
+- **keywords**: a group may now have **no plain term**, provided it has at
+  least one `/regex/` and a `=> Label` - the label is then what the search
+  templates query. This is the only way to hunt for a term without also
+  matching it loosely, and without it the shipped `RTOS` group could not be
+  fixed: matching folds case, so `RTOs` (Indian Regional Transport Offices) is
+  the same string as `RTOS`, and 4 of that group's 10 live stories were
+  e-rickshaw enforcement and licence backlogs. Adding a regex *beside* the
+  plain term does not help - `filter.group_matches()` ORs terms with regexes,
+  so a regex only ever widens a group. `config/frequency_words.txt.example`
+  now ships the group as three word-boundary regexes with the query still
+  coming from `=> RTOS`: measured 0 of 3 noise kept, 4 of 4 real stories kept.
+  A group with neither a plain term nor a labelled regex is still refused.
+
 ## v0.2.5 - 2026-09-07
 
 ### Fixes

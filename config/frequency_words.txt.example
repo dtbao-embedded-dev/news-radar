@@ -7,13 +7,18 @@
 #   +word       required - the title must contain this too
 #   !word       excluded - a title containing this never matches this group
 #   @n          keep at most n items in this group, after ranking
-#   /pattern/   match by regular expression instead of substring
+#   /pattern/   match by regular expression, against the ORIGINAL title
 #   => Label    display name for the group
 #   # ...       comment
 #
 # The FIRST plain term of a group is its primary term: that is the one
 # substituted into the search templates in config.yaml. Later plain terms
 # widen local matching but cost no extra request.
+#
+# A group may have NO plain term, if it has at least one /regex/ and a
+# `=> Label`. The label is then what the search templates query. That is the
+# only way to hunt for a term without also matching it loosely - see the RTOS
+# group below for why you would want that.
 #
 # Matching folds case and Vietnamese diacritics, so "dien tu" matches
 # "Dien tu" and "Điện tử". A /regex/ is applied to the original title.
@@ -33,15 +38,29 @@ OTA update
 @10
 => Firmware
 
-# `RTOS` is four characters and used to return nothing at all: HN Algolia's
-# typo tolerance matched 41,612 stories for it (ESP32 matches 1,308) and
+# Two separate problems solved in two separate places, and this group is the
+# worked example of both.
+#
+# Getting RTOS stories at all: `RTOS` is four characters, and HN Algolia's typo
+# tolerance matched 41,612 stories for it (ESP32 matches 1,308) while
 # search_by_date handed back the most recent of that noise. The fix is
 # `typoTolerance=false` on the template in config.yaml, not a longer term here -
-# with it, `RTOS` returns 18 of 20 where `FreeRTOS` returns 14, and Google News
-# prefers the short form too.
-RTOS
-FreeRTOS
-Zephyr
+# with it `RTOS` returns 18 of 20 where `FreeRTOS` returns 14, and Google News
+# prefers the short form too. So the query stays `RTOS`.
+#
+# Keeping the wrong RTOS stories out: matching folds case, and `RTOs` - Indian
+# Regional Transport Offices - folds to exactly the same string. Measured
+# 2026-09-07: 4 of this group's 10 stories were e-rickshaw enforcement and
+# licence backlogs. A plain term cannot tell them apart at all, and adding a
+# regex *beside* a plain term does not help either, because the two are OR-ed
+# and a regex only ever widens a group.
+#
+# Hence a group with no plain term. Its regexes run on the ORIGINAL title, so
+# `\bRTOS\b` requires the capital S and the word boundary, and the search
+# query comes from the `=> Label` below instead of from a first plain term.
+/\bRTOS\b/
+/\bFreeRTOS\b/
+/\bZephyr\b/
 @8
 => RTOS
 

@@ -64,16 +64,35 @@ def _finish(lines, path):
         else:
             group.terms.append(text)
 
-    if not group.terms:
-        # A group with no plain term produces no search URL and matches nothing
-        # a human would recognise. Left to itself it would just quietly vanish
-        # from the report, which is the failure that costs an afternoon.
+    # `primary` is the string every search template queries. Two ways to give
+    # the group one, and the second exists because the first cannot express a
+    # narrow match.
+    #
+    # A plain term is matched on the **folded** title, so it can never be made
+    # case- or boundary-sensitive: `fold("RTOs") == fold("RTOS")`, and the
+    # `RTOS` group spent a day carrying Indian Regional Transport Offices
+    # because of it. `/\bRTOS\b/` separates them exactly - but a regex only
+    # ever *widens* a group (`filter.group_matches()` ORs the two), so the
+    # loose plain term has to go, and then there was nothing left to search
+    # for. A regex-only group takes its query from its `=> Label` instead.
+    if group.terms:
+        group.primary = group.terms[0]
+    elif group.regexes and group.label:
+        # The label is a display string doing a second job here, which is worth
+        # knowing when writing one: it travels into the search URL verbatim, so
+        # a label with a space is sent as a quoted phrase.
+        group.primary = group.label
+    else:
+        # A group with no plain term and no labelled regex produces no search
+        # URL and matches nothing a human would recognise. Left to itself it
+        # would just quietly vanish from the report, which is the failure that
+        # costs an afternoon.
         raise KeywordError(
-            "{}:{}: group has no plain term - the first one is its primary "
-            "term and the one the search templates query".format(
-                path, lines[0][0]))
+            "{}:{}: group has nothing to search for - give it a plain term "
+            "(the first one is its primary term and the one the search "
+            "templates query), or a /regex/ plus a '=> Label' to query "
+            "instead".format(path, lines[0][0]))
 
-    group.primary = group.terms[0]
     group.label = group.label or group.primary
     return group
 

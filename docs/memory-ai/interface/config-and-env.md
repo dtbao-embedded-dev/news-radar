@@ -107,9 +107,17 @@ group is counted, capped and displayed independently.
 | `+word` | **Required**: the title must contain this as well, on top of matching the group |
 | `!word` | **Excluded**: a title containing this never matches the group |
 | `@n` | Cap this group at `n` items after ranking |
-| `/pattern/` | Match by regular expression instead of substring |
+| `/pattern/` | Match by regular expression, against the **original** title |
 | `=> Label` | Display name for the group on the page and in messages |
 | `# comment` | Ignored |
+
+A group may have **no plain term at all**, provided it has at least one
+`/pattern/` and a `=> Label`; the label is then what the search templates query.
+That is the only way to hunt for a term without also matching it loosely, and
+the reason it exists is in [[news-search]]: a plain term is compared on the
+folded title, so `RTOS` and `RTOs` are the same string to it, and a regex placed
+*beside* a plain term cannot help because the two are OR-ed. A group with
+neither a plain term nor a labelled regex is refused.
 
 The **first plain term** of a group is the group's *primary term*: it is what gets
 substituted into the search templates. Later plain terms widen the local match but

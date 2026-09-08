@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-07 - 20 durable doc(s)._
+_Generated 2026-09-08 - 20 durable doc(s)._
 
 ## State (transient)
 
@@ -18,6 +18,46 @@ _Generated 2026-09-07 - 20 durable doc(s)._
 > Current delivery state - what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
 
 ## What works
+
+### The summary survives a model being retired (2026-09-08, unreleased)
+
+`ai.model` is asked first; a model that fails falls through to the `:free`
+models the endpoint itself publishes, three a cycle at most. Live against
+OpenRouter with the dead slug still pinned: one 404, one GET,
+`dots-studio/dots-3-note-preview:free` answered **20 of 20** in Vietnamese.
+
+**The outage it was measured on.** OpenRouter withdrew the free tier of
+`minimax/minimax-m3`; the pinned `:free` slug answered 404 on **54 consecutive
+cycles over nine hours**, `held for the next cycle` climbed 10 -> 27, and every
+page and both channels went out with no sentence under any story. Nothing
+raised, nothing alerted - the optional-feature contract working exactly as
+written, and the reason nobody noticed for nine hours.
+
+Four things the free tier taught, all on the same real 20-story prompt, and two
+of them overturned the obvious answer:
+
+- **A dead slug is only one of five failure shapes.** 404 retired, 429
+  rate-limited upstream, 402 paid-only (the *paid* `minimax/minimax-m3` answers
+  this - the account has no credit), 403 harness-only, and a **200 with an
+  empty body** (`nemotron-3-super-120b-a12b:free`). `_ask()` returns `None` for
+  all five because the caller's next move is identical for each.
+- **A `:free` id is not automatically a summariser.** That day's free list held
+  two code models, a content-safety classifier and a reranker. Auto-discovery
+  with no filter reaches them.
+- **But a domain fine-tune is one, against expectation.**
+  `ling-3.0-flash-sante` is a *health* tune and was the first thing excluded;
+  measured twice it answered **20 of 20** in idiomatic Vietnamese about GPUs and
+  datacentres in **13 s and 14 s**, four times faster than anything else free.
+  The exclusion was removed. What a model is asked about is the corpus, not what
+  it was tuned on.
+- **The names lie about speed, so the cap is a cycle budget.**
+  `nemotron-3.5-lightning:free` took **533 s and 601 s** across two runs -
+  longer than the whole ten-minute cycle - answering 20 of 20 once and 0 of 20
+  the other time. `ai.timeout_s` is the only thing keeping it out of the way.
+
+**`ai.timeout_s: 60` is a live constraint, not a code one.** The pin at 13 s
+clears it easily; the *next* candidate down, at 66 s, does not. A deployment
+that wants the fallback to actually land has to raise it.
 
 ### Five model groups replace RTOS (2026-09-07, unreleased)
 
@@ -976,6 +1016,30 @@ the ops layer and the summary - and the whole thing is reachable at
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**The AI summary went quiet for nine hours and now recovers on its own
+(2026-09-08, unreleased after v0.2.8).** OpenRouter withdrew the free tier of
+the pinned `minimax/minimax-m3:free`; `summarize.py` now falls through to the
+`:free` models the endpoint publishes, three a cycle at most. Numbers in
+[[progress]].
+
+**Next, and production stays broken until both of these happen by hand.** The
+homelab's `config/config.yaml` is gitignored, so neither merges on its own:
+
+- `ai.model` -> `inclusionai/ling-3.0-flash-sante:free`. Measured twice at 20
+  of 20 in 13-14 s, the fastest thing on the free list. The pin is asked first,
+  so leaving the dead slug there buys a wasted 404 every cycle.
+- `ai.timeout_s` -> `90`. Not for the pin, which needs 14 s, but for the
+  fallback: the next candidate down measured 66 s and would be cut off at 60.
+
+Then cut a release, and the ~30-story backlog drains at `max_per_run: 20` a
+cycle. It has a ceiling worth knowing: a story that ages past
+`rank.max_age_days` leaves the report before it is ever summarised.
+
+**Unrelated, found in the same log and not yet touched:** Discord has refused
+**36 messages in 24 h** with `400 {"content": ["Must be 2000 or fewer in
+length."]}`. Telegram delivers, Discord drops them. `notify.chunk()` is
+budgeting the wrong limit for that channel.
 
 **Topics reshaped to what the user actually reads (2026-09-07, unreleased
 after v0.2.7).** `RTOS` out, five model groups in - `Claude`, `ChatGPT`, `GLM`,
@@ -2551,9 +2615,9 @@ someone chose it.
 | `ops.backup_keep` | int | `7` | Newest N backups kept; `0` = back nothing up |
 | `ai.enabled` | bool | `false` | The AI summary - one sentence under each story, on the page and in the message. Off is the shipped case: a config that says nothing about `ai` never reaches the network and never sees a bill |
 | `ai.api_url` | str | `https://api.openai.com/v1/chat/completions` | Any endpoint speaking the OpenAI chat-completions wire format - OpenRouter, DeepSeek, Groq, a local Ollama. Must be an http(s) url, and non-empty when `ai.enabled` |
-| `ai.model` | str | `gpt-4o-mini` | Model id, passed through verbatim |
+| `ai.model` | str | `gpt-4o-mini` | Model id, passed through verbatim, and asked **first**. On an endpoint that publishes `:free` models a failure falls through to those rather than to no summary - see [[ai-summary]] |
 | `ai.max_per_run` | int | `20` | Stories one cycle will pay to summarise. The rest wait for the next cycle, so a first run against a full store does not send one enormous prompt. Must be >= 1: zero is a prompt with nothing in it, and a cap of zero would silently disable a feature `ai.enabled` says is on |
-| `ai.timeout_s` | int | `60` | Per-request timeout for the completion only. `advanced.request_timeout_s` stays the feeds' budget; fifteen seconds would time out every summary while looking like an outage |
+| `ai.timeout_s` | int | `60` | Per-request timeout for the completion only. `advanced.request_timeout_s` stays the feeds' budget; fifteen seconds would time out every summary while looking like an outage. It is now **per model tried**, and the free models that answer at all measured 13 s, 66 s and 111 s on a 20-story prompt - 60 clears the fastest and cuts off the rest, so raise it if the fallback is meant to land |
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |
@@ -3382,10 +3446,11 @@ HttpError(message, status=None, url=None, body=b"", retry_after=None)
 RETRY_AFTER_MAX = 60.0
 ```
 
-**Both verbs, one code path.** `get()` reads a feed and `post_json()` talks to a
-notification channel or an AI endpoint; both go through a private `_request()`,
-so the User-Agent, the timeout, the retry policy and the per-host gap are
-decided once.
+**Both verbs, one code path.** `get()` reads a feed - and, since 2026-09-08,
+an AI endpoint's `/v1/models` list when `summarize.py` needs a model to fall
+back to - while `post_json()` talks to a notification channel or an AI
+endpoint; both go through a private `_request()`, so the User-Agent, the
+timeout, the retry policy and the per-host gap are decided once.
 A POST is retried on the same statuses a GET is, which means a 5xx can deliver
 the same message twice - the trade [[notify-channels]] already takes, where a
 duplicate is the acceptable failure and a dropped story is not.
@@ -3749,13 +3814,14 @@ The next cycle rewrites `index.html` from the restored store. Day snapshots unde
 of them is reproducible from the rows that are.
 
 ### [interface] The AI Summary - summarize.py
-*`interface/ai-summary.md` - Every public signature of the AI summary layer, the OpenAI-compatible contract it speaks, and the rules that keep an optional feature from ever costing a cycle or paying for the same sentence twice. - status: active - source: src/news_radar/summarize.py, src/news_radar/__main__.py, src/news_radar/store.py, src/news_radar/render.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py - keywords: summarize, build_prompt, parse_answer, SENTENCES_MAX, SUMMARY_MAX, ai_summary, excerpt, unsummarised, save_summaries, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, chat completions, OpenAI-compatible, Ollama, per-story summary, P6-4*
+*`interface/ai-summary.md` - Every public signature of the AI summary layer, the OpenAI-compatible contract it speaks, the fallback that survives a free model being retired, and the rules that keep an optional feature from ever costing a cycle or paying for the same sentence twice. - status: active - source: src/news_radar/summarize.py, src/news_radar/__main__.py, src/news_radar/store.py, src/news_radar/render.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py - keywords: summarize, build_prompt, parse_answer, free_models, MODEL_TRIES, FREE_SUFFIX, model fallback, :free, retired model, /v1/models, SENTENCES_MAX, SUMMARY_MAX, ai_summary, excerpt, unsummarised, save_summaries, ai.enabled, ai.api_url, ai.model, ai.timeout_s, max_per_run, OPENAI_API_KEY, chat completions, OpenAI-compatible, OpenRouter, Ollama, per-story summary, P6-4*
 
 # The AI Summary - `summarize.py`
 
 > One sentence under each story, in Vietnamese, from any endpoint speaking the
 > OpenAI chat-completions wire format. Written once per story and stored. Off by
-> default, and constitutionally unable to fail a cycle.
+> default, and constitutionally unable to fail a cycle - and when the model it
+> was pointed at stops existing, it finds another one rather than going quiet.
 
 ## Signatures
 
@@ -3763,11 +3829,23 @@ of them is reproducible from the rows that are.
 SENTENCES_MAX = 1
 SUMMARY_MAX = 220
 EXCERPT_IN_PROMPT = 320
+MODEL_TRIES = 3
+FREE_SUFFIX = ":free"
 
 build_prompt(rows)                                     -> str
 parse_answer(text, rows)                               -> {dedup_key: str}
+free_models(fetcher, api_url)                          -> [str]
 summarize(fetcher, api_url, api_key, model, rows)      -> {dedup_key: str}
 ```
+
+Three private helpers carry the fallback, named here because the signature
+above no longer says what one call does:
+
+| Helper | Contract |
+|--------|----------|
+| `_models_url(api_url)` | `.../chat/completions` -> `.../models`, or `""` for a url that is not one. `rpartition` on the suffix, not a url parser - the whole reason `ai.api_url` is a full completions url is that providers disagree about where the base ends |
+| `_candidates(fetcher, api_url, model)` | A **generator**: the pinned model, then `free_models()` minus it. Lazy is the contract, not an implementation detail - a working pin must never pay for the GET |
+| `_ask(..., model, prompt)` | One completion. The text, or `None` for every failure alike: a refusal, a proxy's HTML, an undocumented body, and a 200 carrying `""` all mean *try the next one* |
 
 `rows` is a **list** of the row shape `store.day_matches()` returns - the
 caller's order is the prompt's numbering, and the only thing mapping an answer
@@ -3813,11 +3891,71 @@ not the vendor: OpenRouter, DeepSeek, Groq and a local Ollama all answer
 
 **One request per cycle, not one per story.** The whole batch is numbered into a
 single prompt; a per-story call would be twenty requests every thirty minutes
-against a free tier that rate-limits well below that.
+against a free tier that rate-limits well below that. Still one request whenever
+the pinned model answers; a pin that fails costs one GET and at most
+`MODEL_TRIES` completions - see below.
 
 `temperature` is low but not zero: a summary read every day should not be the
 same four sentences with the nouns swapped, and nothing here needs
 reproducibility.
+
+## When a free slug is retired
+
+**The outage this exists for, measured.** OpenRouter withdrew the free tier of
+`minimax/minimax-m3` on 2026-09-08. The pinned `minimax/minimax-m3:free`
+answered `404 This model is unavailable for free. The paid version is available
+now - use this slug instead: minimax/minimax-m3` to **every cycle for nine
+hours**: 54 cycles, a `held for the next cycle` count that climbed to 27, and a
+page and two channels that went out each time with no sentence under any story.
+Nothing broke - that is the design working - and nothing alerted, which is the
+design's cost. One WARNING a cycle, in a log nobody was reading.
+
+A config file cannot be right about this. The endpoint's own list can:
+
+```
+GET  {api_url minus /chat/completions}/models
+     -> keep the ids ending in `:free`
+     -> drop the ones structurally incapable of a summary
+     -> try them in the list's own order
+```
+
+**The pin goes first, always.** `ai.model` is the operator's measured choice and
+a list ordered by release date is not an opinion about which model writes the
+better Vietnamese sentence. Discovery is a generator, so a cycle whose pin
+answers makes no GET at all and this file behaves exactly as it did before the
+fallback existed. That is also what keeps a paid deployment paid-for: nothing
+silently reaches for a free model while the billed one still works.
+
+**The order is the provider's, because nothing better is on offer.** OpenRouter
+returns `/models` newest-first by `created`, and "most recently released" is the
+only field in the payload that correlates with "still served". The API publishes
+nothing about quality, so nothing is invented here.
+
+**`_NOT_A_SUMMARISER` excludes structure, not subject matter.** A `code` model,
+a `content-safety` classifier, an `embed`der and a `rerank`er are not being
+asked to write a sentence, and this is the only place that can be caught -
+`parse_answer()` reads the number and nothing else. The **domain fine-tunes are
+kept**, which was not the expectation: `ling-3.0-flash-sante` (health) and
+`-fin` (finance) were the first things excluded, and measured twice on the real
+prompt `-sante` answered **20 of 20** in idiomatic Vietnamese about GPUs and
+datacentres in **13 s** - four times faster than anything else free. What a
+model is asked about is the corpus, not what it was tuned on.
+
+**`MODEL_TRIES = 3` is a cycle budget, not a retry policy.** Each attempt is a
+real completion with the whole of `ai.timeout_s` behind it, inside a ten-minute
+cycle that still has to render and notify. Measured on the same 20-story
+prompt: 13 s, 66 s, 111 s - and `nemotron-3.5-lightning:free`, whose name
+promises otherwise, took **533 s and 601 s** across two runs, answering 20 of 20
+once and 0 of 20 the other. `ai.timeout_s` is all that stands between that model
+and a cycle overrunning its own schedule.
+
+**An endpoint with no free tier is the shipped case.** `api.openai.com` and a
+local Ollama publish no `:free` id, so `free_models()` returns `[]`, the pin
+stays the only candidate, and a 401 or a typo'd model id costs what it did
+before: one warning, no summary. A url that is not a completions url never asks.
+
+Verified live against OpenRouter on 2026-09-08 with the dead slug still pinned:
+one 404, one GET, and `dots-studio/dots-3-note-preview:free` answered 20 of 20.
 
 ## A key is optional
 
@@ -3883,10 +4021,16 @@ sentence and messages that go out exactly as they did before the feature:
 |-------|----------|
 | Empty `api_url` | Returns before any request |
 | No rows | Returns before any request |
-| `HttpError` - refused, timed out, 4xx, 5xx | WARNING, `{}` |
-| A 200 that is not JSON (a proxy's HTML error page) | WARNING, `{}` |
-| A body missing `choices` / `message` / `content` | WARNING, `{}` |
-| An empty answer | WARNING, `{}` |
+| `HttpError` - refused, timed out, 4xx, 5xx | WARNING, **the next candidate** |
+| A 200 that is not JSON (a proxy's HTML error page) | WARNING, **the next candidate** |
+| A body missing `choices` / `message` / `content` | WARNING, **the next candidate** |
+| An empty answer | WARNING, **the next candidate** |
+| An unreadable `/models` | WARNING, no fallback - the pin was already tried |
+| Every candidate exhausted, or `MODEL_TRIES` reached | WARNING naming each one tried, `{}` |
+
+The four middle rows used to end in `{}` and now end in the next model. What
+they still preserve is unchanged: `{}` means *no story was answered at all*, so
+the rows stay `NULL` and the next cycle retries them.
 
 `{}` rather than a mapping of empty strings, and the distinction matters: a
 failed **request** must leave those stories unasked so the next cycle retries

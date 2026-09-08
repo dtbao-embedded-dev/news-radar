@@ -67,9 +67,9 @@ someone chose it.
 | `ops.backup_keep` | int | `7` | Newest N backups kept; `0` = back nothing up |
 | `ai.enabled` | bool | `false` | The AI summary - one sentence under each story, on the page and in the message. Off is the shipped case: a config that says nothing about `ai` never reaches the network and never sees a bill |
 | `ai.api_url` | str | `https://api.openai.com/v1/chat/completions` | Any endpoint speaking the OpenAI chat-completions wire format - OpenRouter, DeepSeek, Groq, a local Ollama. Must be an http(s) url, and non-empty when `ai.enabled` |
-| `ai.model` | str | `gpt-4o-mini` | Model id, passed through verbatim |
+| `ai.model` | str | `gpt-4o-mini` | Model id, passed through verbatim, and asked **first**. On an endpoint that publishes `:free` models a failure falls through to those rather than to no summary - see [[ai-summary]] |
 | `ai.max_per_run` | int | `20` | Stories one cycle will pay to summarise. The rest wait for the next cycle, so a first run against a full store does not send one enormous prompt. Must be >= 1: zero is a prompt with nothing in it, and a cap of zero would silently disable a feature `ai.enabled` says is on |
-| `ai.timeout_s` | int | `60` | Per-request timeout for the completion only. `advanced.request_timeout_s` stays the feeds' budget; fifteen seconds would time out every summary while looking like an outage |
+| `ai.timeout_s` | int | `60` | Per-request timeout for the completion only. `advanced.request_timeout_s` stays the feeds' budget; fifteen seconds would time out every summary while looking like an outage. It is now **per model tried**, and the free models that answer at all measured 13 s, 66 s and 111 s on a 20-story prompt - 60 clears the fastest and cuts off the rest, so raise it if the fallback is meant to land |
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |

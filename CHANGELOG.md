@@ -23,9 +23,15 @@ one makes the file and the tags disagree.
   a human edits a config file. `ai.model` is still asked first and its answer
   still ends the cycle, so a working pin costs the same single request it
   always did; only a failure fetches `/v1/models`, keeps the `:free` ids, drops
-  the ones that cannot write a summary (code models, safety classifiers, the
-  `-sante` and `-fin` domain fine-tunes) and asks them in the order the
+  the ones structurally incapable of a summary (code models, safety
+  classifiers, embedders, rerankers) and asks the rest in the order the
   provider gave - newest first - up to three models a cycle.
+
+  The **domain fine-tunes are kept**, which was not the expectation: a health
+  tune and a finance tune were the first things excluded, and measured twice on
+  the real 20-story prompt the health one answered 20 of 20 in idiomatic
+  Vietnamese about GPUs and datacentres in 13 s - four times faster than
+  anything else on the free list.
 
   The outage that produced it, measured on the homelab: OpenRouter withdrew the
   free tier of `minimax/minimax-m3` and the pinned `:free` slug answered

@@ -16,6 +16,38 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.9 - 2026-09-08
+
+### Features
+
+- **summary**: a model that fails now falls through to the next one the
+  endpoint says it serves for free, instead of taking the summaries down until
+  a human edits a config file. `ai.model` is still asked first and its answer
+  still ends the cycle, so a working pin costs the same single request it
+  always did; only a failure fetches `/v1/models`, keeps the `:free` ids, drops
+  the ones structurally incapable of a summary (code models, safety
+  classifiers, embedders, rerankers) and asks the rest in the order the
+  provider gave - newest first - up to three models a cycle.
+
+  The **domain fine-tunes are kept**, which was not the expectation: a health
+  tune and a finance tune were the first things excluded, and measured twice on
+  the real 20-story prompt the health one answered 20 of 20 in idiomatic
+  Vietnamese about GPUs and datacentres in 13 s - four times faster than
+  anything else on the free list.
+
+  The outage that produced it, measured on the homelab: OpenRouter withdrew the
+  free tier of `minimax/minimax-m3` and the pinned `:free` slug answered
+  `404 This model is unavailable for free` on **every cycle for nine hours**.
+  Nothing broke and nothing alerted, by design - the page and both channels
+  went out exactly as before, with no sentence under any story, behind one
+  WARNING a cycle. An endpoint that publishes no `:free` model at all -
+  `api.openai.com`, a local Ollama - gets `[]` back and behaves as it did
+  before this existed.
+
+  The log line for a successful summary now names the model that wrote it: with
+  a fallback in play, "20 of 20 answered" without a name cannot tell an
+  operator their pin has died.
+
 ## v0.2.8 - 2026-09-07
 
 ### Changed

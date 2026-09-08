@@ -265,6 +265,13 @@ ai:
   #   api_url: https://api.deepseek.com/v1/chat/completions
   #   api_url: http://ollama:11434/v1/chat/completions   # local, no key needed
   api_url: https://api.openai.com/v1/chat/completions
+
+  # Asked first, every cycle. If it fails - and a free slug is withdrawn
+  # without notice - the endpoint's own /v1/models is read and its `:free`
+  # models are tried instead, newest first, three models a cycle at most. An
+  # endpoint with no free tier publishes no `:free` id, so nothing changes for
+  # it. Raise timeout_s below if you are relying on that fallback: the free
+  # models measured 13s, 66s and 111s on a 20-story prompt.
   model: gpt-4o-mini
 
   # OPENAI_API_KEY in docker/.env, and only if the endpoint wants one. A

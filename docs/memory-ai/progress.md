@@ -1,6 +1,6 @@
 ---
 title: Progress
-updated: 2026-09-07
+updated: 2026-09-08
 ---
 
 # Progress
@@ -8,6 +8,46 @@ updated: 2026-09-07
 > Current delivery state - what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
 
 ## What works
+
+### The summary survives a model being retired (2026-09-08, unreleased)
+
+`ai.model` is asked first; a model that fails falls through to the `:free`
+models the endpoint itself publishes, three a cycle at most. Live against
+OpenRouter with the dead slug still pinned: one 404, one GET,
+`dots-studio/dots-3-note-preview:free` answered **20 of 20** in Vietnamese.
+
+**The outage it was measured on.** OpenRouter withdrew the free tier of
+`minimax/minimax-m3`; the pinned `:free` slug answered 404 on **54 consecutive
+cycles over nine hours**, `held for the next cycle` climbed 10 -> 27, and every
+page and both channels went out with no sentence under any story. Nothing
+raised, nothing alerted - the optional-feature contract working exactly as
+written, and the reason nobody noticed for nine hours.
+
+Four things the free tier taught, all on the same real 20-story prompt, and two
+of them overturned the obvious answer:
+
+- **A dead slug is only one of five failure shapes.** 404 retired, 429
+  rate-limited upstream, 402 paid-only (the *paid* `minimax/minimax-m3` answers
+  this - the account has no credit), 403 harness-only, and a **200 with an
+  empty body** (`nemotron-3-super-120b-a12b:free`). `_ask()` returns `None` for
+  all five because the caller's next move is identical for each.
+- **A `:free` id is not automatically a summariser.** That day's free list held
+  two code models, a content-safety classifier and a reranker. Auto-discovery
+  with no filter reaches them.
+- **But a domain fine-tune is one, against expectation.**
+  `ling-3.0-flash-sante` is a *health* tune and was the first thing excluded;
+  measured twice it answered **20 of 20** in idiomatic Vietnamese about GPUs and
+  datacentres in **13 s and 14 s**, four times faster than anything else free.
+  The exclusion was removed. What a model is asked about is the corpus, not what
+  it was tuned on.
+- **The names lie about speed, so the cap is a cycle budget.**
+  `nemotron-3.5-lightning:free` took **533 s and 601 s** across two runs -
+  longer than the whole ten-minute cycle - answering 20 of 20 once and 0 of 20
+  the other time. `ai.timeout_s` is the only thing keeping it out of the way.
+
+**`ai.timeout_s: 60` is a live constraint, not a code one.** The pin at 13 s
+clears it easily; the *next* candidate down, at 66 s, does not. A deployment
+that wants the fallback to actually land has to raise it.
 
 ### Five model groups replace RTOS (2026-09-07, unreleased)
 

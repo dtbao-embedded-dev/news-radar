@@ -39,8 +39,8 @@ import re
 
 from .fetch.http import HttpError
 
-__all__ = ["summarize", "build_prompt", "parse_answer", "SENTENCES_MAX",
-           "SUMMARY_MAX"]
+__all__ = ["summarize", "build_prompt", "parse_answer", "free_models",
+           "SENTENCES_MAX", "SUMMARY_MAX", "MODEL_TRIES"]
 
 log = logging.getLogger("news_radar.summarize")
 
@@ -60,6 +60,33 @@ SUMMARY_MAX = 220
 # costs nothing to keep, while every character here is paid for once per story
 # and the first two sentences of a teaser carry the subject.
 EXCERPT_IN_PROMPT = 320
+
+# How many models one cycle will ask before it gives up. A free slug fails in
+# five different ways - retired (404), rate-limited upstream (429), paid-only
+# (402), harness-only (403), and a 200 with an empty body - so trying the next
+# one is what keeps the feature alive across a retirement. The cap is what
+# stops it eating the cycle: every attempt is a real request with the full
+# `ai.timeout_s` behind it, and the page still has to render and notify.
+MODEL_TRIES = 3
+
+# The suffix a provider puts on a slug it serves for nothing. OpenRouter's
+# convention, and the only machine-readable "this costs no money" the list has.
+FREE_SUFFIX = ":free"
+
+# A `:free` id is not automatically a summariser, and this is the only place a
+# wrong one can be caught - `parse_answer()` reads the number and nothing else,
+# so it cannot tell a bad summary from a good one. Structural mismatches only:
+# a code model, a safety classifier, an embedder or a reranker is not being
+# asked to write a sentence about the news.
+#
+# The domain fine-tunes are deliberately **not** here, against expectation.
+# `inclusionai/ling-3.0-flash-sante` is a health tune and `-fin` a finance one,
+# and both looked like obvious exclusions; measured twice on the real 20-story
+# prompt, `-sante` answered **20 of 20** in correct, idiomatic Vietnamese about
+# GPUs and datacentres in 13 s - four times faster than anything else on the
+# free list. What a model is asked about is the corpus, not what it was tuned
+# on.
+_NOT_A_SUMMARISER = ("code", "content-safety", "guard", "embed", "rerank")
 
 # Written in English because everything in this repository is; the *answer* is
 # Vietnamese because that is who reads the page. `{n}` is SENTENCES_MAX.
@@ -152,34 +179,93 @@ def parse_answer(text, rows):
             for index, row in enumerate(rows, start=1)}
 
 
-def summarize(fetcher, api_url, api_key, model, rows):
-    """One completion for the whole batch. `{dedup_key: summary}`, or `{}`.
+def _models_url(api_url):
+    """`.../v1/chat/completions` -> `.../v1/models`, or `""` when it is not one.
 
-    An empty mapping is the only failure mode this function has. A refused
-    request, a timeout, a proxy answering HTML with a 200, a body shaped like
-    nothing the API documents - each is a page whose stories carry no sentence
-    and messages that go out as they did before, never a cycle that stops. `{}`
-    rather than a mapping of empty strings on purpose: a failed *request* must
-    leave the stories unasked, so the next cycle tries them again.
-
-    **An empty `api_key` is a supported deployment, not a failure.** An SGLang,
-    vLLM or Ollama on the LAN authenticates nobody; sending it
-    `Authorization: Bearer ` is at best ignored and at worst a 401 from whatever
-    sits in front of it, so with no key the header is simply not sent.
-
-    The two short-circuits above the request are not politeness: an empty url or
-    a cycle that found no new story would each be a bill for asking a question
-    with nothing in it.
+    String surgery rather than a url parser, and deliberately: `ai.api_url` is
+    spelled as a whole completions url in the first place because providers
+    disagree about where the base ends - only some of them put it under `/v1`.
+    The one thing they do agree on is that suffix, so it is the only thing
+    worth keying off. Anything else - a gateway on its own path shape - gets
+    `""`, which skips discovery rather than guessing a url and 404ing on it.
     """
-    if not api_url:
-        return {}
+    base, sep, _ = (api_url or "").rpartition("/chat/completions")
+    return base + "/models" if sep else ""
 
-    rows = list(rows)
-    prompt = build_prompt(rows)
-    if not prompt:
-        return {}
 
-    key = (api_key or "").strip()
+def free_models(fetcher, api_url):
+    """The endpoint's free model ids, newest first, or `[]`. Never raises.
+
+    This exists because a free slug is retired without notice and a pinned one
+    then fails forever. Measured: `minimax/minimax-m3:free` answered for two
+    days, then returned 404 "This model is unavailable for free" on **every
+    cycle for nine hours** - fifty-four cycles of pages and notifications that
+    went out with no sentence under any story, behind one WARNING a cycle that
+    nobody was reading. The endpoint own list is right the day after a
+    retirement, which a config file is not.
+
+    The order is the list own - OpenRouter returns it newest-first by
+    `created` - and newest is the best proxy available for "still served". The
+    API publishes nothing about quality to sort on, so nothing is invented
+    here: `_NOT_A_SUMMARISER` drops the ids that are wrong for the job and the
+    rest are tried in the order the provider gave them.
+
+    **An endpoint with no free tier answers this with `[]`, which is the
+    shipped case.** `api.openai.com` and a local Ollama publish no `:free` id
+    at all, so the pinned model stays the only candidate and this file behaves
+    exactly as it did before the fallback existed.
+    """
+    url = _models_url(api_url)
+    if not url:
+        return []
+
+    try:
+        payload = json.loads(fetcher.get(url).decode("utf-8", "replace"))
+        ids = [entry["id"] for entry in payload["data"]]
+    except (HttpError, ValueError, AttributeError, KeyError, TypeError) as exc:
+        # A list that cannot be read is one fallback that will not happen, not
+        # a failure of its own: the caller has already tried the pinned model
+        # by the time this runs.
+        log.warning("summary: the model list is unreadable (%s: %s)",
+                    type(exc).__name__, exc)
+        return []
+
+    return [name for name in ids
+            if isinstance(name, str) and name.endswith(FREE_SUFFIX)
+            and not any(bad in name.lower() for bad in _NOT_A_SUMMARISER)]
+
+
+def _candidates(fetcher, api_url, model):
+    """The pinned model, then the endpoint free ones. A generator on purpose.
+
+    Discovery costs a GET, and a cycle whose pinned model answers must never
+    pay for it - which is what keeps the normal path the same single request it
+    was before, right up until the day the pin stops working.
+
+    The pin goes first even when it is itself a free slug: it is the operator
+    measured choice, and a list ordered by release date is not an opinion about
+    which model writes the better Vietnamese sentence.
+    """
+    pinned = (model or "").strip()
+    if pinned:
+        yield pinned
+    for candidate in free_models(fetcher, api_url):
+        if candidate != pinned:
+            yield candidate
+
+
+def _ask(fetcher, api_url, key, model, prompt):
+    """One completion from one model. Its text, or `None` for any failure.
+
+    `None` for all of them on purpose - a refusal, a proxy HTML page, a body
+    shaped like nothing the API documents, and a 200 carrying an empty string
+    are the same fact to the caller: this model did not answer, try the next.
+    The 200-with-nothing case is not hypothetical, it is measured:
+    `nvidia/nemotron-3-super-120b-a12b:free` returns an empty body under load.
+
+    Every branch names the model in its log line. With a fallback in play,
+    "the endpoint refused" without a name is a log nobody can act on.
+    """
     try:
         body = fetcher.post_json(
             api_url,
@@ -194,9 +280,8 @@ def summarize(fetcher, api_url, api_key, model, rows):
             headers={"Authorization": "Bearer {}".format(key)} if key else None,
         )
     except HttpError as exc:
-        log.warning("summary: the endpoint refused (%s) - the page and the "
-                    "messages go out without one", exc)
-        return {}
+        log.warning("summary: %s refused (%s)", model, exc)
+        return None
 
     try:
         payload = json.loads(body.decode("utf-8", "replace"))
@@ -204,15 +289,68 @@ def summarize(fetcher, api_url, api_key, model, rows):
     except (ValueError, AttributeError, KeyError, IndexError, TypeError) as exc:
         # Every provider claims this shape and one of them will be wrong. A
         # KeyError from an endpoint is not a bug in the radar.
-        log.warning("summary: the answer was not in the documented shape (%s: "
-                    "%s)", type(exc).__name__, exc)
-        return {}
+        log.warning("summary: %s answered outside the documented shape (%s: "
+                    "%s)", model, type(exc).__name__, exc)
+        return None
 
     if not text:
-        log.warning("summary: the endpoint answered with an empty summary")
+        log.warning("summary: %s answered with an empty summary", model)
+        return None
+    return text
+
+
+def summarize(fetcher, api_url, api_key, model, rows):
+    """One completion for the whole batch. `{dedup_key: summary}`, or `{}`.
+
+    An empty mapping is the only failure mode this function has. A refused
+    request, a timeout, a proxy answering HTML with a 200, a body shaped like
+    nothing the API documents - each is a page whose stories carry no sentence
+    and messages that go out as they did before, never a cycle that stops. `{}`
+    rather than a mapping of empty strings on purpose: a failed *request* must
+    leave the stories unasked, so the next cycle tries them again.
+
+    **One request per cycle, until the pinned model stops working.** The pin is
+    asked first and its answer ends the loop, so the common case is the single
+    completion it always was. Only a model that fails reaches for
+    `free_models()` - one GET, then up to `MODEL_TRIES` completions in total,
+    which is what stops a provider retiring a free slug from taking the feature
+    down until a human notices and edits a config file.
+
+    **An empty `api_key` is a supported deployment, not a failure.** An SGLang,
+    vLLM or Ollama on the LAN authenticates nobody; sending it
+    `Authorization: Bearer ` is at best ignored and at worst a 401 from whatever
+    sits in front of it, so with no key the header is simply not sent.
+
+    The two short-circuits above the loop are not politeness: an empty url or a
+    cycle that found no new story would each be a bill for asking a question
+    with nothing in it.
+    """
+    if not api_url:
         return {}
 
-    summaries = parse_answer(text, rows)
-    answered = sum(1 for value in summaries.values() if value)
-    log.info("summary: %d of %d story(ies) answered", answered, len(rows))
-    return summaries
+    rows = list(rows)
+    prompt = build_prompt(rows)
+    if not prompt:
+        return {}
+
+    key = (api_key or "").strip()
+    tried = []
+    for candidate in _candidates(fetcher, api_url, model):
+        tried.append(candidate)
+        text = _ask(fetcher, api_url, key, candidate, prompt)
+        if text:
+            summaries = parse_answer(text, rows)
+            answered = sum(1 for value in summaries.values() if value)
+            # The model is named here because it is no longer necessarily the
+            # one in the config file: an operator reading "17 of 20 answered"
+            # needs to know which model wrote them, and therefore that the pin
+            # has stopped working.
+            log.info("summary: %d of %d story(ies) answered by %s",
+                     answered, len(rows), candidate)
+            return summaries
+        if len(tried) >= MODEL_TRIES:
+            break
+
+    log.warning("summary: no model answered (tried %s) - the page and the "
+                "messages go out without one", ", ".join(tried) or "none")
+    return {}

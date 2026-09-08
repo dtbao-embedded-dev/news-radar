@@ -3,7 +3,7 @@ title: Fetch Layer Contracts
 category: interface
 purpose: Every public signature of the fetch layer and the two leaf modules it stands on - what each returns, what it raises, and what it deliberately does not.
 status: active
-updated: 2026-09-05
+updated: 2026-09-08
 source: src/news_radar/fetch/http.py, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py, src/news_radar/item.py, src/news_radar/keywords.py
 confidence: confirmed
 keywords: Fetcher, HttpError, post_json, Retry-After, RETRY_AFTER_MAX, parse, read_source, read_fixed_feeds, build_urls, read_search_feeds, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle
@@ -60,10 +60,11 @@ HttpError(message, status=None, url=None, body=b"", retry_after=None)
 RETRY_AFTER_MAX = 60.0
 ```
 
-**Both verbs, one code path.** `get()` reads a feed and `post_json()` talks to a
-notification channel or an AI endpoint; both go through a private `_request()`,
-so the User-Agent, the timeout, the retry policy and the per-host gap are
-decided once.
+**Both verbs, one code path.** `get()` reads a feed - and, since 2026-09-08,
+an AI endpoint's `/v1/models` list when `summarize.py` needs a model to fall
+back to - while `post_json()` talks to a notification channel or an AI
+endpoint; both go through a private `_request()`, so the User-Agent, the
+timeout, the retry policy and the per-host gap are decided once.
 A POST is retried on the same statuses a GET is, which means a 5xx can deliver
 the same message twice - the trade [[notify-channels]] already takes, where a
 duplicate is the acceptable failure and a dropped story is not.

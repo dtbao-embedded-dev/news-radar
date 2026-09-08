@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.9 - 2026-09-08
+
 ### Features
 
 - **summary**: a model that fails now falls through to the next one the

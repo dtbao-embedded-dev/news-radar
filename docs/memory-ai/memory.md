@@ -1023,18 +1023,22 @@ the pinned `minimax/minimax-m3:free`; `summarize.py` now falls through to the
 `:free` models the endpoint publishes, three a cycle at most. Numbers in
 [[progress]].
 
-**Next, and production stays broken until both of these happen by hand.** The
-homelab's `config/config.yaml` is gitignored, so neither merges on its own:
+**Shipped and live, same day.** v0.2.9 is cut and the homelab is running it -
+`docker compose pull` + `--profile autoupdate up -d`, `--check` clean, and the
+first cycle on the new image logged
+`summary: 20 of 20 story(ies) answered by inclusionai/ling-3.0-flash-sante:free`
+at 10:40. The homelab's two hand-edited values, both in the gitignored
+`config/config.yaml`:
 
-- `ai.model` -> `inclusionai/ling-3.0-flash-sante:free`. Measured twice at 20
-  of 20 in 13-14 s, the fastest thing on the free list. The pin is asked first,
-  so leaving the dead slug there buys a wasted 404 every cycle.
+- `ai.model` -> `inclusionai/ling-3.0-flash-sante:free`, replacing the withdrawn
+  slug. The pin is asked first, so a dead one buys a wasted 404 every cycle.
 - `ai.timeout_s` -> `90`. Not for the pin, which needs 14 s, but for the
   fallback: the next candidate down measured 66 s and would be cut off at 60.
+  Backup of the previous file is `config/config.yaml.bak-20260908`.
 
-Then cut a release, and the ~30-story backlog drains at `max_per_run: 20` a
-cycle. It has a ceiling worth knowing: a story that ages past
-`rank.max_age_days` leaves the report before it is ever summarised.
+The 40-story backlog drains at `max_per_run: 20` a cycle. It has a ceiling worth
+knowing: a story that ages past `rank.max_age_days` leaves the report before it
+is ever summarised.
 
 **Unrelated, found in the same log and not yet touched:** Discord has refused
 **36 messages in 24 h** with `400 {"content": ["Must be 2000 or fewer in

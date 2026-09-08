@@ -16,6 +16,10 @@ Three rules this file exists to pin:
   one skipped line costs a completion every thirty minutes forever.
 - **A summary is optional, so nothing here may raise.** Every failure the wire
   and a strange body can produce comes back as `{}` and one log line.
+- **A retired free slug must not take the feature down.** A model that fails is
+  followed by the next one the endpoint says it serves for free, capped at
+  `MODEL_TRIES` - and a pinned model that works still costs exactly one
+  request, because discovery it never needs is discovery it never pays for.
 """
 
 from __future__ import annotations
@@ -33,8 +37,22 @@ from news_radar.fetch.http import Fetcher  # noqa: E402
 
 FAILURES = []
 HITS = {}
+GETS = {}
 SEEN_HEADERS = {}
 SEEN_BODIES = {}
+
+# The shape of `/v1/models`, carrying one of everything the real free list
+# ships. Order is the list own, newest-first, exactly as OpenRouter returns it.
+MODEL_LIST = {"data": [
+    {"id": "vendor/retired:free"},          # the pinned one, and it 404s now
+    {"id": "vendor/mini-code:free"},        # a code model - never a summariser
+    {"id": "vendor/text-embed-2:free"},     # an embedder, not a writer
+    {"id": "vendor/content-safety:free"},   # a classifier, same problem
+    {"id": "vendor/paid-only"},             # no `:free`, so never a fallback
+    {"id": "vendor/hollow:free"},           # 200 with an empty content string
+    {"id": "vendor/good:free"},             # the one that answers
+    {"id": "vendor/tuned-sante:free"},      # a domain fine-tune, and it stays
+]}
 
 ANSWER = ("  1. Bài về SDK mới cho ESP32-S3.\n"
           "2. Nguồn điện trên board dev.\n"
@@ -54,6 +72,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
 
+    def do_GET(self):
+        GETS[self.path] = GETS.get(self.path, 0) + 1
+        if self.path == "/broken/models":
+            self._reply(500, b"upstream is having a day")
+            return
+        if self.path == "/nofree/models":
+            self._reply(200, json.dumps({"data": [{"id": "gpt-4o-mini"}]}
+                                        ).encode("utf-8"))
+            return
+        self._reply(200, json.dumps(MODEL_LIST).encode("utf-8"))
+
     def do_POST(self):
         path = self.path
         HITS[path] = HITS.get(path, 0) + 1
@@ -61,6 +90,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         SEEN_BODIES[path] = self.rfile.read(
             int(self.headers.get("Content-Length") or 0))
 
+        if path.startswith("/switch") or path.startswith("/nofree"):
+            asked = (json.loads(SEEN_BODIES[path]) or {}).get("model")
+            if asked == "vendor/good:free":
+                self._reply(200, self._content(ANSWER))
+            elif asked == "vendor/hollow:free":
+                self._reply(200, self._content(""))
+            else:
+                # Every other slug in this fixture is dead, which is the point:
+                # 404 is what a retired free model actually answers.
+                self._reply(404, b'{"error":{"message":"unavailable for free"}}')
+            return
         if path == "/500":
             self._reply(500, b'{"error":"upstream is having a day"}')
             return
@@ -251,6 +291,79 @@ eq("no url means no summary",
 eq("a cycle with no new story means no summary",
    summarize.summarize(fetcher, url("/ok"), "k", "m", []), {})
 eq("...and neither sent a request", sum(HITS.values()), 0)
+
+
+# --- the model list: read it, and refuse the ids that cannot summarise ----
+
+eq("a completions url yields the list beside it",
+   summarize._models_url("https://x.invalid/api/v1/chat/completions"),
+   "https://x.invalid/api/v1/models")
+eq("a url that is not a completions url yields nothing to fetch",
+   summarize._models_url("https://x.invalid/generate"), "")
+eq("no url at all is not a url either", summarize._models_url(""), "")
+
+found = summarize.free_models(fetcher, url("/switch/chat/completions"))
+eq("only the free ids are candidates, in the list own order",
+   found, ["vendor/retired:free", "vendor/hollow:free", "vendor/good:free",
+           "vendor/tuned-sante:free"])
+check("a code model is not a summariser",
+      not any("code" in name for name in found), found)
+check("neither is an embedder or a safety classifier",
+      not any("embed" in name or "safety" in name for name in found), found)
+# Left in, and measured rather than assumed: `ling-3.0-flash-sante` is a health
+# fine-tune that answered 20 of 20 in idiomatic Vietnamese about datacentre
+# news, four times faster than anything else on the real free list. What a model
+# is asked about is the corpus, not what it was tuned on.
+check("a domain fine-tune stays a candidate",
+      "vendor/tuned-sante:free" in found, found)
+
+eq("an endpoint with no free tier offers no fallback at all",
+   summarize.free_models(fetcher, url("/nofree/chat/completions")), [])
+eq("a model list that will not load is no fallback, not an exception",
+   summarize.free_models(fetcher, url("/broken/chat/completions")), [])
+
+
+# --- the fallback: a retired pin must not take the summaries down ---------
+
+# The measured outage this exists for: a pinned `:free` slug is withdrawn, the
+# endpoint answers 404 to every cycle, and until now that was fifty-four
+# cycles of pages with no sentence under any story.
+HITS.clear()
+GETS.clear()
+
+switched = summarize.summarize(
+    fetcher, url("/switch/chat/completions"), "k", "vendor/retired:free", ROWS)
+eq("a dead pin falls through to a model that answers",
+   switched, {"k1": "Bài về SDK mới cho ESP32-S3.",
+              "k2": "Nguồn điện trên board dev.",
+              "k3": "Rust vào nhân Linux."})
+eq("...having read the endpoint own list exactly once",
+   GETS.get("/switch/models"), 1)
+eq("...and having asked three models: the pin, the hollow one, the good one",
+   HITS.get("/switch/chat/completions"), 3)
+eq("...with the working model in the body of the last request",
+   json.loads(SEEN_BODIES["/switch/chat/completions"]).get("model"),
+   "vendor/good:free")
+
+# `MODEL_TRIES` is the whole reason this cannot eat a cycle: every attempt is a
+# real request with the full `ai.timeout_s` behind it, and the page still has
+# to render and notify inside ten minutes.
+HITS.clear()
+GETS.clear()
+eq("a pin outside the list pushes the good model past the try cap",
+   summarize.summarize(fetcher, url("/switch/chat/completions"), "k",
+                       "vendor/not-listed", ROWS), {})
+eq("...so exactly MODEL_TRIES models were asked, not the whole list",
+   HITS.get("/switch/chat/completions"), summarize.MODEL_TRIES)
+
+# The laziness guarantee, and the one that keeps a paid deployment paid-for:
+# discovery is a GET that a working pin must never make.
+HITS.clear()
+GETS.clear()
+check("a pin that answers still produces summaries",
+      summarize.summarize(fetcher, url("/ok"), "k", "gpt-4o-mini", ROWS))
+eq("...in one request", HITS.get("/ok"), 1)
+eq("...and the model list was never fetched", sum(GETS.values()), 0)
 
 
 server.shutdown()

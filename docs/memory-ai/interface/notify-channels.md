@@ -3,10 +3,10 @@ title: Notification Channels - Telegram and Discord
 category: interface
 purpose: Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send.
 status: active
-updated: 2026-09-06
+updated: 2026-09-12
 source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py
 confidence: confirmed
-keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set
+keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, clip, SendResult, report.mode, incremental, current, daily, seen set
 order: 3
 ---
 
@@ -34,10 +34,11 @@ with nothing installed and nothing configured.
 | Signature | Returns | Notes |
 |-----------|---------|-------|
 | `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order, the seen-set diff, and one appearance per story. Empty groups dropped |
-| `chunk(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. Every text under `limit` |
+| `messages(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. **One message per story**, header included, each text under `limit` |
 | `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
 | `stamp(moment, tz)` | `str` | `published_at` as `TIME_FMT` (`%H:%M %d/%m`), or `NO_TIME` (`--`) |
 | `SendResult(sent, failed, keys)` | dataclass | `.stories` is `len(keys)` |
+| `NOTIFY_INTERVAL_MS` | `3500` | The gap between two sends, used by `__main__._notify()` |
 
 `TITLE_MAX` is `240`: long enough that no real headline is touched, short enough
 that one absurd title plus its link cannot on its own overflow the smaller of the
@@ -66,11 +67,28 @@ both of its sections and both counts; only the message collapses it. Marking
 follows the message: the key enters `reported` once, so the copy dropped here is
 not owed a message next cycle either.
 
-**`chunk()` splits on a group boundary first and an item boundary second**, and a
-single story is never split across two messages: half a headline with no link is
-worse than the same story arriving one message later. When a group has to be
-split, its header is repeated on every part - the second message is the one most
-likely to be read on its own.
+**`messages()` sends one story per message.** A group used to travel as one
+message with a bullet per story, split only when it outgrew the channel's
+budget. Now each story is its own message and the group name is the heading of
+every one of them - a phone shows one story at a glance rather than a wall of
+ten, and a reply, a forward or a reaction is about that story. The header is
+repeated rather than sent once because every message is now read on its own. 🟢
+
+**A story too long for the channel is clipped, never split.** Half a headline
+with no link is worse than a shortened one, and `clip()` has already capped the
+title - what can still overrun is an AI sentence, and losing its tail costs
+nothing the link does not carry. 🟢
+
+**The rate limit is the cost of the shape, and two things pay it.** A busy cycle
+posts twenty messages in a row, and Telegram allows about 20 a minute to one
+group before answering 429 - at which point `send()` gives up on the channel for
+the whole cycle. `__main__._notify()` therefore builds its **own** Fetcher at
+`NOTIFY_INTERVAL_MS` (3500 ms) rather than reusing the crawl's, whose
+`advanced.request_interval_ms` of 2 s is a number chosen for reading feeds;
+Discord's webhook budget (5 requests per 5 s) is comfortable at the same gap.
+The second is `report.mode: daily`, which re-offers whatever a refused cycle
+could not deliver - under `incremental` the tail of a throttled run is never
+offered again. 🟢
 
 **An empty group contributes nothing.** The page prints `Security - 0 item(s)`
 because a reader is looking for the keyword that went quiet; a phone should not
@@ -182,7 +200,7 @@ and only works at the start of a line.
 | HTTP 429 | `Fetcher` sleeps the server's own `Retry-After` (header, else the JSON body) and retries, up to `advanced.max_retries`. Capped at `RETRY_AFTER_MAX = 60 s` |
 | HTTP 5xx, timeout, network error | Retried with exponential backoff up to `advanced.max_retries` |
 | HTTP 4xx other than 429 | Not retried - a bad token, a bad chat id, a revoked webhook or a body the channel could not parse. The response body is logged, because that is where the fixable half of the failure is |
-| Any refusal | **The channel stops for this run.** The same answer is coming for chunk two, and hammering a throttled bot is how throttled becomes banned |
+| Any refusal | **The channel stops for this run.** The same answer is coming for the next story, and hammering a throttled bot is how throttled becomes banned. One message per story makes this cost the tail of the run, which is what `NOTIFY_INTERVAL_MS` and `report.mode: daily` exist to answer |
 | Channel fails entirely | The run continues: the page is already written, and the other channel is still attempted |
 
 Whatever was accepted **before** a refusal still counts as sent, so those stories
@@ -242,7 +260,7 @@ Recorded rather than quietly dropped:
 P6-2 pushes *failures* down the same two channels the stories use, and the
 payload has nothing in common with a story but the transport. `alert()` takes one
 string, posts it once, and answers `True`/`False` rather than a `SendResult`:
-there is no seen-set to diff, no group order to preserve, nothing to chunk (an
+there is no seen-set to diff, no group order to preserve, nothing to split (an
 alert that overran a channel limit would be a bug in `ops.Health`, not a case to
 split), and nothing to mark as reported.
 

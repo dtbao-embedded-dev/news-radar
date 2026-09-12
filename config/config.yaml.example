@@ -133,14 +133,24 @@ feeds:
     rank_weight: 0.9
 
 # Search feeds: {kw} is replaced by each keyword group's primary term.
-# Cost per run is len(groups) x len(enabled templates) - six groups and the
-# three enabled below is 18 requests, on top of the eight fixed feeds. Keep
-# that in mind before enabling the fourth.
+# Cost per run is len(groups) x len(enabled templates) - the shipped keyword
+# file's 13 groups and the 2 enabled below is 26 requests, on top of the 12
+# enabled fixed feeds. Adding a keyword group costs 2 requests a cycle and
+# enabling a third template costs 13. Google News is the host that throttles
+# first, so count before doing either.
 search_templates:
-  # `when:7d` is the whole reason this template earns its slot. Google News
+  # `when:1d` is the whole reason this template earns its slot. Google News
   # answers relevance-first: without a window it returns hits aged months,
   # which score 0 for freshness and leave the group ordered by source weight
   # alone. Widen it and the page goes stale, not fuller.
+  #
+  # It was `when:7d` until 2026-09-12. A week is not a radar: measured that day
+  # over 1269 stored items, this template was the one carrying the same story
+  # back for three and four days running, and the reader's complaint was that
+  # the message was old news, not that there was too little of it. `1d` is the
+  # query half of the day-long window; `rank.max_age_days: 1` below is the
+  # other half, and it is the one that also cuts `hn_algolia`, which has no
+  # date filter in its url at all.
   # Disabled since the keyword file grew to eleven groups. It answers in
   # Vietnamese, and the Vietnamese press writes about one of those groups: over
   # the six shipped groups it returned 53 usable stories and 49 of them were the
@@ -150,7 +160,7 @@ search_templates:
   # `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news.
   - id: google_news
     name: Google News (vi)
-    url: "https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi"
+    url: "https://news.google.com/rss/search?q={kw}+when:1d&hl=vi&gl=VN&ceid=VN:vi"
     format: rss
     enabled: false
     rank_weight: 0.8
@@ -162,7 +172,7 @@ search_templates:
   # group per cycle and is what keeps Vietnamese AI coverage on the page.
   - id: google_news_en
     name: Google News (en)
-    url: "https://news.google.com/rss/search?q={kw}+when:7d&hl=en&gl=US&ceid=US:en"
+    url: "https://news.google.com/rss/search?q={kw}+when:1d&hl=en&gl=US&ceid=US:en"
     format: rss
     enabled: true
     rank_weight: 0.8
@@ -215,14 +225,25 @@ rank:
 
   # Stories older than this are dropped before anything is ranked. 0 = no cut,
   # which is the code default so an upgrade never starts discarding on its own;
-  # 14 is what ships. The half-life above cannot do this job: freshness reaches
-  # 0 after about two days, so past that a three-day-old story and a
-  # three-year-old one score the same, and a group short of fresh matches fills
-  # its cap from whatever archive a feed happens to carry. Measured before this
-  # existed: 12 of 68 shortlisted stories were over 30 days old, five of them
-  # Hugging Face posts taking half of AI Repos, the oldest 27,466 hours.
+  # **1 is what ships**, and it is what "only today's news" means here. The
+  # half-life above cannot do this job: freshness reaches 0 after about two
+  # days, so past that a three-day-old story and a three-year-old one score the
+  # same, and a group short of fresh matches fills its cap from whatever archive
+  # a feed happens to carry. Measured before this existed: 12 of 68 shortlisted
+  # stories were over 30 days old, five of them Hugging Face posts taking half
+  # of AI Repos, the oldest 27,466 hours.
+  #
+  # It was 14 until 2026-09-12. This is the half of the window that binds every
+  # source, not just the two Google News templates that carry `when:1d`:
+  # `hn_algolia` is `search_by_date` with no date filter in the url, and the
+  # fixed feeds are read whole. A rolling 24 hours, not the calendar day - at
+  # 08:00 a calendar cut would leave the radar almost empty.
+  #
+  # Expect the slow groups to look thin. ESP32 and RISC-V see a handful of
+  # stories a day, so a section of one or two items is the window working, not
+  # a feed that broke; the per-group count in the log says which.
   # An entry with no date is always kept - gh_trending dates nothing at all.
-  max_age_days: 14
+  max_age_days: 1
 
 storage:
   data_dir: output

@@ -56,18 +56,24 @@ def _install_signal_handlers():
             signal.signal(sig, handler)
 
 
-def _fetcher(cfg, timeout_s=None):
+def _fetcher(cfg, timeout_s=None, interval_ms=None):
     """One Fetcher per cycle: the per-host throttle state lives on it.
 
-    `timeout_s` overrides the feed timeout for the one caller that needs it: a
-    chat completion is slower than an RSS file by an order of magnitude, and
-    fifteen seconds would time out every summary while looking like an outage.
+    Two overrides, one caller each, both because `advanced.*` is tuned for
+    reading feeds and neither caller is reading one:
+
+    - `timeout_s` - a chat completion is slower than an RSS file by an order of
+      magnitude, and fifteen seconds would time out every summary while looking
+      like an outage.
+    - `interval_ms` - a story is now its own message, so a busy cycle posts
+      twenty of them in a row and Telegram's group limit is the binding one.
+      See `notify.NOTIFY_INTERVAL_MS`.
     """
     return Fetcher(
         user_agent=cfg.user_agent(),
         timeout_s=timeout_s or cfg.get("advanced.request_timeout_s", 15),
         max_retries=cfg.get("advanced.max_retries", 2),
-        interval_ms=cfg.get("advanced.request_interval_ms", 2000),
+        interval_ms=interval_ms or cfg.get("advanced.request_interval_ms", 2000),
     )
 
 
@@ -384,7 +390,7 @@ def _send_channel(conn, cfg, fetcher, name, rows, labels, now, tz):
              if result.failed else "")
 
 
-def _notify(cfg, fetcher, run_id, labels, fetched_at):
+def _notify(cfg, run_id, labels, fetched_at):
     """Push the run's new stories to every enabled channel.
 
     Two levels of guard, and both are in the contract. The outer one keeps a
@@ -392,11 +398,18 @@ def _notify(cfg, fetcher, run_id, labels, fetched_at):
     written by the time this runs. The inner one is per channel: a dead webhook
     must leave the *other* channel still attempted, so it cannot be allowed to
     unwind the loop.
+
+    Its **own** Fetcher, not the crawl's. A story is its own message now, so a
+    busy cycle posts twenty in a row, and `advanced.request_interval_ms` is a
+    number chosen for feeds - two seconds is over Telegram's ~20-a-minute group
+    limit, and a 429 ends the channel for the cycle.
     """
     channels = [c for c in cfg.enabled_channels() if c in SENDERS]
     if not channels:
         log.info("no notification channel is enabled, nothing is sent")
         return
+
+    fetcher = _fetcher(cfg, interval_ms=notify.NOTIFY_INTERVAL_MS)
 
     log.info("notifying %d channel(s) in %s mode", len(channels),
              cfg.get("report.mode"))
@@ -513,7 +526,7 @@ def crawl(cfg):
         # the one the page shows under the same headline. There is no separate
         # summary message any more: one a day plus the list of links was the
         # same day described twice, and the list is where the reader already is.
-        _notify(cfg, fetcher, run_id, [g.label for g in groups], fetched_at)
+        _notify(cfg, run_id, [g.label for g in groups], fetched_at)
     else:
         # `_publish` already logged the traceback. Without this line the cycle
         # would go on to ping the heartbeat and claim it succeeded, which is

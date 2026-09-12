@@ -420,11 +420,18 @@ if example.is_file():
     # measured group cut of 0.40. Deleting the entry would lose the comment
     # explaining why, and someone would add the feed back next year.
     # The eighth deliberate disagreement: the code default keeps everything,
-    # the template chooses a fortnight. A radar reporting a three-year-old blog
-    # post is what this number exists to stop.
-    check("the shipped template cuts stories older than a fortnight",
-          shipped.get("rank.max_age_days") == 14,
+    # the template keeps one day. "Only today's news" is this number plus the
+    # `when:1d` in the two Google News templates - and this is the half that
+    # binds hn_algolia and the fixed feeds too, neither of which has a date
+    # filter to carry.
+    check("the shipped template keeps one day, not a fortnight",
+          shipped.get("rank.max_age_days") == 1,
           repr(shipped.get("rank.max_age_days")))
+    check("both Google News templates ask for one day",
+          [t.get("id") for t in shipped.get("search_templates") or []
+           if "when:1d" in (t.get("url") or "")]
+          == ["google_news", "google_news_en"],
+          repr([t.get("url") for t in shipped.get("search_templates") or []]))
     check("genk ships disabled - it dates nothing, so it can never place",
           [f.get("enabled") for f in shipped.get("feeds") or []
            if f.get("id") == "genk"] == [False])

@@ -115,22 +115,41 @@ eq("new_item strips html out of the title",
 check("new_item keeps an explicit external_id",
       make(external_id="guid-1").external_id == "guid-1")
 
-same = mod.dedup_key(make(url="http://WWW.example.com/a?utm_source=rss#top"))
-eq("the same story from two urls that canonicalise alike shares a dedup key",
-   same, mod.dedup_key(it))
-check("a different url gives a different dedup key",
-      mod.dedup_key(make(url="https://example.com/b")) != same)
+# The dedup key is the normalised TITLE, not the url. Google News answers the
+# same article with a different opaque /rss/articles/CBMi... redirect on every
+# query, so a url-keyed store held the same story up to nine times - measured
+# 2026-09-12 at 121 of 1266 live items.
+same = mod.dedup_key(it)
+eq("the same headline under two different urls shares one dedup key",
+   mod.dedup_key(make(url="https://news.google.com/rss/articles/CBMiXyz")), same)
+eq("the url plays no part at all - no url is still the same key",
+   mod.dedup_key(make(url="")), same)
+check("a different headline gives a different dedup key",
+      mod.dedup_key(make(title="ESP32-C6 does not ship")) != same)
+
+eq("a trailing ' - Publisher' is dropped when enough headline is left",
+   mod.dedup_key(make(title="Anthropic says Yemen group used Claude in missiles"
+                            " - Bloomberg")),
+   mod.dedup_key(make(title="Anthropic says Yemen group used Claude in "
+                            "missiles")))
+eq("a trailing ' | Publisher' is dropped the same way",
+   mod.dedup_key(make(title="Anthropic says Yemen group used Claude in missiles"
+                            " | Reuters")),
+   mod.dedup_key(make(title="Anthropic says Yemen group used Claude in "
+                            "missiles")))
+check("a short headline keeps its suffix - 'X - Y' may be the whole title",
+      mod.dedup_key(make(title="ESP32-C6 ships - Hackaday")) != same)
 
 nourl = make(url="")
 eq("an item with no usable url canonicalises to empty", nourl.canonical_url, "")
 check("an item with no url still gets a dedup key", bool(mod.dedup_key(nourl)))
-eq("the title fallback ignores case, diacritics and punctuation",
+eq("the key ignores case, diacritics and punctuation",
    mod.dedup_key(mod.new_item(title="Điện tử: ESP32!", url="",
                               source_id="genk", fetched_at=NOW)),
    mod.dedup_key(mod.new_item(title="dien tu esp32", url="",
                               source_id="tinhte", fetched_at=NOW)))
-check("the title fallback is not the same key as a url key",
-      mod.dedup_key(nourl) != same)
+eq("key_for_title is the same key, addressable without a NewsItem",
+   mod.key_for_title(it.title), same)
 
 # An item without a title is a parse-time drop, not a record with an empty
 # headline: every downstream stage displays the title, so there is nothing to

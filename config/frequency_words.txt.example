@@ -30,9 +30,62 @@ ESP32-C6
 @12
 => ESP32
 
+# The other half of "firmware for ESP and STM". A group of its own rather than
+# four more terms in the ESP32 group, because the FIRST plain term is what the
+# search templates query and a second family in the same group would never be
+# asked for. Measured 2026-09-12: with no query of its own, STM32 appeared in
+# 3 of 1269 stored items - the same shape as DeepSeek before it was given a
+# group (7 mentions without a query, 67 with one).
+#
+# `ST` alone is not here and must not be: matching is substring, so it would
+# hit almost every title in the file.
+STM32
+STM32Cube
+STM32CubeIDE
+STM32H7
+STM32F4
+STMicroelectronics
+!tuyen dung
+!hiring
+@10
+=> STM32
+
+# `firmware` is the widest word in this file and it does not belong to
+# embedded: measured 2026-09-12 across 1269 stored items, the group matched 94
+# and **36 of them were consumer-device firmware** - Nikon ZR 2.00 in eight
+# different spellings, Canon EOS R5, a Sony car stereo, PlayStation 5 14.0,
+# Beats 360, an Apple 140 W power adapter.
+#
+# The exclusions below are that measured list and nothing speculative. They are
+# on the group rather than in [GLOBAL_FILTER] on purpose: an ESP32-CAM project
+# is a real story, and it still reaches the reader under the ESP32 group, which
+# sits ahead of this one.
+#
+# What this deliberately costs: a headline like `Building Firmware with CMake`
+# survives, but `Nikon ZR firmware brings open gate` does not - and neither
+# does an ESP32 camera build, which loses its place here and keeps the one it
+# already had above.
 firmware
 bootloader
 OTA update
+!nikon
+!canon
+!sony
+!fujifilm
+!panasonic
+!gopro
+!dji
+!playstation
+!ps5
+!xbox
+!airpods
+!beats
+!soundbar
+!camera
+!lens
+!car stereo
+!power adapter
+!smartwatch
 !tuyen dung
 !hiring
 @10
@@ -41,6 +94,41 @@ OTA update
 RISC-V
 @8
 => RISC-V
+
+# New models, which is a different question from news about AI. It cannot be
+# written as plain terms: `release` matches every ESP-IDF tag and every camera
+# firmware note, and `model` matches half the industry. Two regexes instead,
+# both run against the ORIGINAL title so the capitals and the version numbers
+# do the work:
+#
+#   1. a versioned model name - the way a release is actually announced.
+#   2. a release verb sitting next to a model word, for the launches whose
+#      headline names no version.
+#
+# Measured 2026-09-12 over 1269 stored items: the first matched 80 titles, the
+# second 31, and `ESP-IDF Release v5.2.8` and `Canon Announces Firmware
+# Updates` matched neither.
+#
+# `!leak` and `!rumor` are here because the second regex is broad enough to
+# pull in the speculation channels that repackage every launch. `!firmware` is
+# there for a sharper reason, found in the same measurement: `Amazfit releases
+# major firmware update for three T-Rex models` satisfies regex 2 exactly -
+# a release verb, then the word `models`, meaning watch models. A model release
+# is never a firmware story, and the Firmware group above is where that one
+# belongs.
+#
+# It sits ahead of every vendor group and of AI: a story about Qwen3.8 Max is
+# in all three, and `notify.pick()` sends it under the first, where the heading
+# says what actually happened.
+/(?i)\b(GPT-\d|Claude \d|Gemini \d|Llama \d|Qwen ?[\d.]+|DeepSeek[- ][VR]\d|Grok \d|Gemma \d|Phi-\d|Mistral \w+|Kimi [A-Z]?\d|Ling[- ]\d)/
+/(?i)\b(releases?|releasing|launch(?:es|ed|ing)?|unveil(?:s|ed|ing)?|introduc(?:es|ed|ing)|announc(?:es|ed|ing)|debuts?|open[- ]sources?|open[- ]weights?)\b[^\n]{0,60}\b(model|models|LLM|LLMs|checkpoint|weights|parameters)\b/
+!leak
+!rumor
+!firmware
+!tuyen dung
+!hiring
+@10
+=> AI Model Release
 
 # One group per model vendor, and each one earns its place by being its own
 # search query: a group's first plain term is what the templates ask for, so
@@ -153,8 +241,27 @@ awesome-llm
 => GitHub Trending
 
 # Applied to every item from every source, before any group is considered.
+#
+# The second block is measured, not guessed: on 2026-09-12 the model-vendor
+# groups were carrying Zcash whale trades, SK Hynix share moves and DeepSeek
+# IPO filings - a vendor name in a market story is still a market story.
+#
+# Two words that look like they belong here and must never be added, because
+# matching is substring and not word-boundary:
+#   !crypto  would also block cryptography, cryptographic, crypto-chip.
+#   !ipo     would also block LiPo, which is every battery story in the file.
 [GLOBAL_FILTER]
 !giveaway
 !coupon
 !khuyen mai
 !sponsored
+!zcash
+!bitcoin
+!ethereum
+!memecoin
+!altcoin
+!cryptocurrency
+!share price
+!stock market
+!whale short
+!millionaire

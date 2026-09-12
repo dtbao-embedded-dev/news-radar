@@ -16,6 +16,86 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.10 - 2026-09-12
+
+### Features
+
+- **notify**: a story is now **its own message** on Telegram and Discord,
+  instead of a bullet in a message holding a whole group. The group name is
+  repeated as the heading of every message, so each one is readable on its own,
+  and a story too long for the channel is clipped rather than split across two.
+
+  A send is spaced 3.5 s apart, from a Fetcher `_notify()` builds for itself
+  rather than the crawl's: `advanced.request_interval_ms` is 2 s, which is
+  tuned for reading feeds and is over Telegram's ~20-a-minute group limit once
+  a busy cycle posts twenty messages in a row. A 429 ends the channel for the
+  cycle, so the gap is what stops the tail of a run being lost - and
+  `report.mode: daily` is what re-offers it when one is.
+
+- **keywords**: two new groups in the shipped template, and a much narrower
+  `Firmware`.
+
+  `STM32` is a group of its own rather than four terms added to `ESP32`,
+  because a group's first plain term is what the search templates query and a
+  second family inside one group would never be asked for. Measured 2026-09-12
+  with no query of its own, STM32 appeared in 3 of 1269 stored items - the same
+  shape DeepSeek had before it was given a group (7 mentions without a query,
+  67 with one).
+
+  `AI Model Release` answers "what shipped", which the `AI` group cannot: it is
+  two regexes, one for a versioned model name and one for a release verb beside
+  a model word, and it sits ahead of the vendor groups so a Qwen3.8 release is
+  sent under a heading that says so. It matched 129 of the 1269 stored items,
+  and neither `ESP-IDF Release v5.2.8` nor `Canon Announces Firmware Updates`.
+
+  `Firmware` matched 94 stored items and **36 of them were consumer-device
+  firmware** - Nikon ZR 2.00 in eight spellings, Canon EOS R5, a Sony car
+  stereo, PlayStation 5 14.0, Beats 360, an Apple 140 W power adapter. The
+  measured exclusion list takes it to 60 with none of them left. An ESP32
+  camera build loses its place here and keeps the one it already had in the
+  `ESP32` group above.
+
+  `[GLOBAL_FILTER]` gains the crypto and market terms the vendor groups were
+  carrying - Zcash whale trades, SK Hynix share moves, DeepSeek IPO filings.
+  `!crypto` and `!ipo` are deliberately absent: matching is substring, and they
+  would eat *cryptography* and *LiPo*.
+
+### Fixes
+
+- **dedup**: a story is now identified by its **normalised headline**, with a
+  trailing `- Publisher` byline stripped, instead of by its canonical URL.
+
+  A URL looks like the stronger key and is not one. Google News answers the
+  same article with a different opaque `news.google.com/rss/articles/CBMi...`
+  redirect on every query, so one story was stored - and sent - under as many
+  as **nine** different keys. Measured on the live store 2026-09-12: **121 of
+  1269 items (9.6%) were duplicates of another row**, across 84 groups, and not
+  one of those groups mixed two different stories. Keying on the headline also
+  collapses what no URL rule could: the same piece from `cnx-software.com` and
+  from Google News' copy of it, or a Bloomberg story on Hacker News beside the
+  same one carrying its byline.
+
+  Known ceiling: two genuinely different articles with a byte-identical
+  normalised headline become one story. None was found in those 1269 items, and
+  real recurring columns carry a date or a version in the title.
+
+- **store**: schema version 3. `open_db()` now runs migrations **as a chain** -
+  a v1 store runs the v1→v2 step and then the v2→v3 one, instead of jumping
+  straight to the current number and skipping what happened in between. The new
+  v2→v3 step re-seeds `reported` with each already-sent story's new key, so the
+  dedup change does not make the first cycle after the upgrade push a whole day
+  again, one message per story. Verified against a copy of the production
+  store: 1241 already-sent stories, 0 re-sent.
+
+- **config**: the shipped template narrows the window to a day. Both Google
+  News templates ask `when:1d` instead of `when:7d`, and `rank.max_age_days`
+  drops from 14 to 1 - the half that also binds `hn_algolia`, which has no date
+  filter in its url, and the fixed feeds, which are read whole. A rolling 24
+  hours rather than the calendar day; at 08:00 a calendar cut would leave the
+  radar almost empty. Expect the slow groups to look thin - ESP32 and RISC-V
+  see a handful of stories a day, and a section of one or two items is the
+  window working.
+
 ## v0.2.9 - 2026-09-08
 
 ### Features

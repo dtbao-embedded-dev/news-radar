@@ -3,7 +3,7 @@ title: How News Is Searched, Matched and Ranked
 category: behavior
 purpose: The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered.
 status: active
-updated: 2026-09-07
+updated: 2026-09-12
 source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py
 confidence: confirmed
 keywords: crawl, search algorithm, matching, max_age_days, fresh_enough, age cut, match_excerpt, excerpt, _haystack, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases
@@ -29,8 +29,9 @@ order: 1
 
 Cost is predictable and worth stating out loud: `len(enabled feeds) +
 len(groups) x len(enabled templates)`. Measured on the shipped config: twelve
-enabled feeds, eleven groups and two enabled templates is **34 requests per
-run**. That number is the reason `genk` and the `google_news` (hl=vi) template
+enabled feeds, **thirteen** groups and two enabled templates is **38 requests
+per run** (it was 34 at eleven groups; `STM32` and `AI Model Release` cost two
+requests each). That number is the reason `genk` and the `google_news` (hl=vi) template
 both ship disabled - adding the five model groups would otherwise have taken the
 cycle from 33 requests to 45, a 36% rise at the two hosts already known to
 throttle first. `build_urls()` is pure, so that number is known before the first
@@ -140,6 +141,11 @@ by the earliest fact any source had. The size of that union is the
 cross-source frequency signal - a story that showed up on Hacker News *and*
 Lobsters *and* a Google News query is, empirically, the story of the day.
 
+Since 2026-09-12 the key is the **normalised headline**, not the canonical URL,
+which is what makes that union real: Google News hands back a different opaque
+redirect for the same article on every query, so a URL key was counting one
+story as up to nine and giving each of them a frequency of one. 🟢
+
 ## Stage 6 - rank
 
 Per group, each surviving item scores:
@@ -155,6 +161,9 @@ Weights are `rank.weight_source`, `rank.weight_frequency`, `rank.weight_freshnes
 
 **The age cut runs first.** `rank.max_age_days` drops a story past the limit
 **before** anything is scored - `fresh_enough()` decides one story at a time.
+The shipped value is **1**: a rolling 24 hours, which is what "only today's
+news" means here, and the half of the window that binds every source rather
+than only the two Google News templates carrying `when:1d`.
 It is the floor the score cannot express: freshness reaches 0 after about two
 days, so past that a three-day-old story and a three-year-old one are the same
 number, and a group short of fresh matches fills the rest of its cap from

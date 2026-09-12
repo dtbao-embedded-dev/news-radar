@@ -202,16 +202,24 @@ shipped = (pathlib.Path(__file__).resolve().parent.parent
            / "config" / "frequency_words.txt.example")
 if shipped.is_file():
     sgroups, sfilter = mod.parse(shipped)
-    eq("the shipped keyword template parses into 11 groups", len(sgroups), 11)
+    eq("the shipped keyword template parses into 13 groups", len(sgroups), 13)
     eq("its primary terms are the ones the search templates will query",
        [g.primary for g in sgroups],
-       ["ESP32", "firmware", "RISC-V", "Claude", "ChatGPT", "GLM", "Qwen",
-        "DeepSeek", "artificial intelligence", "open source AI",
-        "GitHub Trending"])
+       ["ESP32", "STM32", "firmware", "RISC-V", "AI Model Release", "Claude",
+        "ChatGPT", "GLM", "Qwen", "DeepSeek", "artificial intelligence",
+        "open source AI", "GitHub Trending"])
     # ESP32, AI and AI Repos were widened when the template took on six more
     # feeds. The five model groups are narrow topics and get @6 apiece.
     eq("its caps survive the parse",
-       [g.cap for g in sgroups], [12, 10, 8, 6, 6, 6, 6, 6, 12, 10, 8])
+       [g.cap for g in sgroups],
+       [12, 10, 10, 8, 10, 6, 6, 6, 6, 6, 12, 10, 8])
+
+    # STM32 is the other half of "firmware for ESP and STM". Its primary term
+    # is what the search templates query, which is the whole point of giving it
+    # a group instead of adding STM32 to the ESP32 one.
+    check("STM32 is its own group, so it gets its own search query",
+          "STM32" in [g.primary for g in sgroups], repr(
+              [g.primary for g in sgroups]))
 
     # Load-bearing order: `notify.pick()` sends a story under the FIRST group
     # in this file that claims it, and a Claude story matches the AI group too.
@@ -221,7 +229,18 @@ if shipped.is_file():
           all(labels.index(v) < labels.index("AI")
               for v in ("Claude", "ChatGPT", "GLM", "Qwen", "DeepSeek")),
           repr(labels))
-    eq("its global filter has four exclusions", len(sfilter), 4)
+    check("its global filter still blocks the advertising terms",
+          {"giveaway", "coupon", "khuyen mai", "sponsored"} <= set(sfilter),
+          repr(sfilter))
+    # Measured 2026-09-12 in the live store: the model-vendor groups were
+    # pulling in Zcash whale trades, SK Hynix share moves and DeepSeek IPO
+    # filings. `crypto` and `ipo` are deliberately absent - matching is
+    # substring, so they would eat `cryptography` and `LiPo`.
+    check("...and the crypto and market noise measured on the live store",
+          {"zcash", "bitcoin", "cryptocurrency", "memecoin"} <= set(sfilter),
+          repr(sfilter))
+    check("no global exclusion is a substring trap",
+          not ({"crypto", "ipo", "tv"} & set(sfilter)), repr(sfilter))
     check("every group has a non-empty label",
           all(g.label for g in sgroups))
 
@@ -244,6 +263,34 @@ if shipped.is_file():
           repos.regexes[0].search("Show HN: Argus, open-source AI agents"))
     check("...but not a Show HN with nothing to do with AI",
           not repos.regexes[0].search("Show HN: Md2pdf - Markdown to PDF"))
+
+    # A model release is what the request asked to hunt, and it cannot be a
+    # plain term: `release` matches every ESP-IDF tag and every camera
+    # firmware. Two regexes - a versioned model name, and a release verb next
+    # to a model word - and they are pinned for the same reason the AI ones
+    # are: losing one costs matches quietly.
+    release = by_label["AI Model Release"]
+    eq("the model-release group is regex-only", len(release.terms), 0)
+    eq("...with two regexes", len(release.regexes), 2)
+    hits = lambda t: any(rx.search(t) for rx in release.regexes)
+    check("...matching a versioned model name",
+          hits("Qwen3.8 Max Debuts With 2.4 Trillion Parameters"))
+    check("...and a release verb beside a model word",
+          hits("Alibaba's Qwen releases open-source model for driving"))
+    check("...and DeepSeek's own version scheme",
+          hits("China's DeepSeek launches V4.1-Flash model"))
+    check("...but not an ESP-IDF tag",
+          not hits("ESP-IDF Release v5.2.8"))
+    check("...and not a camera firmware release",
+          not hits("Canon Announces Firmware Updates for PTZ Camera Lineup"))
+
+    # The Firmware group is the one the request named, and the bare word
+    # belongs to every consumer device: measured 2026-09-12, 36 of its 94 live
+    # matches were Nikon, Canon, Sony, PlayStation or AirPods firmware.
+    fw = by_label["Firmware"]
+    check("the firmware group excludes the consumer devices it was drowning in",
+          {"nikon", "canon", "camera", "playstation", "airpods"}
+          <= {e.lower() for e in fw.excluded}, repr(fw.excluded))
 else:
     FAILURES.append(
         "config/frequency_words.txt.example is missing from the checkout")

@@ -18,10 +18,10 @@ only by a number:
 
 - **`pick()`** - the group order and the seen-set diff, applied to the store's
   rows before either channel sees them.
-- **`chunk()`** - the split. A group boundary is preferred, an item boundary is
-  the fallback, and a story is never cut in half.
-- **`clip()`** - the cap that keeps one absurd headline from making a whole
-  chunk unsendable.
+- **`messages()`** - one message per story, header and all. A story too long
+  for the channel is clipped, never split across two messages.
+- **`clip()`** - the cap that keeps one absurd headline or a runaway AI
+  sentence from making a message unsendable.
 - **`stamp()`** - the published time, spelled the way the page spells it.
 
 Contract: docs/memory-ai/interface/notify-channels.md
@@ -34,8 +34,8 @@ import logging
 
 from dataclasses import dataclass, field
 
-__all__ = ["SendResult", "pick", "chunk", "clip", "stamp", "TITLE_MAX",
-           "TIME_FMT", "NO_TIME", "UTC"]
+__all__ = ["SendResult", "pick", "messages", "clip", "stamp", "TITLE_MAX",
+           "TIME_FMT", "NO_TIME", "UTC", "NOTIFY_INTERVAL_MS"]
 
 log = logging.getLogger("news_radar.notify")
 
@@ -59,17 +59,24 @@ UTC = dt.timezone.utc
 # smaller of the two channel budgets and cost the story its message.
 TITLE_MAX = 240
 
-# One blank line between two groups in the same message.
-JOIN = "\n\n"
+# The minimum gap between two sends, whatever `advanced.request_interval_ms`
+# says about feeds. One message per story means a busy cycle posts twenty of
+# them back to back, and Telegram allows about 20 a minute to one group before
+# answering 429 - at which point `send()` gives up on the channel for the whole
+# cycle. Three and a half seconds sits under that with room to spare, and
+# Discord's webhook budget (5 requests per 5 seconds) is comfortable there too.
+# `__main__._notify()` builds its own Fetcher with this rather than reusing the
+# crawl's, which is tuned for reading feeds.
+NOTIFY_INTERVAL_MS = 3500
 
 
 @dataclass
 class SendResult:
     """What one channel did with one run.
 
-    `keys` is the dedup keys of the chunks the channel **accepted**, and it is
-    the only thing `mark_reported()` is ever given. A chunk that failed leaves
-    its stories unreported, so the next run tries them again.
+    `keys` is the dedup keys of the messages the channel **accepted**, and it
+    is the only thing `mark_reported()` is ever given. A message that failed
+    leaves its story unreported, so the next run tries it again.
     """
 
     sent: int = 0
@@ -149,52 +156,30 @@ def pick(rows_by_label, labels, keys=None):
     return out
 
 
-def chunk(blocks, limit):
-    """`[(header, [(line, key)])]` -> `[(text, keys)]`, every text under `limit`.
+def messages(blocks, limit):
+    """`[(header, [(line, key)])]` -> `[(text, keys)]`, one message per story.
 
-    Split on a group boundary first and an item boundary second, per the channel
-    contract. A single story is never split across two messages: half a headline
-    with no link is worse than the same story arriving one message later.
+    A group used to travel as one message with a bullet per story, split only
+    when it outgrew the channel's budget. It is now **one message per story**,
+    each carrying its own group header. A phone shows one story at a glance
+    instead of a wall of ten, and a reply, a forward or a reaction is about
+    that story rather than about the batch it happened to arrive in.
+
+    The header is repeated on every message rather than sent once: a bare link
+    with no group name says nothing about why the radar picked it up, and every
+    message is now read on its own.
+
+    A story longer than `limit` is **clipped, never split**. Half a headline
+    with no link is worse than a shortened one, and `clip()` has already capped
+    the title - what can still overrun is an AI sentence, and losing its tail
+    costs nothing the link does not carry.
 
     An empty group contributes nothing. The page prints `0 item(s)` for a
     keyword that has gone quiet because a reader is looking for exactly that;
     a message pushed to a phone is not the place to say nothing happened.
     """
-    parts = []
-    for header, items in blocks:
-        if items:
-            parts.extend(_split(header, items, limit))
-
     out = []
-    text, keys = "", ()
-    for part_text, part_keys in parts:
-        candidate = part_text if not text else text + JOIN + part_text
-        if text and len(candidate) > limit:
-            out.append((text, keys))
-            text, keys = part_text, part_keys
-        else:
-            text, keys = candidate, keys + part_keys
-
-    if text:
-        out.append((text, keys))
+    for header, items in blocks:
+        for line, key in items:
+            out.append((clip("{}\n{}".format(header, line), limit), (key,)))
     return out
-
-
-def _split(header, items, limit):
-    """One group as one part, or as several parts with the header repeated.
-
-    The header is repeated rather than dropped: a bare list of links with no
-    group name is unreadable on a phone, and the second message is the one most
-    likely to be read on its own.
-    """
-    parts, lines, keys = [], [header], ()
-    for line, key in items:
-        if len(lines) > 1 and len("\n".join(lines + [line])) > limit:
-            parts.append(("\n".join(lines), keys))
-            lines, keys = [header, line], (key,)
-        else:
-            lines.append(line)
-            keys += (key,)
-
-    parts.append(("\n".join(lines), keys))
-    return parts

@@ -20,7 +20,7 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from news_radar import store as mod  # noqa: E402
-from news_radar.item import dedup_key, new_item  # noqa: E402
+from news_radar.item import dedup_key, key_for_title, new_item  # noqa: E402
 from news_radar.rank import Story  # noqa: E402
 
 FAILURES = []
@@ -418,6 +418,71 @@ conn.close()
 conn = mod.open_db(old)
 eq("reopening a migrated store is a no-op",
    conn.execute("PRAGMA user_version").fetchone()[0], mod.SCHEMA_VERSION)
+conn.close()
+
+
+# -- v2 -> v3: the seen-set survives the rekey ------------------------------
+
+# v0.2.10 moved `dedup_key` off the canonical url and onto the normalised
+# title. Every key in a v2 store is therefore stale, and without this migration
+# the first cycle after the upgrade would look at a full day of already-sent
+# stories, find none of their new keys in `reported`, and push the lot again -
+# one message each, now that a story is its own message.
+old2 = data_dir()
+old2.mkdir(parents=True, exist_ok=True)
+raw = sqlite3.connect(str(old2 / mod.DB_NAME))
+raw.executescript("""
+CREATE TABLE items (
+    dedup_key     TEXT PRIMARY KEY,
+    title         TEXT NOT NULL,
+    url           TEXT NOT NULL,
+    canonical_url TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    published_at  TEXT,
+    excerpt       TEXT,
+    ai_summary    TEXT
+);
+CREATE TABLE item_sources (dedup_key TEXT, source_id TEXT,
+                           PRIMARY KEY (dedup_key, source_id));
+CREATE TABLE matches (dedup_key TEXT, group_name TEXT, score REAL,
+                      run_id TEXT, PRIMARY KEY (dedup_key, group_name, run_id));
+CREATE TABLE reported (dedup_key TEXT, channel TEXT, reported_at TEXT,
+                       PRIMARY KEY (dedup_key, channel));
+CREATE TABLE runs (run_id TEXT PRIMARY KEY, started_at TEXT, finished_at TEXT,
+                   items_fetched INTEGER, items_matched INTEGER, errors TEXT);
+""")
+SENT = "Anthropic says Yemen group used Claude in missile development"
+UNSENT = "ESP32-C5 Pico board follows the Raspberry Pi Pico form factor"
+for key, title in (("url-key-1", SENT), ("url-key-2", UNSENT)):
+    raw.execute("INSERT INTO items (dedup_key, title, url, canonical_url,"
+                " first_seen_at, published_at) VALUES (?, ?, ?, ?, ?, NULL)",
+                (key, title, "https://e.invalid/" + key,
+                 "https://e.invalid/" + key, mod.to_db(NOW - HOUR)))
+raw.execute("INSERT INTO reported VALUES ('url-key-1', 'telegram', ?)",
+            (mod.to_db(NOW - HOUR),))
+raw.execute("PRAGMA user_version = 2")
+raw.commit()
+raw.close()
+
+conn = mod.open_db(old2)
+eq("a v2 store is migrated rather than refused",
+   conn.execute("PRAGMA user_version").fetchone()[0], mod.SCHEMA_VERSION)
+eq("a story already sent is not offered again under its new key",
+   mod.unreported(conn, [key_for_title(SENT)], "telegram"), [])
+eq("a story that was never sent is still unreported",
+   mod.unreported(conn, [key_for_title(UNSENT)], "telegram"),
+   [key_for_title(UNSENT)])
+eq("the other channel is untouched - it never saw the story either",
+   mod.unreported(conn, [key_for_title(SENT)], "discord"),
+   [key_for_title(SENT)])
+eq("the old row is kept, not rewritten - it ages out with retention",
+   counts(conn, "items"), 2)
+conn.close()
+conn = mod.open_db(old2)
+eq("reopening a rekeyed store is a no-op",
+   conn.execute("PRAGMA user_version").fetchone()[0], mod.SCHEMA_VERSION)
+eq("...and does not double-write the seed",
+   counts(conn, "reported"), 2)
 conn.close()
 
 

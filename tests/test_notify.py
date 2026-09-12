@@ -180,38 +180,49 @@ for name, chunks in (("telegram", tg_once), ("discord", dc_once)):
     eq("{}: and its key is carried exactly once".format(name),
        keys.count("shared"), 1)
 
+# Four stories across three groups, so four messages on either channel.
+for name, built in (("telegram", tg_once), ("discord", dc_once)):
+    eq("{}: one message per story".format(name), len(built), 4)
+    eq("{}: one key per message".format(name),
+       [len(ks) for _, ks in built], [1, 1, 1, 1])
+    check("{}: every message names its own group".format(name),
+          all(any(label in text for label in ORDER) for text, _ in built),
+          repr([t for t, _ in built]))
 
-# --- the shared chunker ---------------------------------------------------
 
-# Two small groups belong in one message; the split exists for size, not for
-# tidiness, and one notification beats two.
-one = notify.chunk([("A", [("a1", "k1"), ("a2", "k2")]),
-                    ("B", [("b1", "k3")])], 4000)
-eq("small groups travel in one message", len(one), 1)
-eq("every key of every group is carried", one[0][1], ("k1", "k2", "k3"))
-check("a group boundary is a blank line", "\n\n" in one[0][0], repr(one[0][0]))
+# --- one story, one message -----------------------------------------------
 
-# A group that does not fit is split at an item boundary, and the header is
-# repeated so the second message is readable on its own.
-big = notify.chunk([("HEADER", [("x" * 40, "k{}".format(i))
-                                for i in range(10)])], 120)
-check("an oversized group is split", len(big) > 1, str(len(big)))
-check("every part is under the limit",
-      all(len(text) <= 120 for text, _ in big),
-      str([len(t) for t, _ in big]))
-check("the header is repeated on every part",
-      all(text.startswith("HEADER") for text, _ in big))
-check("no story is cut in half",
-      all(line in ("HEADER", "x" * 40)
-          for text, _ in big for line in text.split("\n")))
-keys = [k for _, ks in big for k in ks]
-eq("no story is lost to the split", len(keys), 10)
-eq("no story is sent twice by the split", len(set(keys)), 10)
+# A group used to travel as one message with a bullet per story. It is now one
+# message per story, each carrying its own header: a phone shows a story at a
+# glance, and a reply or a forward is about that story rather than about a
+# wall of ten.
+one = notify.messages([("A", [("a1", "k1"), ("a2", "k2")]),
+                       ("B", [("b1", "k3")])], 4000)
+eq("three stories make three messages", len(one), 3)
+eq("each message carries exactly one key",
+   [ks for _, ks in one], [("k1",), ("k2",), ("k3",)])
+check("every message carries its own group header",
+      [t.split("\n")[0] for t, _ in one] == ["A", "A", "B"],
+      repr([t for t, _ in one]))
+eq("group order is preserved", [t.split("\n")[1] for t, _ in one],
+   ["a1", "a2", "b1"])
+
+# A story longer than the channel budget is clipped, never split: half a
+# headline with no link is worse than a shortened one.
+huge = notify.messages([("HEADER", [("x" * 4000, "k1")])], 120)
+eq("an oversized story is still one message", len(huge), 1)
+check("...and fits the limit", len(huge[0][0]) <= 120, str(len(huge[0][0])))
+check("...and keeps its header", huge[0][0].startswith("HEADER"))
+eq("...and keeps its key", huge[0][1], ("k1",))
 
 # The page prints "Security - 0 item(s)" because a reader is looking for the
 # keyword that went quiet. A push notification saying nothing happened is spam.
-eq("an empty group contributes nothing", notify.chunk([("Quiet", [])], 4000), [])
-eq("nothing at all sends nothing", notify.chunk([], 4000), [])
+eq("an empty group contributes nothing",
+   notify.messages([("Quiet", [])], 4000), [])
+eq("nothing at all sends nothing", notify.messages([], 4000), [])
+
+check("the gap between two sends is under telegram's 20/minute group limit",
+      notify.NOTIFY_INTERVAL_MS >= 3000, str(notify.NOTIFY_INTERVAL_MS))
 
 eq("a short title is left alone", notify.clip("short"), "short")
 long_title = "x" * 500
@@ -280,23 +291,26 @@ groups = [("ESP32", [row("First", "k1"), row("Second", "k2")]),
           ("Rust", [row("Third", "k3")])]
 
 result = telegram.send(fetcher, groups, "TOKEN", "-100123")
-eq("one message went out", result.sent, 1)
+eq("three stories are three messages", result.sent, 3)
 eq("nothing failed", result.failed, 0)
 eq("the accepted keys come back for mark_reported", set(result.keys),
    {"k1", "k2", "k3"})
-eq("the result counts stories, not chunks", result.stories, 3)
+eq("the result counts stories", result.stories, 3)
 
-body = BODIES["/botTOKEN/sendMessage"][0]
+sent = BODIES["/botTOKEN/sendMessage"]
+body = sent[0]
 eq("the chat id is sent as configured", body["chat_id"], "-100123")
 eq("HTML is the declared parse mode", body["parse_mode"], "HTML")
-eq("link previews are off - one preview would bury the list",
+eq("link previews are off - a preview would bury the story under a thumbnail",
    body["disable_web_page_preview"], True)
-check("the message carries both groups",
-      "ESP32" in body["text"] and "Rust" in body["text"])
+check("each message carries exactly one group heading",
+      [("ESP32" in b["text"], "Rust" in b["text"]) for b in sent]
+      == [(True, False), (True, False), (False, True)],
+      str([b["text"] for b in sent]))
 
 eq("nothing to send posts nothing at all",
    telegram.send(fetcher, [], "TOKEN", "-100123").sent, 0)
-eq("...and asks the API nothing", HITS.get("/botTOKEN/sendMessage"), 1)
+eq("...and asks the API nothing", HITS.get("/botTOKEN/sendMessage"), 3)
 
 # A bad token or a bad chat id answers the same way however many times it is
 # asked. Retrying it costs the run three requests for one answer.
@@ -309,10 +323,9 @@ eq("a 400 is not retried", HITS.get("/bot-bad/sendMessage"), 1)
 # Half a run delivered is still half a run delivered: those stories must not be
 # pushed again tomorrow, and the rest must.
 many = [("G{}".format(i), [row("x" * 300, "k{}".format(i))]) for i in range(40)]
-check("the fixture is big enough to need two messages",
-      len(telegram.build(many)) > 1, str(len(telegram.build(many))))
+eq("forty stories are forty messages", len(telegram.build(many)), 40)
 partial = telegram.send(fetcher, many, "-flaky", "-100123")
-eq("the accepted chunk still counts", partial.sent, 1)
+eq("the accepted message still counts", partial.sent, 1)
 eq("the refused one is counted too", partial.failed, 1)
 check("only the accepted stories come back for marking",
       0 < len(partial.keys) < 40, str(len(partial.keys)))
@@ -340,35 +353,38 @@ paren = discord.build([("G", [row("t", "k", url="https://x/a(b)c")])])[0][0]
 check("a closing paren in a url is encoded, not left to end the link early",
       "%29" in paren and "(b)" not in paren, paren)
 
-# 2000 is a quarter of Telegram's budget: the same run makes more Discord
-# messages than Telegram messages, which is expected rather than a bug.
+# The two budgets no longer decide how many messages a run makes - one story is
+# one message on either channel. What the smaller budget still decides is how
+# much of a long AI sentence survives.
 same = [("G{}".format(i), [row("x" * 200, "k{}-{}".format(i, j))
                            for j in range(4)]) for i in range(6)]
-check("a quarter of the budget makes more messages, not truncated ones",
-      len(discord.build(same)) > len(telegram.build(same)),
-      "{} vs {}".format(len(discord.build(same)), len(telegram.build(same))))
-check("every discord chunk is under the webhook limit",
+eq("both channels send one message per story",
+   (len(discord.build(same)), len(telegram.build(same))), (24, 24))
+check("every discord message is under the webhook limit",
       all(len(text) <= discord.LIMIT for text, _ in discord.build(same)))
 
 dgroups = [("ESP32", [row("First", "k1"), row("Second", "k2")]),
            ("Rust", [row("Third", "k3")])]
 
 dres = discord.send(fetcher, dgroups, WEBHOOK)
-eq("one webhook post went out", dres.sent, 1)
+eq("three stories are three webhook posts", dres.sent, 3)
 eq("nothing failed", dres.failed, 0)
 eq("the accepted keys come back for mark_reported", set(dres.keys),
    {"k1", "k2", "k3"})
 
-dbody = BODIES["/webhook"][0]
+posts = BODIES["/webhook"]
+dbody = posts[0]
 check("the payload is a plain content body", "content" in dbody, str(dbody))
 check("no embeds - the 6000-character total is easier to overrun than the "
       "per-embed limit", "embeds" not in dbody, str(dbody))
-check("the message carries both groups",
-      "ESP32" in dbody["content"] and "Rust" in dbody["content"])
+check("each post carries exactly one group heading",
+      [("ESP32" in b["content"], "Rust" in b["content"]) for b in posts]
+      == [(True, False), (True, False), (False, True)],
+      str([b["content"] for b in posts]))
 
 eq("nothing to send posts nothing at all",
    discord.send(fetcher, [], WEBHOOK).sent, 0)
-eq("...and asks the webhook nothing", HITS.get("/webhook"), 1)
+eq("...and asks the webhook nothing", HITS.get("/webhook"), 3)
 
 dbad = discord.send(fetcher, dgroups, WEBHOOK + "-bad")
 eq("a revoked webhook sends nothing", dbad.sent, 0)

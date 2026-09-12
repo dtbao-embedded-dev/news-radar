@@ -396,7 +396,7 @@ def unreported(conn, dedup_keys, channel):
 def mark_reported(conn, dedup_keys, channel, when):
     """Record that these stories went out on this channel. Idempotent.
 
-    Called only **after** the chunk was accepted: a crash between send and write
+    Called only **after** the message was accepted: a crash between send and write
     re-sends, and a duplicate is the acceptable failure where a silently dropped
     story is not.
     """

@@ -133,9 +133,11 @@ feeds:
     rank_weight: 0.9
 
 # Search feeds: {kw} is replaced by each keyword group's primary term.
-# Cost per run is len(groups) x len(enabled templates) - six groups and the
-# three enabled below is 18 requests, on top of the eight fixed feeds. Keep
-# that in mind before enabling the fourth.
+# Cost per run is len(groups) x len(enabled templates) - the shipped keyword
+# file's 13 groups and the 2 enabled below is 26 requests, on top of the 12
+# enabled fixed feeds. Adding a keyword group costs 2 requests a cycle and
+# enabling a third template costs 13. Google News is the host that throttles
+# first, so count before doing either.
 search_templates:
   # `when:1d` is the whole reason this template earns its slot. Google News
   # answers relevance-first: without a window it returns hits aged months,

@@ -38,13 +38,27 @@ throttled cycle loses its tail, and `incremental` never offers a missed story
 again. It is set **before** the code that needs it, which is harmless - v0.2.9
 honours the key.
 
-**The code half still needs a release.** Code reaches the homelab only through
-`:latest` plus watchtower, so until **v0.2.10** is cut production has the
-24-hour window and the new keywords and still the old URL dedup and the old
-grouped messages. That same cycle proves it: `matched 1769 item(s) -> 1730
-story(ies) after dedup` and `telegram 4 message(s), 22 story(ies)` - 39
-collapsed where the headline key would collapse far more, and four messages
-where there should be twenty-two.
+**v0.2.10 is cut and live (2026-09-12 13:00).** All five CI runs green, the
+image published, and the homelab pulled it by hand - watchtower's
+`WATCHTOWER_POLL_INTERVAL` is 86400, so a release does not reach the deployment
+on its own inside a day. `--check` reports the config up to date.
+
+The first cycle on the new image is the end-to-end proof of all four changes:
+
+```
+news-radar 0.2.10 starting
+search feeds: 741 item(s) from 13 group(s) x 2 template(s)
+rekey: 2568 seen-set row(s) carried onto the new dedup key
+migrated output/news.db from schema version 2 to 3
+stored 82 match row(s); 309 story(ies) across 13 group(s) today
+telegram 12 message(s), 12 story(ies)
+discord  12 message(s), 12 story(ies)
+```
+
+**309 stories in the day and 12 messages** is the migration working: without the
+v2->v3 rekey, `daily` mode would have found the whole day unreported under new
+keys and pushed all 309, one message each. And 12 messages for 12 stories is the
+1:1 shape - 40 s per channel, which is 12 x 3.5 s exactly.
 
 **The AI summary went quiet for nine hours and now recovers on its own
 (2026-09-08, unreleased after v0.2.8).** OpenRouter withdrew the free tier of

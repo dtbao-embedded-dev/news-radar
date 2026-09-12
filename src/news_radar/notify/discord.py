@@ -1,4 +1,4 @@
-"""The Discord channel: one webhook POST per chunk, in Markdown.
+"""The Discord channel: one webhook POST per story, in Markdown.
 
 Markdown, not HTML, so the escaping problem is a different one: `*_~|` and a
 backtick are formatting, and a `[` or `]` in a headline ends the masked link
@@ -18,7 +18,7 @@ import json
 import logging
 import re
 
-from . import SendResult, UTC, chunk, clip, stamp
+from . import SendResult, UTC, clip, messages, stamp
 from ..fetch.http import HttpError
 
 __all__ = ["NAME", "LIMIT", "build", "send", "alert"]
@@ -27,9 +27,9 @@ log = logging.getLogger("news_radar.notify.discord")
 
 NAME = "discord"
 
-# 2000 characters, minus headroom for the same reason Telegram has it. A quarter
-# of Telegram's budget means the same run makes more Discord messages than
-# Telegram messages - expected, not a bug.
+# 2000 characters, minus headroom for the same reason Telegram has it. Both
+# channels now send one message per story, so this no longer decides how many
+# messages a run makes - only how much of a long AI sentence survives.
 LIMIT = 1900
 
 # The characters that change what a message *means* rather than how it reads.
@@ -83,21 +83,21 @@ def _line(row, tz):
 
 
 def build(groups, tz=UTC, limit=LIMIT):
-    """`[(label, [row])]` -> `[(text, keys)]`, ready to post. Pure.
+    """`[(label, [row])]` -> `[(text, keys)]`, one message per story. Pure.
 
     `tz` is the display zone from `app.timezone`, defaulting to UTC so this
     stays callable with nothing configured.
     """
-    return chunk([("**{}**".format(_e(label)),
-                   [(_line(row, tz), row["dedup_key"]) for row in rows])
-                  for label, rows in groups], limit)
+    return messages([("**{}**".format(_e(label)),
+                      [(_line(row, tz), row["dedup_key"]) for row in rows])
+                     for label, rows in groups], limit)
 
 
 def send(fetcher, groups, webhook_url, tz=UTC):
-    """Post every chunk to the webhook. Returns the accepted keys.
+    """Post every message to the webhook. Returns the accepted keys.
 
     Stops at the first refusal, like Telegram does: a 400 here is a deleted or
-    revoked webhook and answers the same way for every remaining chunk.
+    revoked webhook and answers the same way for every story still to come.
     """
     result = SendResult()
 

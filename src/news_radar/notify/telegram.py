@@ -1,4 +1,4 @@
-"""The Telegram channel: one `sendMessage` per chunk, in Telegram's own HTML.
+"""The Telegram channel: one `sendMessage` per story, in Telegram's own HTML.
 
 `parse_mode: HTML` rather than Markdown, because Telegram's Markdown refuses a
 message over any unbalanced `*` or `_` in a headline and the story is lost.
@@ -14,7 +14,7 @@ import html
 import json
 import logging
 
-from . import SendResult, UTC, chunk, clip, stamp
+from . import SendResult, UTC, clip, messages, stamp
 from ..fetch.http import HttpError
 
 __all__ = ["NAME", "LIMIT", "build", "send", "alert"]
@@ -63,27 +63,33 @@ def _line(row, tz):
 
 
 def build(groups, tz=UTC, limit=LIMIT):
-    """`[(label, [row])]` -> `[(text, keys)]`, ready to post.
+    """`[(label, [row])]` -> `[(text, keys)]`, one message per story.
 
     Pure: no network, no clock, no config - `tz` is the display zone the caller
     read out of `app.timezone`, and it defaults to UTC so this stays callable
     with nothing configured at all. Every escaping and splitting rule this
     channel has is decided here and can be checked without a socket.
     """
-    return chunk([("<b>{}</b>".format(_e(label)),
-                   [(_line(row, tz), row["dedup_key"]) for row in rows])
-                  for label, rows in groups], limit)
+    return messages([("<b>{}</b>".format(_e(label)),
+                      [(_line(row, tz), row["dedup_key"]) for row in rows])
+                     for label, rows in groups], limit)
 
 
 def send(fetcher, groups, token, chat_id, tz=UTC):
-    """Post every chunk. Returns a SendResult carrying the accepted keys.
+    """Post every message. Returns a SendResult carrying the accepted keys.
 
     The first refusal ends the channel for this run. A 400 is a bad token, a bad
     chat id or a message Telegram could not parse, and it answers the same way
-    for chunk two as for chunk one; a 429 that survived the transport's own
-    retry means the bot is throttled, and hammering it is how throttled becomes
-    banned. Whatever was accepted before the refusal still counts as sent, so
-    those stories are not re-pushed tomorrow.
+    for the second story as for the first; a 429 that survived the transport's
+    own retry means the bot is throttled, and hammering it is how throttled
+    becomes banned. Whatever was accepted before the refusal still counts as
+    sent, so those stories are not re-pushed tomorrow.
+
+    One message per story makes that refusal matter more than it used to - a
+    throttled cycle now loses the tail of the run rather than one of two
+    batches. Two things answer it and neither lives here: `notify.NOTIFY_INTERVAL_MS`
+    keeps the rate under Telegram's own, and `report.mode: daily` re-offers what
+    a cycle could not deliver.
     """
     url = API.format(token=token)
     result = SendResult()

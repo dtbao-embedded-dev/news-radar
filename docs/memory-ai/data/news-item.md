@@ -3,10 +3,10 @@ title: News Item, Dedup Key and Output Layout
 category: data
 purpose: The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/.
 status: active
-updated: 2026-09-06
+updated: 2026-09-12
 source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py
 confidence: confirmed
-keywords: NewsItem, dedup key, canonical url, excerpt, EXCERPT_MAX, ai_summary, gist, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle
+keywords: NewsItem, dedup key, title_key, key_for_title, canonical url, schema version 3, migration chain, excerpt, EXCERPT_MAX, ai_summary, gist, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle
 order: 2
 ---
 
@@ -25,7 +25,7 @@ mutating the item.
 |-------|------|----------|---------|
 | `title` | str | yes | Headline, HTML stripped, whitespace collapsed |
 | `url` | str | yes | Story link as published by the source |
-| `canonical_url` | str | yes | `url` after normalisation (see below) - the dedup input |
+| `canonical_url` | str | yes | `url` after normalisation (see below). Stored and displayed; **not** the dedup input any more |
 | `source_id` | str | yes | `id` of the fixed feed or search template it came from |
 | `external_id` | str | yes | The source's own id (`guid`, `entry/id`, `objectID`); falls back to `canonical_url` |
 | `published_at` | datetime \| None | no | Source timestamp, converted to UTC. `None` means the source gave none - never substitute "now" |
@@ -38,7 +38,9 @@ Invariants:
 - `title` is never empty; an item without a title is dropped at parse time.
 - `excerpt` is never `None` and never markup; an empty one is never a reason
   to drop a story, and it is not part of the dedup key.
-- `canonical_url` is stable across runs for the same story, or dedup silently stops working.
+- `title` is stable across runs for the same story, or dedup silently stops
+  working. `canonical_url` is **not** part of identity any more - it is stored
+  and displayed, nothing else.
 - All datetimes are timezone-aware UTC in memory and stored as UTC in SQLite.
   Local time (`TZ`, default `Asia/Ho_Chi_Minh`) is applied only at render time.
 
@@ -56,22 +58,45 @@ Applied in this order to produce `canonical_url`:
 
 ## Dedup key
 
+The **headline is the identity**, and the URL is not. 🟢
+
 ```
-dedup_key = sha1(canonical_url)                       when the URL survives step 6 non-empty
-          = sha1("t:" + normalised_title)             when the item has no usable URL
+dedup_key = sha1("t:" + title_key(title))
 ```
 
-`normalised_title` is the title lowercased, diacritics folded, punctuation
-removed, whitespace collapsed. The title fallback exists because aggregator items
-sometimes carry only a permalink to the aggregator itself.
+`title_key()` folds case and diacritics, drops a trailing `- Publisher` /
+`| Publisher` byline when at least 5 words are left after it, then removes
+punctuation and collapses whitespace. Punctuation goes here and not in `fold()`,
+which keeps it so a keyword typed `ESP32-S3` still matches; identity wants the
+opposite, because two sources disagreeing only about a colon carry one story.
+
+`key_for_title(title)` is the same digest addressable without a `NewsItem` -
+`store.open_db()` needs it to rekey a row it is migrating.
+
+**Why not the URL.** It looks like the stronger key and is not one: Google News
+answers the same article with a different opaque
+`news.google.com/rss/articles/CBMi...` redirect on every query, so one story was
+stored and sent under as many as **nine** keys. Measured on the live store
+2026-09-12: **121 of 1269 items (9.6%) were duplicates of another row**, across
+84 groups, and no group mixed two different stories. The headline key also
+collapses what no URL rule could - the same piece from `cnx-software.com` and
+from Google News' copy of it, or a Bloomberg story on Hacker News beside the one
+carrying its byline. 🟢
 
 Collapsing rule: the surviving record keeps the **earliest** `published_at` and
 accumulates the set of `source_id`s that carried it. That set size is the
 cross-source frequency term the ranking uses - see [[news-search]].
 
-Deliberate limit: the same story published under two different URLs (a syndicated
-copy, an AMP variant) does **not** collapse. Title-similarity clustering is not
-implemented; it would need a threshold nobody has tuned yet.
+Two deliberate limits:
+
+- **Exact match only.** Two outlets writing genuinely different headlines about
+  one event stay two stories. Similarity clustering cannot be a hash and needs a
+  threshold nobody has tuned; the `ponytail:` note in `item.dedup_key()` records
+  it. 🟢
+- **A byte-identical normalised headline is one story, always.** Two different
+  articles sharing one would merge. None was found in those 1269 items, and real
+  recurring columns carry a date or a version in the title
+  (`Kernel prepatch 7.3-rc2`). 🟡
 
 ## SQLite store
 
@@ -94,9 +119,26 @@ every re-sighting. It also reads back as one `group_concat` in the day query.
 `reported` is keyed per channel on purpose: adding Discord later must not
 retroactively count stories already pushed to Telegram as "sent".
 
-Schema version lives in SQLite's `user_version` pragma; `store.py` migrates
-forward on open and never migrates backward - a file written by a **higher**
-version raises `StoreError` rather than being downgraded.
+Schema version lives in SQLite's `user_version` pragma and is **3**. `store.py`
+migrates forward on open and never backward - a file written by a **higher**
+version raises `StoreError` rather than being downgraded, and so does one at a
+version with no step to reach the current one.
+
+Migrations run **as a chain**, not as a jump: a v1 store runs the v1→v2 step and
+then the v2→v3 one. Jumping straight to the current number is how a store gets
+stamped as migrated while a step it needed was skipped. 🟢
+
+| Step | What it does |
+|------|--------------|
+| v1 → v2 | Adds the nullable `excerpt` and `ai_summary` columns to `items`. Nothing is rewritten. |
+| v2 → v3 | Re-seeds `reported` with each already-sent story's **new** headline key, because v0.2.10 moved `dedup_key` off the URL. Adds rows only; old keys stay and age out with `retention_days`. |
+
+The v2→v3 step rewrites only `reported` on purpose. Rekeying `items`, `matches`
+and `item_sources` would have to merge rows that now collapse onto one key; the
+ones left behind cost nothing. What must be exact is the seen-set, because
+without it the first cycle after the upgrade re-sends a whole local day - one
+message per story. Verified against a copy of the production store: 1241
+already-sent stories, 0 re-sent. 🟢
 
 Every timestamp is an ISO-8601 UTC string carrying the same `+00:00` suffix, so
 `<` and `>` in SQL mean what they say. Local time is applied only at render time.

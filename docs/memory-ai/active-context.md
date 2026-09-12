@@ -23,16 +23,28 @@ re-sent; `when:1d` plus `rank.max_age_days: 1`; `STM32` and `AI Model Release`
 groups with a narrowed `Firmware`; and one message per story on both channels,
 3.5 s apart.
 
-**What still has to happen for the reader to see it.** Config reaches the
-homelab by hand and **code reaches it only through a release** - `:latest` plus
-watchtower. Until v0.2.10 is cut, production has the 24-hour window and the new
-keywords and still the old dedup and the old grouped messages. The three
-surgical edits to the homelab's hand-edited `config/config.yaml` are
-`report.mode: incremental` -> `daily`, `max_age_days: 14` -> `1`, and `when:7d`
--> `when:1d` in both templates; `config/frequency_words.txt` is replaced whole.
+**The config half is live on the homelab (2026-09-12 12:52).** Four surgical
+edits to the hand-edited `config/config.yaml` - `report.mode: incremental` ->
+`daily`, `max_age_days: 14` -> `1`, and `when:7d` -> `when:1d` in both
+templates - and `config/frequency_words.txt` replaced whole. Backups are
+`config.yaml.bak-20260912` and `frequency_words.txt.bak-20260912`; every other
+hand-edited value (`interval_minutes: 30`, `site_url`, the OpenRouter `ai:`
+block) is untouched. The first cycle after the restart logged
+`search feeds: 740 item(s) from 13 group(s) x 2 template(s)`,
+`notifying 2 channel(s) in daily mode`, and no config or keyword error.
+
 `report.mode: daily` is not cosmetic here: with one message per story a
 throttled cycle loses its tail, and `incremental` never offers a missed story
-again.
+again. It is set **before** the code that needs it, which is harmless - v0.2.9
+honours the key.
+
+**The code half still needs a release.** Code reaches the homelab only through
+`:latest` plus watchtower, so until **v0.2.10** is cut production has the
+24-hour window and the new keywords and still the old URL dedup and the old
+grouped messages. That same cycle proves it: `matched 1769 item(s) -> 1730
+story(ies) after dedup` and `telegram 4 message(s), 22 story(ies)` - 39
+collapsed where the headline key would collapse far more, and four messages
+where there should be twenty-two.
 
 **The AI summary went quiet for nine hours and now recovers on its own
 (2026-09-08, unreleased after v0.2.8).** OpenRouter withdrew the free tier of

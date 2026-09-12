@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 __all__ = [
-    "NewsItem", "new_item", "dedup_key", "canonicalise_url", "strip_html", "fold",
-    "EXCERPT_MAX",
+    "NewsItem", "new_item", "dedup_key", "key_for_title", "title_key",
+    "canonicalise_url", "strip_html", "fold", "EXCERPT_MAX",
 ]
 
 # How much of a feed's own description survives into the store. Feeds are wildly
@@ -46,6 +46,18 @@ _DROP_PARAMS = frozenset(
 # "dien tu" for the vowels and stays "đien tu" for the consonant, and a keyword
 # typed "dien tu" silently never matches.
 _D_STROKE = str.maketrans({"đ": "d", "Đ": "d"})
+
+# A publisher's name tacked onto the end of a headline. Google News does it to
+# every entry it carries - `Anthropic says ... - Bloomberg` - so the same
+# article arrives with a byline from the aggregator and without one from the
+# publisher's own feed, and the two must still be one story.
+_PUBLISHER_SUFFIX = re.compile(r"\s+[-|–—]\s+[^-|–—]{2,40}$")
+
+# Below this many words the remainder is not a headline any more. `ESP32-C6
+# ships - Hackaday` would be cut to two words, and at that length a dash is as
+# likely to be part of the title as it is to be a byline - so the suffix stays
+# and the two spellings keep separate keys.
+_SUFFIX_MIN_WORDS = 5
 
 
 def strip_html(text):
@@ -168,14 +180,51 @@ def new_item(title, url, source_id, fetched_at,
     )
 
 
+def title_key(title):
+    """The comparison form of a headline: folded, de-bylined, de-punctuated.
+
+    Punctuation goes here and not in `fold()`, which keeps it on purpose so a
+    keyword typed `ESP32-S3` can still match. Identity wants the opposite: two
+    sources that disagree only about a colon are carrying one story.
+    """
+    folded = fold(title)
+    trimmed = _PUBLISHER_SUFFIX.sub("", folded)
+    if len(trimmed.split()) >= _SUFFIX_MIN_WORDS:
+        folded = trimmed
+    return _SPACE.sub(" ", _PUNCT.sub(" ", folded)).strip()
+
+
+def key_for_title(title):
+    """`title_key()` as the digest the store is keyed by.
+
+    Takes a headline rather than a `NewsItem` so `store.open_db()` can recompute
+    the key of a row it is migrating, where there is no item to build.
+    """
+    return hashlib.sha1(("t:" + title_key(title)).encode("utf-8")).hexdigest()
+
+
 def dedup_key(item):
     """What collapses the same story arriving from several sources.
 
-    The URL is the key whenever there is one. The title fallback exists because
-    aggregator items sometimes carry only a permalink to the aggregator itself,
-    and two of those would otherwise never meet.
+    **The headline is the identity; the URL is not.** A URL looks like the
+    stronger key and is not one: Google News answers the same article with a
+    different opaque `news.google.com/rss/articles/CBMi...` redirect on every
+    query, so a url-keyed store held one story under as many as nine keys, and
+    a phone got nine messages. Measured 2026-09-12 over 1266 live items: 121 of
+    them (9.6%) were duplicates of another row, in 84 groups, and not one of
+    those groups mixed two different stories.
+
+    Keying on the headline also collapses what no URL rule could - the same
+    piece from `cnx-software.com` and from Google News' copy of it, or a
+    Bloomberg story on Hacker News and the same one carrying its byline.
+
+    The known ceiling: two genuinely different articles with a byte-identical
+    normalised headline become one story. None was found in those 1266 items,
+    and real recurring columns carry a date or a version in the title
+    (`Kernel prepatch 7.3-rc2`), which keeps them apart.
     """
-    if item.canonical_url:
-        return hashlib.sha1(item.canonical_url.encode("utf-8")).hexdigest()
-    normalised = _SPACE.sub(" ", _PUNCT.sub(" ", fold(item.title))).strip()
-    return hashlib.sha1(("t:" + normalised).encode("utf-8")).hexdigest()
+    # ponytail: exact-match on the normalised title. Near-duplicate headlines
+    # from two outlets still make two stories; clustering them needs a
+    # similarity pass, which cannot be a hash and is not worth it until the
+    # exact case stops being the bulk of the noise.
+    return key_for_title(item.title)

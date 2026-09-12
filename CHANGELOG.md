@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.10 - 2026-09-12
+
 ### Features
 
 - **notify**: a story is now **its own message** on Telegram and Discord,

@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-08 - 20 durable doc(s)._
+_Generated 2026-09-12 - 20 durable doc(s)._
 
 ## State (transient)
 
@@ -18,6 +18,64 @@ _Generated 2026-09-08 - 20 durable doc(s)._
 > Current delivery state - what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
 
 ## What works
+
+### The duplicates, the window, the keywords and the message shape (2026-09-12, unreleased)
+
+Four complaints from the reader, turned into four measured defects by reading
+the 1269 items and 2526 `reported` rows in the live store on 2026-09-12.
+
+**Duplicates: the URL was never the identity.** `dedup_key()` hashed the
+canonical URL, and Google News answers the same article with a different opaque
+`news.google.com/rss/articles/CBMi...` redirect on **every query** - one story
+under as many as **nine** keys, and nine messages. Measured: **121 of 1269
+items (9.6%) were duplicates of another row**, across 84 groups; every one of
+the 84 was inspected and none mixed two different stories. The key is now the
+normalised headline with a trailing `- Publisher` byline stripped, which also
+collapses what no URL rule could - `cnx-software.com` beside Google News' copy
+of it, a Bloomberg story on Hacker News beside the one carrying its byline.
+
+The thing that made it safe to do: the 14 title groups spanning more than one
+calendar day were all the same story re-reported, not a recurring column. Real
+recurring columns carry a date or a version in the title.
+
+**And the rekey had to be free.** Every key in a v2 store is stale, so the first
+cycle after the upgrade would have found a whole local day unreported and pushed
+the lot - one message each, under the new shape. Schema v3 re-seeds `reported`
+with each already-sent story's new key. Run against a copy of the production
+store: **1241 already-sent stories, 0 re-sent.** The same change made `open_db()`
+run its migrations as a chain rather than a jump, which is what a v1 store needed
+and would not have got.
+
+**The window was a week, not a day.** `when:7d` in both Google News templates and
+`rank.max_age_days: 14`. Now `when:1d` and `1` - a rolling 24 hours, because a
+calendar cut at 08:00 leaves the radar almost empty. The `max_age_days` half is
+the one that matters: `hn_algolia` is `search_by_date` with no date filter in its
+url, and the fixed feeds are read whole. Verified live: the `when:1d` query
+returned 10 items, none older than 23.6 hours.
+
+**`firmware` is not an embedded word.** The group matched 94 stored items and
+**36 were consumer-device firmware** - Nikon ZR 2.00 in eight spellings, Canon
+EOS R5, a Sony car stereo, PlayStation 5 14.0, Beats 360, an Apple 140 W power
+adapter. The measured exclusion list takes it to 60 with none of them left. Two
+groups were added for what the reader actually asked for: `STM32`, its own group
+so it gets its own search query (3 matches without one, the shape DeepSeek had at
+7 before it got a query and 67 after), and `AI Model Release`, two regexes that
+matched 129 of the 1269 and neither `ESP-IDF Release v5.2.8` nor `Canon
+Announces Firmware Updates`. `ESP32`, `RISC-V`, `AI` and `AI Repos` kept
+100/100/100/96% of their matches.
+
+`[GLOBAL_FILTER]` gained the crypto and market terms the vendor groups were
+carrying. **`!crypto` and `!ipo` are deliberately absent**: matching is substring,
+and they would eat *cryptography* and *LiPo*.
+
+**One story, one message.** Both channels sent a whole group as one message with
+a bullet per story. Now each story is its own message with the group name as its
+heading, clipped rather than split when it is too long. The cost is a rate limit:
+twenty messages in a row crosses Telegram's ~20-a-minute group budget, and a 429
+ends the channel for the cycle. `_notify()` therefore builds its own Fetcher at
+3.5 s rather than reusing the crawl's 2 s, and production moves to
+`report.mode: daily`, which re-offers whatever a refused cycle could not deliver -
+under `incremental` the tail of a throttled run is never offered again.
 
 ### The summary survives a model being retired (2026-09-08, unreleased)
 
@@ -853,6 +911,14 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **~~Discord refused 36 messages in 24 h with `Must be 2000 or fewer in
+  length`~~ - closed by the message reshape, 2026-09-12, unreleased.**
+  `notify.chunk()` decided whether a part fitted *before* appending the next
+  line, so a single long line could carry a part past `LIMIT`, and Discord's
+  1900 was the budget that noticed. `messages()` builds one message per story
+  and runs the whole text through `clip(..., limit)`, so a message cannot
+  exceed the channel budget at all - the failure mode is a shortened AI
+  sentence, not a dropped story.
 - **A story in two groups is one message line now, but still two page
   entries** (2026-09-07, unreleased). `notify.pick()` collapses it; the page
   does not, and its per-group counts still count it twice. That is deliberate -
@@ -1017,6 +1083,31 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Current focus
 
+**Four reader complaints, measured against the live store and fixed
+(2026-09-12, unreleased after v0.2.9).** The reader said: the news is not from
+today, the firmware keywords are wrong, the same story arrives twice, and one
+message is a wall of bullets. Reading the 1269 items in the production store
+turned each into a number - 121 duplicates (9.6%), 36 of 94 `Firmware` matches
+being camera and console firmware, a seven-day window, no `STM32` group at all.
+Full numbers in [[progress]].
+
+The four changes: `dedup_key()` keys on the normalised headline instead of the
+canonical URL; schema v3 carries the seen-set across that rekey so nothing is
+re-sent; `when:1d` plus `rank.max_age_days: 1`; `STM32` and `AI Model Release`
+groups with a narrowed `Firmware`; and one message per story on both channels,
+3.5 s apart.
+
+**What still has to happen for the reader to see it.** Config reaches the
+homelab by hand and **code reaches it only through a release** - `:latest` plus
+watchtower. Until v0.2.10 is cut, production has the 24-hour window and the new
+keywords and still the old dedup and the old grouped messages. The three
+surgical edits to the homelab's hand-edited `config/config.yaml` are
+`report.mode: incremental` -> `daily`, `max_age_days: 14` -> `1`, and `when:7d`
+-> `when:1d` in both templates; `config/frequency_words.txt` is replaced whole.
+`report.mode: daily` is not cosmetic here: with one message per story a
+throttled cycle loses its tail, and `incremental` never offers a missed story
+again.
+
 **The AI summary went quiet for nine hours and now recovers on its own
 (2026-09-08, unreleased after v0.2.8).** OpenRouter withdrew the free tier of
 the pinned `minimax/minimax-m3:free`; `summarize.py` now falls through to the
@@ -1040,10 +1131,12 @@ The 40-story backlog drains at `max_per_run: 20` a cycle. It has a ceiling worth
 knowing: a story that ages past `rank.max_age_days` leaves the report before it
 is ever summarised.
 
-**Unrelated, found in the same log and not yet touched:** Discord has refused
-**36 messages in 24 h** with `400 {"content": ["Must be 2000 or fewer in
-length."]}`. Telegram delivers, Discord drops them. `notify.chunk()` is
-budgeting the wrong limit for that channel.
+**~~Unrelated, found in the same log and not yet touched:~~ closed 2026-09-12.**
+Discord had refused **36 messages in 24 h** with
+`400 {"content": ["Must be 2000 or fewer in length."]}` - `notify.chunk()`
+decided whether a part fitted before appending the next line. `messages()`
+clips every message to the channel budget, so it cannot happen; see
+[[progress]], Known issues.
 
 **Topics reshaped to what the user actually reads (2026-09-07, unreleased
 after v0.2.7).** `RTOS` out, five model groups in - `Claude`, `ChatGPT`, `GLM`,
@@ -2338,8 +2431,8 @@ group with three templates enabled produces three requests per run.
 
 | id | Template | Returns | Substitution |
 |----|----------|---------|--------------|
-| `google_news` | `https://news.google.com/rss/search?q={kw}+when:7d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | **Ships disabled since the keyword file reached eleven groups** - see the row below. `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:7d` is not optional - without it the engine answers relevance-first and returns hits aged months |
-| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. A template costs one request **per keyword group**, so at eleven groups `hl=vi` would spend eleven requests a cycle at the host most likely to throttle, for coverage the five model groups replace - it is switched off, and `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news |
+| `google_news` | `https://news.google.com/rss/search?q={kw}+when:1d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | **Ships disabled since the keyword file reached eleven groups** (thirteen since 2026-09-12) - see the row below. `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:1d` is not optional - without it the engine answers relevance-first and returns hits aged months. It was `when:7d` until 2026-09-12: a week is not a radar, and this template was the one carrying the same story back three and four days running |
+| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. A template costs one request **per keyword group**, so at thirteen groups `hl=vi` would spend thirteen requests a cycle at the host most likely to throttle, for coverage the five model groups replace - it is switched off, and `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news |
 | `hn_algolia` | `https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story&typoTolerance=false` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID`. `search_by_date` orders chronologically, so the window needs no epoch computing; `tags=story` drops comment hits, whose title is not a headline. **`typoTolerance=false` is required, not cosmetic**: with it on, Algolia matches 41,612 stories for `RTOS` and `FreeToken` for `FreeRTOS`, and a date sort then returns the most recent of that noise - `RTOS` yielded 0 usable of 20. Off, it is strictly better on every shipped group: 97 usable a cycle instead of 77 |
 | `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement, and the same resolver requirement |
 
@@ -2388,7 +2481,7 @@ id - `hn` and `hn_algolia` are different hosts, the two Reddit entries are not.
 3. Record it in the table above and restamp `updated`.
 
 ### [data] News Item, Dedup Key and Output Layout
-*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py - keywords: NewsItem, dedup key, canonical url, excerpt, EXCERPT_MAX, ai_summary, gist, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle*
+*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py - keywords: NewsItem, dedup key, title_key, key_for_title, canonical url, schema version 3, migration chain, excerpt, EXCERPT_MAX, ai_summary, gist, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle*
 
 # News Item, Dedup Key and Output Layout
 
@@ -2405,7 +2498,7 @@ mutating the item.
 |-------|------|----------|---------|
 | `title` | str | yes | Headline, HTML stripped, whitespace collapsed |
 | `url` | str | yes | Story link as published by the source |
-| `canonical_url` | str | yes | `url` after normalisation (see below) - the dedup input |
+| `canonical_url` | str | yes | `url` after normalisation (see below). Stored and displayed; **not** the dedup input any more |
 | `source_id` | str | yes | `id` of the fixed feed or search template it came from |
 | `external_id` | str | yes | The source's own id (`guid`, `entry/id`, `objectID`); falls back to `canonical_url` |
 | `published_at` | datetime \| None | no | Source timestamp, converted to UTC. `None` means the source gave none - never substitute "now" |
@@ -2418,7 +2511,9 @@ Invariants:
 - `title` is never empty; an item without a title is dropped at parse time.
 - `excerpt` is never `None` and never markup; an empty one is never a reason
   to drop a story, and it is not part of the dedup key.
-- `canonical_url` is stable across runs for the same story, or dedup silently stops working.
+- `title` is stable across runs for the same story, or dedup silently stops
+  working. `canonical_url` is **not** part of identity any more - it is stored
+  and displayed, nothing else.
 - All datetimes are timezone-aware UTC in memory and stored as UTC in SQLite.
   Local time (`TZ`, default `Asia/Ho_Chi_Minh`) is applied only at render time.
 
@@ -2436,22 +2531,45 @@ Applied in this order to produce `canonical_url`:
 
 ## Dedup key
 
+The **headline is the identity**, and the URL is not. 🟢
+
 ```
-dedup_key = sha1(canonical_url)                       when the URL survives step 6 non-empty
-          = sha1("t:" + normalised_title)             when the item has no usable URL
+dedup_key = sha1("t:" + title_key(title))
 ```
 
-`normalised_title` is the title lowercased, diacritics folded, punctuation
-removed, whitespace collapsed. The title fallback exists because aggregator items
-sometimes carry only a permalink to the aggregator itself.
+`title_key()` folds case and diacritics, drops a trailing `- Publisher` /
+`| Publisher` byline when at least 5 words are left after it, then removes
+punctuation and collapses whitespace. Punctuation goes here and not in `fold()`,
+which keeps it so a keyword typed `ESP32-S3` still matches; identity wants the
+opposite, because two sources disagreeing only about a colon carry one story.
+
+`key_for_title(title)` is the same digest addressable without a `NewsItem` -
+`store.open_db()` needs it to rekey a row it is migrating.
+
+**Why not the URL.** It looks like the stronger key and is not one: Google News
+answers the same article with a different opaque
+`news.google.com/rss/articles/CBMi...` redirect on every query, so one story was
+stored and sent under as many as **nine** keys. Measured on the live store
+2026-09-12: **121 of 1269 items (9.6%) were duplicates of another row**, across
+84 groups, and no group mixed two different stories. The headline key also
+collapses what no URL rule could - the same piece from `cnx-software.com` and
+from Google News' copy of it, or a Bloomberg story on Hacker News beside the one
+carrying its byline. 🟢
 
 Collapsing rule: the surviving record keeps the **earliest** `published_at` and
 accumulates the set of `source_id`s that carried it. That set size is the
 cross-source frequency term the ranking uses - see [[news-search]].
 
-Deliberate limit: the same story published under two different URLs (a syndicated
-copy, an AMP variant) does **not** collapse. Title-similarity clustering is not
-implemented; it would need a threshold nobody has tuned yet.
+Two deliberate limits:
+
+- **Exact match only.** Two outlets writing genuinely different headlines about
+  one event stay two stories. Similarity clustering cannot be a hash and needs a
+  threshold nobody has tuned; the `ponytail:` note in `item.dedup_key()` records
+  it. 🟢
+- **A byte-identical normalised headline is one story, always.** Two different
+  articles sharing one would merge. None was found in those 1269 items, and real
+  recurring columns carry a date or a version in the title
+  (`Kernel prepatch 7.3-rc2`). 🟡
 
 ## SQLite store
 
@@ -2474,9 +2592,26 @@ every re-sighting. It also reads back as one `group_concat` in the day query.
 `reported` is keyed per channel on purpose: adding Discord later must not
 retroactively count stories already pushed to Telegram as "sent".
 
-Schema version lives in SQLite's `user_version` pragma; `store.py` migrates
-forward on open and never migrates backward - a file written by a **higher**
-version raises `StoreError` rather than being downgraded.
+Schema version lives in SQLite's `user_version` pragma and is **3**. `store.py`
+migrates forward on open and never backward - a file written by a **higher**
+version raises `StoreError` rather than being downgraded, and so does one at a
+version with no step to reach the current one.
+
+Migrations run **as a chain**, not as a jump: a v1 store runs the v1→v2 step and
+then the v2→v3 one. Jumping straight to the current number is how a store gets
+stamped as migrated while a step it needed was skipped. 🟢
+
+| Step | What it does |
+|------|--------------|
+| v1 → v2 | Adds the nullable `excerpt` and `ai_summary` columns to `items`. Nothing is rewritten. |
+| v2 → v3 | Re-seeds `reported` with each already-sent story's **new** headline key, because v0.2.10 moved `dedup_key` off the URL. Adds rows only; old keys stay and age out with `retention_days`. |
+
+The v2→v3 step rewrites only `reported` on purpose. Rekeying `items`, `matches`
+and `item_sources` would have to merge rows that now collapse onto one key; the
+ones left behind cost nothing. What must be exact is the seen-set, because
+without it the first cycle after the upgrade re-sends a whole local day - one
+message per story. Verified against a copy of the production store: 1241
+already-sent stories, 0 re-sent. 🟢
 
 Every timestamp is an ISO-8601 UTC string carrying the same `+00:00` suffix, so
 `<` and `>` in SQL mean what they say. Local time is applied only at render time.
@@ -2560,7 +2695,7 @@ Two consequences worth knowing before changing this:
   asserts the rule is on the page.
 
 ### [interface] Config Keys, Keyword File and Environment
-*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, match_excerpt, max_age_days, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER*
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, match_excerpt, max_age_days, when:1d, today only, STM32, AI Model Release, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER*
 
 # Config Keys, Keyword File and Environment
 
@@ -2610,7 +2745,7 @@ someone chose it.
 | `rank.weight_frequency` | float | `0.3` | Weight of the cross-source frequency term |
 | `rank.weight_freshness` | float | `0.2` | Weight of the freshness term |
 | `rank.freshness_half_life_hours` | float | `12` | Age at which the freshness term halves |
-| `rank.max_age_days` | int | `0` **(template ships `14`)** | Stories older than this are dropped **before** ranking; `0` = no cut. The half-life above cannot do this: freshness reaches 0 after ~2 days, so a three-day-old and a three-year-old story score alike and an archive feed fills a thin group's cap. An entry with **no date is always kept**. The default and the template disagree on purpose - an upgrade must not start discarding what it reported yesterday |
+| `rank.max_age_days` | int | `0` **(template ships `1`)** | Stories older than this are dropped **before** ranking; `0` = no cut. **`1` is what "only today's news" means here** - a rolling 24 hours, not the calendar day, which at 08:00 would leave the radar almost empty. It is also the half of the window that binds `hn_algolia` (no date filter in its url) and the fixed feeds, which are read whole; the two Google News templates carry `when:1d` as well. Expect the slow groups to look thin - ESP32 and RISC-V see a handful of stories a day. The half-life above cannot do this: freshness reaches 0 after ~2 days, so a three-day-old and a three-year-old story score alike and an archive feed fills a thin group's cap. An entry with **no date is always kept**. The default and the template disagree on purpose - an upgrade must not start discarding what it reported yesterday |
 | `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
 | `storage.retention_days` | int | `0` **(template ships `90`)** | `0` = keep everything; otherwise prune rows and day files past the window. The default and the template disagree on purpose - an absent key must never make an upgrade start deleting, while a fresh install should have a ceiling |
 | `ops.heartbeat_url` | str | `""` | Dead-man's switch pinged after every clean cycle (healthchecks.io / Uptime Kuma push). `""` = no ping |
@@ -2625,7 +2760,7 @@ someone chose it.
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |
-| `advanced.request_interval_ms` | int | `2000` | Minimum gap between two requests **to the same host** |
+| `advanced.request_interval_ms` | int | `2000` | Minimum gap between two requests **to the same host**. Feeds only: `_notify()` builds its own Fetcher at `notify.NOTIFY_INTERVAL_MS` (3500 ms), because one message per story would otherwise cross Telegram's group rate limit - see [[notify-channels]] |
 | `advanced.request_timeout_s` | int | `15` | Per-request timeout; nothing outside the process will kill a hung run |
 | `advanced.max_retries` | int | `2` | Retries per request, exponential backoff |
 | `advanced.user_agent` | str | `news-radar/{version} (+https://news.dtbao.org)` | `{version}` is substituted from `VERSION`; an anonymous UA gets 403 from Reddit |
@@ -2895,7 +3030,7 @@ chain it drives.
   it is asked.
 
 ### [interface] Notification Channels - Telegram and Discord
-*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, message format, 4096, 2000, chunk, pick, clip, SendResult, report.mode, incremental, current, daily, seen set*
+*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, clip, SendResult, report.mode, incremental, current, daily, seen set*
 
 # Notification Channels - Telegram and Discord
 
@@ -2921,10 +3056,11 @@ with nothing installed and nothing configured.
 | Signature | Returns | Notes |
 |-----------|---------|-------|
 | `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order, the seen-set diff, and one appearance per story. Empty groups dropped |
-| `chunk(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. Every text under `limit` |
+| `messages(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. **One message per story**, header included, each text under `limit` |
 | `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
 | `stamp(moment, tz)` | `str` | `published_at` as `TIME_FMT` (`%H:%M %d/%m`), or `NO_TIME` (`--`) |
 | `SendResult(sent, failed, keys)` | dataclass | `.stories` is `len(keys)` |
+| `NOTIFY_INTERVAL_MS` | `3500` | The gap between two sends, used by `__main__._notify()` |
 
 `TITLE_MAX` is `240`: long enough that no real headline is touched, short enough
 that one absurd title plus its link cannot on its own overflow the smaller of the
@@ -2953,11 +3089,28 @@ both of its sections and both counts; only the message collapses it. Marking
 follows the message: the key enters `reported` once, so the copy dropped here is
 not owed a message next cycle either.
 
-**`chunk()` splits on a group boundary first and an item boundary second**, and a
-single story is never split across two messages: half a headline with no link is
-worse than the same story arriving one message later. When a group has to be
-split, its header is repeated on every part - the second message is the one most
-likely to be read on its own.
+**`messages()` sends one story per message.** A group used to travel as one
+message with a bullet per story, split only when it outgrew the channel's
+budget. Now each story is its own message and the group name is the heading of
+every one of them - a phone shows one story at a glance rather than a wall of
+ten, and a reply, a forward or a reaction is about that story. The header is
+repeated rather than sent once because every message is now read on its own. 🟢
+
+**A story too long for the channel is clipped, never split.** Half a headline
+with no link is worse than a shortened one, and `clip()` has already capped the
+title - what can still overrun is an AI sentence, and losing its tail costs
+nothing the link does not carry. 🟢
+
+**The rate limit is the cost of the shape, and two things pay it.** A busy cycle
+posts twenty messages in a row, and Telegram allows about 20 a minute to one
+group before answering 429 - at which point `send()` gives up on the channel for
+the whole cycle. `__main__._notify()` therefore builds its **own** Fetcher at
+`NOTIFY_INTERVAL_MS` (3500 ms) rather than reusing the crawl's, whose
+`advanced.request_interval_ms` of 2 s is a number chosen for reading feeds;
+Discord's webhook budget (5 requests per 5 s) is comfortable at the same gap.
+The second is `report.mode: daily`, which re-offers whatever a refused cycle
+could not deliver - under `incremental` the tail of a throttled run is never
+offered again. 🟢
 
 **An empty group contributes nothing.** The page prints `Security - 0 item(s)`
 because a reader is looking for the keyword that went quiet; a phone should not
@@ -3069,7 +3222,7 @@ and only works at the start of a line.
 | HTTP 429 | `Fetcher` sleeps the server's own `Retry-After` (header, else the JSON body) and retries, up to `advanced.max_retries`. Capped at `RETRY_AFTER_MAX = 60 s` |
 | HTTP 5xx, timeout, network error | Retried with exponential backoff up to `advanced.max_retries` |
 | HTTP 4xx other than 429 | Not retried - a bad token, a bad chat id, a revoked webhook or a body the channel could not parse. The response body is logged, because that is where the fixable half of the failure is |
-| Any refusal | **The channel stops for this run.** The same answer is coming for chunk two, and hammering a throttled bot is how throttled becomes banned |
+| Any refusal | **The channel stops for this run.** The same answer is coming for the next story, and hammering a throttled bot is how throttled becomes banned. One message per story makes this cost the tail of the run, which is what `NOTIFY_INTERVAL_MS` and `report.mode: daily` exist to answer |
 | Channel fails entirely | The run continues: the page is already written, and the other channel is still attempted |
 
 Whatever was accepted **before** a refusal still counts as sent, so those stories
@@ -3129,7 +3282,7 @@ Recorded rather than quietly dropped:
 P6-2 pushes *failures* down the same two channels the stories use, and the
 payload has nothing in common with a story but the transport. `alert()` takes one
 string, posts it once, and answers `True`/`False` rather than a `SendResult`:
-there is no seen-set to diff, no group order to preserve, nothing to chunk (an
+there is no seen-set to diff, no group order to preserve, nothing to split (an
 alert that overran a channel limit would be a bug in `ops.Health`, not a case to
 split), and nothing to mark as reported.
 
@@ -4128,8 +4281,9 @@ upgrades into this version and behaves exactly as it did before.
 
 Cost is predictable and worth stating out loud: `len(enabled feeds) +
 len(groups) x len(enabled templates)`. Measured on the shipped config: twelve
-enabled feeds, eleven groups and two enabled templates is **34 requests per
-run**. That number is the reason `genk` and the `google_news` (hl=vi) template
+enabled feeds, **thirteen** groups and two enabled templates is **38 requests
+per run** (it was 34 at eleven groups; `STM32` and `AI Model Release` cost two
+requests each). That number is the reason `genk` and the `google_news` (hl=vi) template
 both ship disabled - adding the five model groups would otherwise have taken the
 cycle from 33 requests to 45, a 36% rise at the two hosts already known to
 throttle first. `build_urls()` is pure, so that number is known before the first
@@ -4239,6 +4393,11 @@ by the earliest fact any source had. The size of that union is the
 cross-source frequency signal - a story that showed up on Hacker News *and*
 Lobsters *and* a Google News query is, empirically, the story of the day.
 
+Since 2026-09-12 the key is the **normalised headline**, not the canonical URL,
+which is what makes that union real: Google News hands back a different opaque
+redirect for the same article on every query, so a URL key was counting one
+story as up to nine and giving each of them a frequency of one. 🟢
+
 ## Stage 6 - rank
 
 Per group, each surviving item scores:
@@ -4254,6 +4413,9 @@ Weights are `rank.weight_source`, `rank.weight_frequency`, `rank.weight_freshnes
 
 **The age cut runs first.** `rank.max_age_days` drops a story past the limit
 **before** anything is scored - `fresh_enough()` decides one story at a time.
+The shipped value is **1**: a rolling 24 hours, which is what "only today's
+news" means here, and the half of the window that binds every source rather
+than only the two Google News templates carrying `when:1d`.
 It is the floor the score cannot express: freshness reaches 0 after about two
 days, so past that a three-day-old story and a three-year-old one are the same
 number, and a group short of fresh matches fills the rest of its cap from

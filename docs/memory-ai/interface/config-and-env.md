@@ -3,10 +3,10 @@ title: Config Keys, Keyword File and Environment
 category: interface
 purpose: Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads.
 status: active
-updated: 2026-09-07
+updated: 2026-09-12
 source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py
 confidence: confirmed
-keywords: config.yaml, match_excerpt, max_age_days, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER
+keywords: config.yaml, match_excerpt, max_age_days, when:1d, today only, STM32, AI Model Release, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER
 order: 1
 ---
 
@@ -58,7 +58,7 @@ someone chose it.
 | `rank.weight_frequency` | float | `0.3` | Weight of the cross-source frequency term |
 | `rank.weight_freshness` | float | `0.2` | Weight of the freshness term |
 | `rank.freshness_half_life_hours` | float | `12` | Age at which the freshness term halves |
-| `rank.max_age_days` | int | `0` **(template ships `14`)** | Stories older than this are dropped **before** ranking; `0` = no cut. The half-life above cannot do this: freshness reaches 0 after ~2 days, so a three-day-old and a three-year-old story score alike and an archive feed fills a thin group's cap. An entry with **no date is always kept**. The default and the template disagree on purpose - an upgrade must not start discarding what it reported yesterday |
+| `rank.max_age_days` | int | `0` **(template ships `1`)** | Stories older than this are dropped **before** ranking; `0` = no cut. **`1` is what "only today's news" means here** - a rolling 24 hours, not the calendar day, which at 08:00 would leave the radar almost empty. It is also the half of the window that binds `hn_algolia` (no date filter in its url) and the fixed feeds, which are read whole; the two Google News templates carry `when:1d` as well. Expect the slow groups to look thin - ESP32 and RISC-V see a handful of stories a day. The half-life above cannot do this: freshness reaches 0 after ~2 days, so a three-day-old and a three-year-old story score alike and an archive feed fills a thin group's cap. An entry with **no date is always kept**. The default and the template disagree on purpose - an upgrade must not start discarding what it reported yesterday |
 | `storage.data_dir` | str | `output` | Where `news.db`, `index.html` and `days/` live |
 | `storage.retention_days` | int | `0` **(template ships `90`)** | `0` = keep everything; otherwise prune rows and day files past the window. The default and the template disagree on purpose - an absent key must never make an upgrade start deleting, while a fresh install should have a ceiling |
 | `ops.heartbeat_url` | str | `""` | Dead-man's switch pinged after every clean cycle (healthchecks.io / Uptime Kuma push). `""` = no ping |
@@ -73,7 +73,7 @@ someone chose it.
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |
-| `advanced.request_interval_ms` | int | `2000` | Minimum gap between two requests **to the same host** |
+| `advanced.request_interval_ms` | int | `2000` | Minimum gap between two requests **to the same host**. Feeds only: `_notify()` builds its own Fetcher at `notify.NOTIFY_INTERVAL_MS` (3500 ms), because one message per story would otherwise cross Telegram's group rate limit - see [[notify-channels]] |
 | `advanced.request_timeout_s` | int | `15` | Per-request timeout; nothing outside the process will kill a hung run |
 | `advanced.max_retries` | int | `2` | Retries per request, exponential backoff |
 | `advanced.user_agent` | str | `news-radar/{version} (+https://news.dtbao.org)` | `{version}` is substituted from `VERSION`; an anonymous UA gets 403 from Reddit |

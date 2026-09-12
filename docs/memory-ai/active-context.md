@@ -1,6 +1,6 @@
 ---
 title: Active Context
-updated: 2026-09-08
+updated: 2026-09-12
 ---
 
 # Active Context
@@ -8,6 +8,31 @@ updated: 2026-09-08
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**Four reader complaints, measured against the live store and fixed
+(2026-09-12, unreleased after v0.2.9).** The reader said: the news is not from
+today, the firmware keywords are wrong, the same story arrives twice, and one
+message is a wall of bullets. Reading the 1269 items in the production store
+turned each into a number - 121 duplicates (9.6%), 36 of 94 `Firmware` matches
+being camera and console firmware, a seven-day window, no `STM32` group at all.
+Full numbers in [[progress]].
+
+The four changes: `dedup_key()` keys on the normalised headline instead of the
+canonical URL; schema v3 carries the seen-set across that rekey so nothing is
+re-sent; `when:1d` plus `rank.max_age_days: 1`; `STM32` and `AI Model Release`
+groups with a narrowed `Firmware`; and one message per story on both channels,
+3.5 s apart.
+
+**What still has to happen for the reader to see it.** Config reaches the
+homelab by hand and **code reaches it only through a release** - `:latest` plus
+watchtower. Until v0.2.10 is cut, production has the 24-hour window and the new
+keywords and still the old dedup and the old grouped messages. The three
+surgical edits to the homelab's hand-edited `config/config.yaml` are
+`report.mode: incremental` -> `daily`, `max_age_days: 14` -> `1`, and `when:7d`
+-> `when:1d` in both templates; `config/frequency_words.txt` is replaced whole.
+`report.mode: daily` is not cosmetic here: with one message per story a
+throttled cycle loses its tail, and `incremental` never offers a missed story
+again.
 
 **The AI summary went quiet for nine hours and now recovers on its own
 (2026-09-08, unreleased after v0.2.8).** OpenRouter withdrew the free tier of
@@ -32,10 +57,12 @@ The 40-story backlog drains at `max_per_run: 20` a cycle. It has a ceiling worth
 knowing: a story that ages past `rank.max_age_days` leaves the report before it
 is ever summarised.
 
-**Unrelated, found in the same log and not yet touched:** Discord has refused
-**36 messages in 24 h** with `400 {"content": ["Must be 2000 or fewer in
-length."]}`. Telegram delivers, Discord drops them. `notify.chunk()` is
-budgeting the wrong limit for that channel.
+**~~Unrelated, found in the same log and not yet touched:~~ closed 2026-09-12.**
+Discord had refused **36 messages in 24 h** with
+`400 {"content": ["Must be 2000 or fewer in length."]}` - `notify.chunk()`
+decided whether a part fitted before appending the next line. `messages()`
+clips every message to the channel budget, so it cannot happen; see
+[[progress]], Known issues.
 
 **Topics reshaped to what the user actually reads (2026-09-07, unreleased
 after v0.2.7).** `RTOS` out, five model groups in - `Claude`, `ChatGPT`, `GLM`,

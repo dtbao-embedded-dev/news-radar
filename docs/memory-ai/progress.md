@@ -1,6 +1,6 @@
 ---
 title: Progress
-updated: 2026-09-08
+updated: 2026-09-12
 ---
 
 # Progress
@@ -8,6 +8,64 @@ updated: 2026-09-08
 > Current delivery state - what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
 
 ## What works
+
+### The duplicates, the window, the keywords and the message shape (2026-09-12, unreleased)
+
+Four complaints from the reader, turned into four measured defects by reading
+the 1269 items and 2526 `reported` rows in the live store on 2026-09-12.
+
+**Duplicates: the URL was never the identity.** `dedup_key()` hashed the
+canonical URL, and Google News answers the same article with a different opaque
+`news.google.com/rss/articles/CBMi...` redirect on **every query** - one story
+under as many as **nine** keys, and nine messages. Measured: **121 of 1269
+items (9.6%) were duplicates of another row**, across 84 groups; every one of
+the 84 was inspected and none mixed two different stories. The key is now the
+normalised headline with a trailing `- Publisher` byline stripped, which also
+collapses what no URL rule could - `cnx-software.com` beside Google News' copy
+of it, a Bloomberg story on Hacker News beside the one carrying its byline.
+
+The thing that made it safe to do: the 14 title groups spanning more than one
+calendar day were all the same story re-reported, not a recurring column. Real
+recurring columns carry a date or a version in the title.
+
+**And the rekey had to be free.** Every key in a v2 store is stale, so the first
+cycle after the upgrade would have found a whole local day unreported and pushed
+the lot - one message each, under the new shape. Schema v3 re-seeds `reported`
+with each already-sent story's new key. Run against a copy of the production
+store: **1241 already-sent stories, 0 re-sent.** The same change made `open_db()`
+run its migrations as a chain rather than a jump, which is what a v1 store needed
+and would not have got.
+
+**The window was a week, not a day.** `when:7d` in both Google News templates and
+`rank.max_age_days: 14`. Now `when:1d` and `1` - a rolling 24 hours, because a
+calendar cut at 08:00 leaves the radar almost empty. The `max_age_days` half is
+the one that matters: `hn_algolia` is `search_by_date` with no date filter in its
+url, and the fixed feeds are read whole. Verified live: the `when:1d` query
+returned 10 items, none older than 23.6 hours.
+
+**`firmware` is not an embedded word.** The group matched 94 stored items and
+**36 were consumer-device firmware** - Nikon ZR 2.00 in eight spellings, Canon
+EOS R5, a Sony car stereo, PlayStation 5 14.0, Beats 360, an Apple 140 W power
+adapter. The measured exclusion list takes it to 60 with none of them left. Two
+groups were added for what the reader actually asked for: `STM32`, its own group
+so it gets its own search query (3 matches without one, the shape DeepSeek had at
+7 before it got a query and 67 after), and `AI Model Release`, two regexes that
+matched 129 of the 1269 and neither `ESP-IDF Release v5.2.8` nor `Canon
+Announces Firmware Updates`. `ESP32`, `RISC-V`, `AI` and `AI Repos` kept
+100/100/100/96% of their matches.
+
+`[GLOBAL_FILTER]` gained the crypto and market terms the vendor groups were
+carrying. **`!crypto` and `!ipo` are deliberately absent**: matching is substring,
+and they would eat *cryptography* and *LiPo*.
+
+**One story, one message.** Both channels sent a whole group as one message with
+a bullet per story. Now each story is its own message with the group name as its
+heading, clipped rather than split when it is too long. The cost is a rate limit:
+twenty messages in a row crosses Telegram's ~20-a-minute group budget, and a 429
+ends the channel for the cycle. `_notify()` therefore builds its own Fetcher at
+3.5 s rather than reusing the crawl's 2 s, and production moves to
+`report.mode: daily`, which re-offers whatever a refused cycle could not deliver -
+under `incremental` the tail of a throttled run is never offered again.
 
 ### The summary survives a model being retired (2026-09-08, unreleased)
 
@@ -843,6 +901,14 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **~~Discord refused 36 messages in 24 h with `Must be 2000 or fewer in
+  length`~~ - closed by the message reshape, 2026-09-12, unreleased.**
+  `notify.chunk()` decided whether a part fitted *before* appending the next
+  line, so a single long line could carry a part past `LIMIT`, and Discord's
+  1900 was the budget that noticed. `messages()` builds one message per story
+  and runs the whole text through `clip(..., limit)`, so a message cannot
+  exceed the channel budget at all - the failure mode is a shortened AI
+  sentence, not a dropped story.
 - **A story in two groups is one message line now, but still two page
   entries** (2026-09-07, unreleased). `notify.pick()` collapses it; the page
   does not, and its per-group counts still count it twice. That is deliberate -

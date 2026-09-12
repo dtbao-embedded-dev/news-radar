@@ -23,7 +23,7 @@ import sqlite3
 
 from pathlib import Path
 
-from .item import dedup_key
+from .item import dedup_key, key_for_title
 
 __all__ = [
     "StoreError", "SCHEMA_VERSION", "DB_NAME", "open_db", "to_db", "from_db",
@@ -40,7 +40,7 @@ DAYS_DIR = "days"
 # Bumped whenever the shape below changes. `open_db` migrates forward only: a
 # file written by a newer version is refused rather than downgraded, because
 # the alternative is silently dropping columns the operator's other copy needs.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE items (
@@ -125,25 +125,27 @@ def open_db(data_dir):
     until the first run, and failing there would cost the whole cycle for a
     `mkdir`.
 
-    Three versions are understood and the fourth case is the point of this
+    The versions understood, and the case in between that is the point of this
     docstring:
 
     - equal to `SCHEMA_VERSION` - open it.
     - `0` - no file, or an empty one. Create the schema.
-    - `1` - migrate it in place: two nullable columns onto `items`, then stamp
-      the version. A v1 store is a homelab that has been collecting since P4
-      and there is nothing in it worth throwing away.
+    - `1` or `2` - migrate in place, **through every step in turn**: a v1 store
+      runs the v1->v2 migration and then the v2->v3 one, rather than jumping
+      straight to the current number and skipping what happened in between. A
+      v1 store is a homelab that has been collecting since P4 and there is
+      nothing in it worth throwing away.
     - higher - refuse. Another copy of this store is being written by a newer
       build, and dropping columns it needs is not a recovery.
     - **anything in between - refuse, loudly.** Returning a connection to a
       store whose shape this build does not match is how a query silently reads
       a column that means something else now.
 
-    **Bumping `SCHEMA_VERSION` means writing the migration here**, in a branch
-    of its own, before the one that raises. The cycle survives either way:
-    every caller of this function is inside a guard, so a refused store costs
-    the page and the notifications, logs a traceback, withholds the heartbeat
-    ping and alerts after two cycles.
+    **Bumping `SCHEMA_VERSION` means adding a step to the chain below**, before
+    the branch that raises. The cycle survives either way: every caller of this
+    function is inside a guard, so a refused store costs the page and the
+    notifications, logs a traceback, withholds the heartbeat ping and alerts
+    after two cycles.
     """
     data_dir = Path(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -169,26 +171,65 @@ def open_db(data_dir):
                  data_dir / DB_NAME, SCHEMA_VERSION)
         return conn
 
+    was = version
     if version == 1:
-        # Two nullable columns onto `items`, which is the whole of it: every
-        # existing row keeps its identity, and NULL in `ai_summary` is exactly
-        # the "not asked yet" this build wants a backlog of stories to mean.
-        # Nothing is rewritten and nothing is dropped, so the store a v1 build
-        # left behind opens here and carries on.
-        conn.execute("ALTER TABLE items ADD COLUMN excerpt TEXT")
-        conn.execute("ALTER TABLE items ADD COLUMN ai_summary TEXT")
-        conn.execute("PRAGMA user_version = {}".format(SCHEMA_VERSION))
-        conn.commit()
-        log.info("migrated %s from schema version 1 to %d",
-                 data_dir / DB_NAME, SCHEMA_VERSION)
-        return conn
+        _add_summary_columns(conn)
+        version = 2
+    if version == 2:
+        _reseed_reported(conn)
+        version = 3
 
-    conn.close()
-    raise StoreError(
-        "{} is at schema version {}, this build expects {} - and there is no "
-        "migration from {} to {}. Add one to open_db() before bumping "
-        "SCHEMA_VERSION".format(data_dir / DB_NAME, version, SCHEMA_VERSION,
-                                version, SCHEMA_VERSION))
+    if version != SCHEMA_VERSION:
+        conn.close()
+        raise StoreError(
+            "{} is at schema version {}, this build expects {} - and there is "
+            "no migration from {} to {}. Add one to open_db() before bumping "
+            "SCHEMA_VERSION".format(data_dir / DB_NAME, was, SCHEMA_VERSION,
+                                    was, SCHEMA_VERSION))
+
+    conn.execute("PRAGMA user_version = {}".format(SCHEMA_VERSION))
+    conn.commit()
+    log.info("migrated %s from schema version %d to %d",
+             data_dir / DB_NAME, was, SCHEMA_VERSION)
+    return conn
+
+
+def _add_summary_columns(conn):
+    """v1 -> v2: two nullable columns onto `items`, which is the whole of it.
+
+    Every existing row keeps its identity, and NULL in `ai_summary` is exactly
+    the "not asked yet" this build wants a backlog of stories to mean. Nothing
+    is rewritten and nothing is dropped.
+    """
+    conn.execute("ALTER TABLE items ADD COLUMN excerpt TEXT")
+    conn.execute("ALTER TABLE items ADD COLUMN ai_summary TEXT")
+
+
+def _reseed_reported(conn):
+    """v2 -> v3: mark every already-sent story reported under its **new** key.
+
+    v0.2.10 moved `dedup_key` off the canonical url and onto the normalised
+    title, so every key in a v2 store is stale. Without this, the first cycle
+    after the upgrade reads a whole local day of stories it has already sent,
+    finds none of their new keys in `reported`, and pushes the lot again - one
+    message each, now that a story is its own message.
+
+    Only `reported` is rewritten, and only by adding rows. The old keys stay on
+    every table: rewriting `items`, `matches` and `item_sources` would have to
+    merge rows that now collapse onto one key, and the ones left behind cost
+    nothing and age out with `retention_days`. What must be exact is the
+    seen-set, and that is what this touches.
+    """
+    rows = conn.execute(
+        "SELECT r.channel, r.reported_at, i.title FROM reported r"
+        " JOIN items i ON i.dedup_key = r.dedup_key").fetchall()
+    conn.executemany(
+        "INSERT OR IGNORE INTO reported (dedup_key, channel, reported_at)"
+        " VALUES (?, ?, ?)",
+        [(key_for_title(row["title"]), row["channel"], row["reported_at"])
+         for row in rows])
+    log.info("rekey: %d seen-set row(s) carried onto the new dedup key",
+             len(rows))
 
 
 def start_run(conn, started_at):

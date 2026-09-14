@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.11 - 2026-09-14
+
 ### Fixed
 
 - `title_key()` now strips a publisher byline that contains a dash, or that runs

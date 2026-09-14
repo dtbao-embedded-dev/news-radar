@@ -1,6 +1,6 @@
 ---
 title: Active Context
-updated: 2026-09-12
+updated: 2026-09-14
 ---
 
 # Active Context
@@ -8,6 +8,24 @@ updated: 2026-09-12
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**Two days of the live store read for duplicates, three fixes, unreleased after
+v0.2.10 (2026-09-14).** The question was "are titles duplicated". They were not -
+0 exact-title duplicates across 548 pushed stories - but the reading found the
+firehose behind the question: ~20 messages an hour, sustained, because
+`rank_groups()` caps `@n` **per run** and the homelab runs a 30-minute cycle.
+
+Three changes, in the order they were found: `notify.pick()` takes `caps` and
+spends the `@n` budget over the day rather than the cycle; `title_key()` strips a
+byline holding a dash or longer than 40 characters, with schema **v4** re-seeding
+the seen-set across the rekey; and `notify.cluster()` sends one message per
+event rather than one per write-up. A `notify.min_score` floor was tried first
+and rejected on the measurement - p10 to p90 spans 0.016, so no threshold exists
+that does not also empty `DeepSeek`, `Qwen`, `STM32`, `GLM` and `Firmware`.
+
+Replayed over the 25 runs of 2026-09-14: **344 messages become 161**. Full
+numbers in [[progress]]. Nothing is deployed - the homelab runs a GHCR image and
+this needs a release.
 
 **Four reader complaints, measured against the live store and fixed
 (2026-09-12, unreleased after v0.2.9).** The reader said: the news is not from

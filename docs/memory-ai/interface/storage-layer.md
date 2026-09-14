@@ -3,7 +3,7 @@ title: Storage and Render Layer Contracts
 category: interface
 purpose: Every public signature of the store and render modules - what each writes, what the page is built from, and the row shape that travels between them.
 status: active
-updated: 2026-09-06
+updated: 2026-09-14
 source: src/news_radar/store.py, src/news_radar/render.py, src/news_radar/__main__.py
 confidence: confirmed
 keywords: backup, restore, open_db, migration, schema version, user_version, start_run, finish_run, save, day_matches, run_matches, unreported, mark_reported, prune, to_db, from_db, local_tz, day_bounds, write, StoreError, SCHEMA_VERSION, seen set, retention, index.html, day snapshot
@@ -46,17 +46,19 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `0` | No file, or an empty one. The schema is created and the version stamped. Not an error - it is the first run |
 | `> SCHEMA_VERSION` | `StoreError`. Another copy of this store is written by a newer build, and dropping columns it needs is not a recovery |
 | `1` | **Migrated in place**: `ALTER TABLE items ADD COLUMN excerpt TEXT` and `ai_summary TEXT`, then the version is stamped. A v1 store is a homelab collecting since P4, and two nullable columns are not a reason to throw it away |
+| `2` | `_reseed_reported()`: every already-sent story is marked reported under the key this build derives from its title. v0.2.10 moved `dedup_key` onto the headline |
+| `3` | `_reseed_reported()` again, for v0.2.11's widened byline strip. Steps run **in turn**, so a v1 store walks 1→2→3→4 rather than jumping |
 | anything in between | `StoreError`, naming both versions |
 
-`SCHEMA_VERSION` is `2`, so the last row is again the empty set - `0 < v < 2`
-holds for nothing once `1` has its own branch - and it exists so that the day it
-becomes reachable is a loud one. Until v0.2.3 that case fell through every
+`SCHEMA_VERSION` is `4`, and every version below it has a branch, so the last
+row is again the empty set - and it exists so that the day it becomes reachable
+is a loud one. Until v0.2.3 that case fell through every
 branch and `open_db()` returned a connection to a store whose shape the build
 did not match, which is how a query silently reads a column that means something
 else now.
 
 **Bumping `SCHEMA_VERSION` means writing the migration in a branch of its own**,
-above the one that raises, in the same commit. `1 -> 2` is the worked example. The cycle survives a refusal either way: every caller is inside a
+above the one that raises, in the same commit. `1 -> 2` is the worked example for a shape change, `3 -> 4` for a rekey. The cycle survives a refusal either way: every caller is inside a
 guard, so a refused store costs the page and the notifications, logs a
 traceback, withholds the heartbeat ping, and alerts after two cycles.
 

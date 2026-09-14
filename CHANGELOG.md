@@ -16,6 +16,41 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Fixed
+
+- `title_key()` now strips a publisher byline that contains a dash, or that runs
+  past 40 characters. Both were refused before, so the **same article from the
+  same publisher** kept two dedup keys and was pushed twice: `- How-To Geek` and
+  `- Geeky Gadgets` against `- howtogeek.com` and `- geeky-gadgets.com`, and
+  `- International Business Times, Singapore Edition` at 46 characters. The tail
+  may not hold another spaced separator, which anchors the strip to the last one
+  rather than the first.
+
+### Added
+
+- `notify.cluster()` groups the near-duplicate headlines several outlets write
+  about one event, and a channel is sent only the best-scoring member of each.
+  Measured over the 548 stories pushed on 2026-09-13 and 09-14: 19 clusters and
+  39 same-event messages, the worst of them one BRICS open-source-AI
+  announcement carried by **18 outlets**. It runs before the `@n` cap, so a cap
+  buys distinct events; a cluster is eligible only while every member is unsent,
+  or the event returns each time another outlet files its own version.
+- Schema **v4**, migrated from v3 by re-running `_reseed_reported()`: the byline
+  fix above changes `title_key()`, so every stored key for a headline carrying a
+  byline is stale, and without the re-seed the first cycle after the upgrade
+  pushes the store again.
+
+### Changed
+
+- A group's `@n` is now the **day's** budget on a notification channel, not the
+  cycle's. `notify.pick()` takes a `caps` mapping and slices each group's rows
+  before the seen-set diff, so a story already sent still holds its slot;
+  previously every 30-minute run handed out a fresh `n` and `@12` allowed up to
+  576 stories a day. Unlimited (`0` or no cap) is unchanged, and the slice is a
+  no-op in `report.mode: current` and `incremental`, where `rank_groups()` has
+  already capped the single run. Replayed over the 25 runs of 2026-09-14: 344
+  messages become 167.
+
 ## v0.2.10 - 2026-09-12
 
 ### Features

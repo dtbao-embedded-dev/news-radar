@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import pathlib
+import hashlib
 import sqlite3
 import sys
 import tempfile
@@ -483,6 +484,41 @@ eq("reopening a rekeyed store is a no-op",
    conn.execute("PRAGMA user_version").fetchone()[0], mod.SCHEMA_VERSION)
 eq("...and does not double-write the seed",
    counts(conn, "reported"), 2)
+conn.close()
+
+
+# -- v3 -> v4: the same rekey, for the widened byline strip -----------------
+
+# v0.2.11 widened `_PUBLISHER_SUFFIX` so a byline containing a dash, or longer
+# than 40 characters, is stripped like every other. That changes `title_key()`,
+# so a v3 key for such a headline is stale in exactly the way a v2 url key was -
+# and the seen-set has to be carried across again or the store re-pushes.
+old3 = data_dir()
+old3.mkdir(parents=True, exist_ok=True)
+raw = sqlite3.connect(str(old3 / mod.DB_NAME))
+raw.executescript(mod.SCHEMA)
+# A byline v3 could not strip: `How-To Geek` holds a dash, so the v3 key was
+# the digest of the headline WITH the byline still on it.
+DASHED = "5 ESP32 projects that make everyday routines feel a little more magical - How-To Geek"
+stale = hashlib.sha1(
+    ("t:" + "5 esp32 projects that make everyday routines feel a little more "
+     "magical how to geek").encode("utf-8")).hexdigest()
+raw.execute("INSERT INTO items (dedup_key, title, url, canonical_url,"
+            " first_seen_at, published_at) VALUES (?, ?, ?, ?, ?, NULL)",
+            (stale, DASHED, "https://e.invalid/d", "https://e.invalid/d",
+             mod.to_db(NOW - HOUR)))
+raw.execute("INSERT INTO reported VALUES (?, 'telegram', ?)",
+            (stale, mod.to_db(NOW - HOUR)))
+raw.execute("PRAGMA user_version = 3")
+raw.commit()
+raw.close()
+
+check("the v3 key really is stale under this build", stale != key_for_title(DASHED))
+conn = mod.open_db(old3)
+eq("a v3 store is migrated rather than refused",
+   conn.execute("PRAGMA user_version").fetchone()[0], mod.SCHEMA_VERSION)
+eq("the story is not offered again under its newly stripped key",
+   mod.unreported(conn, [key_for_title(DASHED)], "telegram"), [])
 conn.close()
 
 

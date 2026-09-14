@@ -362,7 +362,7 @@ def _rows_to_send(cfg, conn, run_id, fetched_at, tz):
     return store.run_matches(conn, run_id)
 
 
-def _send_channel(conn, cfg, fetcher, name, rows, labels, now, tz):
+def _send_channel(conn, cfg, fetcher, name, rows, labels, caps, now, tz):
     """One channel: diff, send, and mark only what was accepted."""
     keys = None
     if cfg.get("report.mode") != "current":
@@ -373,7 +373,7 @@ def _send_channel(conn, cfg, fetcher, name, rows, labels, now, tz):
                  for row in rows.get(label) or []]
         keys = set(store.unreported(conn, every, name))
 
-    groups = notify.pick(rows, labels, keys)
+    groups = notify.pick(rows, labels, keys, caps)
     if not groups:
         log.info("  %-8s nothing new to send", name)
         return
@@ -390,7 +390,7 @@ def _send_channel(conn, cfg, fetcher, name, rows, labels, now, tz):
              if result.failed else "")
 
 
-def _notify(cfg, run_id, labels, fetched_at):
+def _notify(cfg, run_id, labels, caps, fetched_at):
     """Push the run's new stories to every enabled channel.
 
     Two levels of guard, and both are in the contract. The outer one keeps a
@@ -423,7 +423,7 @@ def _notify(cfg, run_id, labels, fetched_at):
         rows = _rows_to_send(cfg, conn, run_id, fetched_at, tz)
         for name in channels:
             try:
-                _send_channel(conn, cfg, fetcher, name, rows, labels,
+                _send_channel(conn, cfg, fetcher, name, rows, labels, caps,
                               fetched_at, tz)
             except Exception:
                 log.exception("channel %s failed; the page and the other "
@@ -526,7 +526,10 @@ def crawl(cfg):
         # the one the page shows under the same headline. There is no separate
         # summary message any more: one a day plus the list of links was the
         # same day described twice, and the list is where the reader already is.
-        _notify(cfg, run_id, [g.label for g in groups], fetched_at)
+        default_cap = cfg.get("report.max_per_group", 0)
+        _notify(cfg, run_id, [g.label for g in groups],
+                {g.label: (g.cap if g.cap is not None else default_cap)
+                 for g in groups}, fetched_at)
     else:
         # `_publish` already logged the traceback. Without this line the cycle
         # would go on to ping the heartbeat and claim it succeeded, which is

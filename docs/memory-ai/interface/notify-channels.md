@@ -3,10 +3,10 @@ title: Notification Channels - Telegram and Discord
 category: interface
 purpose: Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send.
 status: active
-updated: 2026-09-12
+updated: 2026-09-14
 source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py
 confidence: confirmed
-keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, clip, SendResult, report.mode, incremental, current, daily, seen set
+keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, cluster, caps, daily cap, budget, jaccard, near-duplicate, clip, SendResult, report.mode, incremental, current, daily, seen set
 order: 3
 ---
 
@@ -33,7 +33,8 @@ with nothing installed and nothing configured.
 
 | Signature | Returns | Notes |
 |-----------|---------|-------|
-| `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order, the seen-set diff, and one appearance per story. Empty groups dropped |
+| `cluster(rows)` | `[[row]]` | Near-duplicate headlines about one event, grouped. Best-first in and out; a selection step, never an identity one |
+| `pick(rows_by_label, labels, keys=None, caps=None)` | `[(label, [row])]` | Group order, one message per event, the day's `@n` budget, the seen-set diff, and one appearance per story. Empty groups dropped |
 | `messages(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. **One message per story**, header included, each text under `limit` |
 | `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
 | `stamp(moment, tz)` | `str` | `published_at` as `TIME_FMT` (`%H:%M %d/%m`), or `NO_TIME` (`--`) |
@@ -44,12 +45,29 @@ with nothing installed and nothing configured.
 that one absurd title plus its link cannot on its own overflow the smaller of the
 two budgets and cost the story its message.
 
-**`pick()` does the three things that decide what a channel is even shown.**
-`labels` is the group order the keyword file fixes - the same order the page
-renders in, because a mapping's own order would shuffle the sections between runs
-for no reason a reader could follow. `keys` is the seen-set answer: `None` sends
-everything (`report.mode: current`), while an **empty set** means everything has
+**`pick()` does the five things that decide what a channel is even shown.**
+`labels` is the group order the keyword file fixes - the same the page renders
+in, because a mapping's own order would shuffle the sections between runs for no
+reason a reader could follow. `keys` is the seen-set answer: `None` sends
+everything (`report.mode: current`), an **empty set** means everything has
 already gone out - not the same thing, and it must send nothing at all.
+
+**`cluster()` runs first, so a channel is sent one message per event.** Several
+outlets write one announcement up several ways and the exact-headline key in
+[[news-item]] makes a story of each: over the 548 pushed on 2026-09-13/14, 19
+clusters and 39 same-event messages, the worst one BRICS item carried by **18
+outlets**. Greedy single-link on the Jaccard of `title_key()` words, floor 0.5,
+at least 3 shared. A **selection** step, never an identity one - membership
+depends on the batch, so it must not reach `dedup_key`, the store or the page.
+A cluster travels only while *every* member is unsent, or the event returns each
+time another outlet files.
+
+**Then `caps`, `{label: @n}` - a day's budget rather than a cycle's.** Taken
+before the diff, so a cluster already sent still spends its slot; without that a
+30-minute cycle hands out a fresh `n` every run and `@12` means 576 stories a
+day. `0` or a missing label is unlimited, and it bounds a day only in
+`report.mode: daily`, the one mode where `rows_by_label` *is* the day. Churn
+puts the real total above the sum of the caps. Numbers in [[progress]].
 
 **And a story goes out once, under the first group in `labels` that claims it.**
 The store is right to hold a row per (story, group) - see [[storage-layer]] -

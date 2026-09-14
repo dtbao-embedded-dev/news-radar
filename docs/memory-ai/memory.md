@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-09-12 - 20 durable doc(s)._
+_Generated 2026-09-14 - 20 durable doc(s)._
 
 ## State (transient)
 
@@ -18,6 +18,46 @@ _Generated 2026-09-12 - 20 durable doc(s)._
 > Current delivery state - what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
 
 ## What works
+
+### `@n` is the day's budget, not the cycle's (2026-09-14, unreleased)
+
+Two days of the live store were read to answer "are titles duplicated". They
+were not - 0 exact-title duplicates across 530 pushed stories on 09-13 and
+09-14 - but the reading turned up three numbers that matter more. 🟢
+
+**The volume.** `rank_groups()` caps a group at `@n` per run, and the homelab
+runs a 30-minute cycle, so the cap never bounded a day: ~20 messages an hour,
+sustained, on each of two channels. `notify.pick()` now takes `caps` and slices
+the day's rows before the seen-set diff, so a story already sent still holds its
+slot. Replayed over the 25 runs of 2026-09-14: **344 messages become 167**, a
+51% cut. The floor is the sum of the caps, 110; freshness decay reorders the
+ranking during the day, so churn accounts for the other 57.
+
+**A score floor was tried first and rejected on the measurement.** Of 696
+pushed (story, group) pairs, p10 is 0.583 and p90 is 0.599 - 80% inside a
+0.016-wide band, so there is no usable threshold: 0.55 keeps 96% and 0.60 keeps
+4.9%, with nothing in between. At 0.60 the groups that vanish entirely are
+`DeepSeek`, `Qwen`, `STM32`, `GLM`, `Firmware` and `GitHub Trending`, and
+`ESP32` drops to 1 of 13. The knob would have cut the reader's own topics and
+kept the AI firehose. 🟢
+
+**Clustering does not reduce the count; it changes what is in it.** Replayed
+through the real `pick()` over the 25 runs of 2026-09-14: 344 messages as
+shipped, 167 with the daily cap, 166 with the byline fix, 161 with clustering.
+The cap is what bounds the day, and clustering then spends that budget on
+distinct events - the freed slots refill with other stories rather than
+disappearing. The reader stops getting nine write-ups of one announcement and
+starts getting one of it plus eight other things. 🟢
+
+**Why the score does not discriminate: `source_count` is 1 for 680 of those 696
+pairs.** The cross-source frequency term that [[news-search]] stage 6 leans on
+is dead in practice, because near-duplicate headlines never collapse - see the
+known issue below. The 16 pairs that did merge are exactly the high scorers,
+topping out at 0.889 against a median of 0.596, which says the term works
+whenever it is given anything to count. The byline fix narrows that; clustering
+does not, because it is a notify-layer selection step and the ranking never sees
+it. Reviving the frequency term properly means clustering before `rank()`, which
+needs a cluster identity stable across runs and is not attempted. 🟡
 
 ### The duplicates, the window, the keywords and the message shape (2026-09-12, unreleased)
 
@@ -911,6 +951,38 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Known issues
 
+- **~~`_PUBLISHER_SUFFIX` fails to strip a byline that contains a dash or runs
+  past 40 characters~~ - closed 2026-09-14, unreleased.** The tail is tempered
+  now (`(?:(?!\s[-|–—]\s).){2,50}`) so it may hold a dash and run to 50
+  characters but not a second spaced separator, and schema v4 re-seeds the
+  seen-set across the rekey. All three live pairs collapse. What it was: `item.py:54` is
+  `r"\s+[-|–—]\s+[^-|–—]{2,40}$"`: the character class excludes `-`, so
+  `- How-To Geek` and `- Geeky Gadgets` never match at all, while
+  `- howtogeek.com` and `- geeky-gadgets.com` strip cleanly; and
+  `- International Business Times, Singapore Edition` is 46 characters, past
+  the `{2,40}` bound. Proven on three live pairs from 2026-09-13, every one of
+  them the *same article from the same publisher* under two byline spellings -
+  `title_key()` returned different strings for all three. 🟢
+
+  This is the exact-match case the `ponytail:` note at `item.py:229` calls the
+  bulk of the noise, still leaking; it is not the near-duplicate case below.
+  **The fix is not one line.** `title_key()` feeds `dedup_key()`, so widening
+  the regex rekeys every row in the store and needs a schema v3 -> v4 migration
+  that re-seeds `reported` the way v0.2.10's v2 -> v3 did - without it every
+  story ever stored is pushed again once.
+
+- **~~Near-duplicate headlines from different outlets stay separate stories~~ -
+  closed for the *message* by `notify.cluster()`, 2026-09-14, unreleased.** The
+  store and the page still hold one row per headline, which is deliberate:
+  cluster membership depends on the batch and cannot be an identity. What it
+  was: Measured
+  over two days: 7 clusters and 17 redundant messages on 09-14 (6.6%), 9 and 19
+  on 09-13 (7.0%), by token-set Jaccard >= 0.5 - an ad-hoc measure, not the
+  project's. The worst single cluster is one BRICS open-source-AI story carried
+  by 12 outlets on 09-13 and 9 more on 09-14: **21 messages for one event**.
+  The cost is not only the noise - it is why `source_count` is 1 for 97.7% of
+  pushed stories and the frequency term contributes nothing. 🟢
+
 - **~~Discord refused 36 messages in 24 h with `Must be 2000 or fewer in
   length`~~ - closed by the message reshape, 2026-09-12, unreleased.**
   `notify.chunk()` decided whether a part fitted *before* appending the next
@@ -1083,6 +1155,24 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Current focus
 
+**Two days of the live store read for duplicates, three fixes, unreleased after
+v0.2.10 (2026-09-14).** The question was "are titles duplicated". They were not -
+0 exact-title duplicates across 548 pushed stories - but the reading found the
+firehose behind the question: ~20 messages an hour, sustained, because
+`rank_groups()` caps `@n` **per run** and the homelab runs a 30-minute cycle.
+
+Three changes, in the order they were found: `notify.pick()` takes `caps` and
+spends the `@n` budget over the day rather than the cycle; `title_key()` strips a
+byline holding a dash or longer than 40 characters, with schema **v4** re-seeding
+the seen-set across the rekey; and `notify.cluster()` sends one message per
+event rather than one per write-up. A `notify.min_score` floor was tried first
+and rejected on the measurement - p10 to p90 spans 0.016, so no threshold exists
+that does not also empty `DeepSeek`, `Qwen`, `STM32`, `GLM` and `Firmware`.
+
+Replayed over the 25 runs of 2026-09-14: **344 messages become 161**. Full
+numbers in [[progress]]. Nothing is deployed - the homelab runs a GHCR image and
+this needs a release.
+
 **Four reader complaints, measured against the live store and fixed
 (2026-09-12, unreleased after v0.2.9).** The reader said: the news is not from
 today, the firmware keywords are wrong, the same story arrives twice, and one
@@ -1112,13 +1202,27 @@ throttled cycle loses its tail, and `incremental` never offers a missed story
 again. It is set **before** the code that needs it, which is harmless - v0.2.9
 honours the key.
 
-**The code half still needs a release.** Code reaches the homelab only through
-`:latest` plus watchtower, so until **v0.2.10** is cut production has the
-24-hour window and the new keywords and still the old URL dedup and the old
-grouped messages. That same cycle proves it: `matched 1769 item(s) -> 1730
-story(ies) after dedup` and `telegram 4 message(s), 22 story(ies)` - 39
-collapsed where the headline key would collapse far more, and four messages
-where there should be twenty-two.
+**v0.2.10 is cut and live (2026-09-12 13:00).** All five CI runs green, the
+image published, and the homelab pulled it by hand - watchtower's
+`WATCHTOWER_POLL_INTERVAL` is 86400, so a release does not reach the deployment
+on its own inside a day. `--check` reports the config up to date.
+
+The first cycle on the new image is the end-to-end proof of all four changes:
+
+```
+news-radar 0.2.10 starting
+search feeds: 741 item(s) from 13 group(s) x 2 template(s)
+rekey: 2568 seen-set row(s) carried onto the new dedup key
+migrated output/news.db from schema version 2 to 3
+stored 82 match row(s); 309 story(ies) across 13 group(s) today
+telegram 12 message(s), 12 story(ies)
+discord  12 message(s), 12 story(ies)
+```
+
+**309 stories in the day and 12 messages** is the migration working: without the
+v2->v3 rekey, `daily` mode would have found the whole day unreported under new
+keys and pushed all 309, one message each. And 12 messages for 12 stories is the
+1:1 shape - 40 s per channel, which is 12 x 3.5 s exactly.
 
 **The AI summary went quiet for nine hours and now recovers on its own
 (2026-09-08, unreleased after v0.2.8).** OpenRouter withdrew the free tier of
@@ -2493,7 +2597,7 @@ id - `hn` and `hn_algolia` are different hosts, the two Reddit entries are not.
 3. Record it in the table above and restamp `updated`.
 
 ### [data] News Item, Dedup Key and Output Layout
-*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py - keywords: NewsItem, dedup key, title_key, key_for_title, canonical url, schema version 3, migration chain, excerpt, EXCERPT_MAX, ai_summary, gist, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle*
+*`data/news-item.md` - The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/. - status: active - source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py - keywords: NewsItem, dedup key, title_key, key_for_title, canonical url, schema version 4, migration chain, publisher suffix, byline, excerpt, EXCERPT_MAX, ai_summary, gist, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle*
 
 # News Item, Dedup Key and Output Layout
 
@@ -2551,7 +2655,15 @@ dedup_key = sha1("t:" + title_key(title))
 
 `title_key()` folds case and diacritics, drops a trailing `- Publisher` /
 `| Publisher` byline when at least 5 words are left after it, then removes
-punctuation and collapses whitespace. Punctuation goes here and not in `fold()`,
+punctuation and collapses whitespace. The byline tail may itself contain a dash
+and may run to 50 characters; what it may **not** contain is another spaced
+separator, which is what anchors the strip to the *last* one rather than the
+first. Both halves of that are paid for by v0.2.10 misses measured 2026-09-13,
+where the same article from the same publisher kept two keys: `- How-To Geek`
+and `- Geeky Gadgets` were refused for holding a dash while `- howtogeek.com`
+and `- geeky-gadgets.com` stripped, and
+`- International Business Times, Singapore Edition` was refused for being 46
+characters against a 40-character bound. 🟢 Punctuation goes here and not in `fold()`,
 which keeps it so a keyword typed `ESP32-S3` still matches; identity wants the
 opposite, because two sources disagreeing only about a colon carry one story.
 
@@ -2617,6 +2729,7 @@ stamped as migrated while a step it needed was skipped. 🟢
 |------|--------------|
 | v1 → v2 | Adds the nullable `excerpt` and `ai_summary` columns to `items`. Nothing is rewritten. |
 | v2 → v3 | Re-seeds `reported` with each already-sent story's **new** headline key, because v0.2.10 moved `dedup_key` off the URL. Adds rows only; old keys stay and age out with `retention_days`. |
+| v3 → v4 | The same re-seed, run again: v0.2.11 widened the byline strip inside `title_key()`, so every key for a headline carrying one is stale. `_reseed_reported()` re-derives the key from `items.title`, so it is correct for any such change and is safe to run twice. |
 
 The v2→v3 step rewrites only `reported` on purpose. Rekeying `items`, `matches`
 and `item_sources` would have to merge rows that now collapse onto one key; the
@@ -3042,7 +3155,7 @@ chain it drives.
   it is asked.
 
 ### [interface] Notification Channels - Telegram and Discord
-*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, clip, SendResult, report.mode, incremental, current, daily, seen set*
+*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, cluster, caps, daily cap, budget, jaccard, near-duplicate, clip, SendResult, report.mode, incremental, current, daily, seen set*
 
 # Notification Channels - Telegram and Discord
 
@@ -3067,7 +3180,8 @@ with nothing installed and nothing configured.
 
 | Signature | Returns | Notes |
 |-----------|---------|-------|
-| `pick(rows_by_label, labels, keys=None)` | `[(label, [row])]` | Group order, the seen-set diff, and one appearance per story. Empty groups dropped |
+| `cluster(rows)` | `[[row]]` | Near-duplicate headlines about one event, grouped. Best-first in and out; a selection step, never an identity one |
+| `pick(rows_by_label, labels, keys=None, caps=None)` | `[(label, [row])]` | Group order, one message per event, the day's `@n` budget, the seen-set diff, and one appearance per story. Empty groups dropped |
 | `messages(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. **One message per story**, header included, each text under `limit` |
 | `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
 | `stamp(moment, tz)` | `str` | `published_at` as `TIME_FMT` (`%H:%M %d/%m`), or `NO_TIME` (`--`) |
@@ -3078,12 +3192,29 @@ with nothing installed and nothing configured.
 that one absurd title plus its link cannot on its own overflow the smaller of the
 two budgets and cost the story its message.
 
-**`pick()` does the three things that decide what a channel is even shown.**
-`labels` is the group order the keyword file fixes - the same order the page
-renders in, because a mapping's own order would shuffle the sections between runs
-for no reason a reader could follow. `keys` is the seen-set answer: `None` sends
-everything (`report.mode: current`), while an **empty set** means everything has
+**`pick()` does the five things that decide what a channel is even shown.**
+`labels` is the group order the keyword file fixes - the same the page renders
+in, because a mapping's own order would shuffle the sections between runs for no
+reason a reader could follow. `keys` is the seen-set answer: `None` sends
+everything (`report.mode: current`), an **empty set** means everything has
 already gone out - not the same thing, and it must send nothing at all.
+
+**`cluster()` runs first, so a channel is sent one message per event.** Several
+outlets write one announcement up several ways and the exact-headline key in
+[[news-item]] makes a story of each: over the 548 pushed on 2026-09-13/14, 19
+clusters and 39 same-event messages, the worst one BRICS item carried by **18
+outlets**. Greedy single-link on the Jaccard of `title_key()` words, floor 0.5,
+at least 3 shared. A **selection** step, never an identity one - membership
+depends on the batch, so it must not reach `dedup_key`, the store or the page.
+A cluster travels only while *every* member is unsent, or the event returns each
+time another outlet files.
+
+**Then `caps`, `{label: @n}` - a day's budget rather than a cycle's.** Taken
+before the diff, so a cluster already sent still spends its slot; without that a
+30-minute cycle hands out a fresh `n` every run and `@12` means 576 stories a
+day. `0` or a missing label is unlimited, and it bounds a day only in
+`report.mode: daily`, the one mode where `rows_by_label` *is* the day. Churn
+puts the real total above the sum of the caps. Numbers in [[progress]].
 
 **And a story goes out once, under the first group in `labels` that claims it.**
 The store is right to hold a row per (story, group) - see [[storage-layer]] -
@@ -3818,17 +3949,19 @@ Imports `sqlite3`, `json`, `pathlib` and `item.dedup_key`. Nothing else.
 | `0` | No file, or an empty one. The schema is created and the version stamped. Not an error - it is the first run |
 | `> SCHEMA_VERSION` | `StoreError`. Another copy of this store is written by a newer build, and dropping columns it needs is not a recovery |
 | `1` | **Migrated in place**: `ALTER TABLE items ADD COLUMN excerpt TEXT` and `ai_summary TEXT`, then the version is stamped. A v1 store is a homelab collecting since P4, and two nullable columns are not a reason to throw it away |
+| `2` | `_reseed_reported()`: every already-sent story is marked reported under the key this build derives from its title. v0.2.10 moved `dedup_key` onto the headline |
+| `3` | `_reseed_reported()` again, for v0.2.11's widened byline strip. Steps run **in turn**, so a v1 store walks 1→2→3→4 rather than jumping |
 | anything in between | `StoreError`, naming both versions |
 
-`SCHEMA_VERSION` is `2`, so the last row is again the empty set - `0 < v < 2`
-holds for nothing once `1` has its own branch - and it exists so that the day it
-becomes reachable is a loud one. Until v0.2.3 that case fell through every
+`SCHEMA_VERSION` is `4`, and every version below it has a branch, so the last
+row is again the empty set - and it exists so that the day it becomes reachable
+is a loud one. Until v0.2.3 that case fell through every
 branch and `open_db()` returned a connection to a store whose shape the build
 did not match, which is how a query silently reads a column that means something
 else now.
 
 **Bumping `SCHEMA_VERSION` means writing the migration in a branch of its own**,
-above the one that raises, in the same commit. `1 -> 2` is the worked example. The cycle survives a refusal either way: every caller is inside a
+above the one that raises, in the same commit. `1 -> 2` is the worked example for a shape change, `3 -> 4` for a rekey. The cycle survives a refusal either way: every caller is inside a
 guard, so a refused store costs the page and the notifications, logs a
 traceback, withholds the heartbeat ping, and alerts after two cycles.
 
@@ -4454,7 +4587,11 @@ Two properties decided by measurement rather than taste:
   real story.
 - `source_count` saturates at four sources: past that, more copies say nothing new.
 - After sorting, the group's `@n` cap applies, falling back to
-  `report.max_per_group`.
+  `report.max_per_group`. That one is **per run**, and it bounds the page. The
+  same `@n` is applied a second time in `notify.pick()`, against the day's rows
+  and before the seen-set diff, which is what bounds a phone - see
+  [[notify-channels]]. Without it a 30-minute cycle sends a fresh `n` every run:
+  measured 2026-09-14, 344 messages in a day against a sum of caps of 110.
 
 ## Edge cases
 

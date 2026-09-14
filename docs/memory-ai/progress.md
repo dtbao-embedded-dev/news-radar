@@ -1,6 +1,6 @@
 ---
 title: Progress
-updated: 2026-09-12
+updated: 2026-09-14
 ---
 
 # Progress
@@ -8,6 +8,46 @@ updated: 2026-09-12
 > Current delivery state - what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
 
 ## What works
+
+### `@n` is the day's budget, not the cycle's (2026-09-14, unreleased)
+
+Two days of the live store were read to answer "are titles duplicated". They
+were not - 0 exact-title duplicates across 530 pushed stories on 09-13 and
+09-14 - but the reading turned up three numbers that matter more. 🟢
+
+**The volume.** `rank_groups()` caps a group at `@n` per run, and the homelab
+runs a 30-minute cycle, so the cap never bounded a day: ~20 messages an hour,
+sustained, on each of two channels. `notify.pick()` now takes `caps` and slices
+the day's rows before the seen-set diff, so a story already sent still holds its
+slot. Replayed over the 25 runs of 2026-09-14: **344 messages become 167**, a
+51% cut. The floor is the sum of the caps, 110; freshness decay reorders the
+ranking during the day, so churn accounts for the other 57.
+
+**A score floor was tried first and rejected on the measurement.** Of 696
+pushed (story, group) pairs, p10 is 0.583 and p90 is 0.599 - 80% inside a
+0.016-wide band, so there is no usable threshold: 0.55 keeps 96% and 0.60 keeps
+4.9%, with nothing in between. At 0.60 the groups that vanish entirely are
+`DeepSeek`, `Qwen`, `STM32`, `GLM`, `Firmware` and `GitHub Trending`, and
+`ESP32` drops to 1 of 13. The knob would have cut the reader's own topics and
+kept the AI firehose. 🟢
+
+**Clustering does not reduce the count; it changes what is in it.** Replayed
+through the real `pick()` over the 25 runs of 2026-09-14: 344 messages as
+shipped, 167 with the daily cap, 166 with the byline fix, 161 with clustering.
+The cap is what bounds the day, and clustering then spends that budget on
+distinct events - the freed slots refill with other stories rather than
+disappearing. The reader stops getting nine write-ups of one announcement and
+starts getting one of it plus eight other things. 🟢
+
+**Why the score does not discriminate: `source_count` is 1 for 680 of those 696
+pairs.** The cross-source frequency term that [[news-search]] stage 6 leans on
+is dead in practice, because near-duplicate headlines never collapse - see the
+known issue below. The 16 pairs that did merge are exactly the high scorers,
+topping out at 0.889 against a median of 0.596, which says the term works
+whenever it is given anything to count. The byline fix narrows that; clustering
+does not, because it is a notify-layer selection step and the ranking never sees
+it. Reviving the frequency term properly means clustering before `rank()`, which
+needs a cluster identity stable across runs and is not attempted. 🟡
 
 ### The duplicates, the window, the keywords and the message shape (2026-09-12, unreleased)
 
@@ -900,6 +940,38 @@ the ops layer and the summary - and the whole thing is reachable at
   days can answer.
 
 ## Known issues
+
+- **~~`_PUBLISHER_SUFFIX` fails to strip a byline that contains a dash or runs
+  past 40 characters~~ - closed 2026-09-14, unreleased.** The tail is tempered
+  now (`(?:(?!\s[-|–—]\s).){2,50}`) so it may hold a dash and run to 50
+  characters but not a second spaced separator, and schema v4 re-seeds the
+  seen-set across the rekey. All three live pairs collapse. What it was: `item.py:54` is
+  `r"\s+[-|–—]\s+[^-|–—]{2,40}$"`: the character class excludes `-`, so
+  `- How-To Geek` and `- Geeky Gadgets` never match at all, while
+  `- howtogeek.com` and `- geeky-gadgets.com` strip cleanly; and
+  `- International Business Times, Singapore Edition` is 46 characters, past
+  the `{2,40}` bound. Proven on three live pairs from 2026-09-13, every one of
+  them the *same article from the same publisher* under two byline spellings -
+  `title_key()` returned different strings for all three. 🟢
+
+  This is the exact-match case the `ponytail:` note at `item.py:229` calls the
+  bulk of the noise, still leaking; it is not the near-duplicate case below.
+  **The fix is not one line.** `title_key()` feeds `dedup_key()`, so widening
+  the regex rekeys every row in the store and needs a schema v3 -> v4 migration
+  that re-seeds `reported` the way v0.2.10's v2 -> v3 did - without it every
+  story ever stored is pushed again once.
+
+- **~~Near-duplicate headlines from different outlets stay separate stories~~ -
+  closed for the *message* by `notify.cluster()`, 2026-09-14, unreleased.** The
+  store and the page still hold one row per headline, which is deliberate:
+  cluster membership depends on the batch and cannot be an identity. What it
+  was: Measured
+  over two days: 7 clusters and 17 redundant messages on 09-14 (6.6%), 9 and 19
+  on 09-13 (7.0%), by token-set Jaccard >= 0.5 - an ad-hoc measure, not the
+  project's. The worst single cluster is one BRICS open-source-AI story carried
+  by 12 outlets on 09-13 and 9 more on 09-14: **21 messages for one event**.
+  The cost is not only the noise - it is why `source_count` is 1 for 97.7% of
+  pushed stories and the frequency term contributes nothing. 🟢
 
 - **~~Discord refused 36 messages in 24 h with `Must be 2000 or fewer in
   length`~~ - closed by the message reshape, 2026-09-12, unreleased.**

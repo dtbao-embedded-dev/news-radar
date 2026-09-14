@@ -3,10 +3,10 @@ title: News Item, Dedup Key and Output Layout
 category: data
 purpose: The shape every story is normalised into, how duplicates collapse, and what lands on disk under output/.
 status: active
-updated: 2026-09-12
+updated: 2026-09-14
 source: src/news_radar/item.py, src/news_radar/fetch/feeds.py, src/news_radar/store.py, src/news_radar/render.py
 confidence: confirmed
-keywords: NewsItem, dedup key, title_key, key_for_title, canonical url, schema version 3, migration chain, excerpt, EXCERPT_MAX, ai_summary, gist, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle
+keywords: NewsItem, dedup key, title_key, key_for_title, canonical url, schema version 4, migration chain, publisher suffix, byline, excerpt, EXCERPT_MAX, ai_summary, gist, sqlite schema, news.db, output layout, index.html, seen set, snapshot, page layout, rail, jump nav, hidden, filter, theme toggle
 order: 2
 ---
 
@@ -66,7 +66,15 @@ dedup_key = sha1("t:" + title_key(title))
 
 `title_key()` folds case and diacritics, drops a trailing `- Publisher` /
 `| Publisher` byline when at least 5 words are left after it, then removes
-punctuation and collapses whitespace. Punctuation goes here and not in `fold()`,
+punctuation and collapses whitespace. The byline tail may itself contain a dash
+and may run to 50 characters; what it may **not** contain is another spaced
+separator, which is what anchors the strip to the *last* one rather than the
+first. Both halves of that are paid for by v0.2.10 misses measured 2026-09-13,
+where the same article from the same publisher kept two keys: `- How-To Geek`
+and `- Geeky Gadgets` were refused for holding a dash while `- howtogeek.com`
+and `- geeky-gadgets.com` stripped, and
+`- International Business Times, Singapore Edition` was refused for being 46
+characters against a 40-character bound. 🟢 Punctuation goes here and not in `fold()`,
 which keeps it so a keyword typed `ESP32-S3` still matches; identity wants the
 opposite, because two sources disagreeing only about a colon carry one story.
 
@@ -132,6 +140,7 @@ stamped as migrated while a step it needed was skipped. 🟢
 |------|--------------|
 | v1 → v2 | Adds the nullable `excerpt` and `ai_summary` columns to `items`. Nothing is rewritten. |
 | v2 → v3 | Re-seeds `reported` with each already-sent story's **new** headline key, because v0.2.10 moved `dedup_key` off the URL. Adds rows only; old keys stay and age out with `retention_days`. |
+| v3 → v4 | The same re-seed, run again: v0.2.11 widened the byline strip inside `title_key()`, so every key for a headline carrying one is stale. `_reseed_reported()` re-derives the key from `items.title`, so it is correct for any such change and is safe to run twice. |
 
 The v2→v3 step rewrites only `reported` on purpose. Rekeying `items`, `matches`
 and `item_sources` would have to merge rows that now collapse onto one key; the

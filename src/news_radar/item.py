@@ -51,7 +51,21 @@ _D_STROKE = str.maketrans({"đ": "d", "Đ": "d"})
 # every entry it carries - `Anthropic says ... - Bloomberg` - so the same
 # article arrives with a byline from the aggregator and without one from the
 # publisher's own feed, and the two must still be one story.
-_PUBLISHER_SUFFIX = re.compile(r"\s+[-|–—]\s+[^-|–—]{2,40}$")
+#
+# The tail is tempered rather than a plain negated class, and both halves of
+# that are paid for by live misses measured 2026-09-13, where the SAME article
+# from the SAME publisher kept two keys:
+#
+#   - a publisher name may contain a dash. Excluding `-` from the tail meant
+#     `- How-To Geek` and `- Geeky Gadgets` never matched at all while
+#     `- howtogeek.com` and `- geeky-gadgets.com` stripped cleanly.
+#   - it may be long. `- International Business Times, Singapore Edition` is 46
+#     characters and a 40-character bound refused it.
+#
+# What the tail may NOT contain is another spaced separator, which is what
+# still anchors the match to the LAST one: `re.sub` scans left to right, and a
+# plain `[^|]` tail would strip from the first ` - ` in the line.
+_PUBLISHER_SUFFIX = re.compile(r"\s+[-|–—]\s+(?:(?!\s[-|–—]\s).){2,50}$")
 
 # Below this many words the remainder is not a headline any more. `ESP32-C6
 # ships - Hackaday` would be cut to two words, and at that length a dash is as

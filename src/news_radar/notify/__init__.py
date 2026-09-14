@@ -34,7 +34,9 @@ import logging
 
 from dataclasses import dataclass, field
 
-__all__ = ["SendResult", "pick", "messages", "clip", "stamp", "TITLE_MAX",
+from ..item import title_key
+
+__all__ = ["SendResult", "pick", "cluster", "messages", "clip", "stamp", "TITLE_MAX",
            "TIME_FMT", "NO_TIME", "UTC", "NOTIFY_INTERVAL_MS"]
 
 log = logging.getLogger("news_radar.notify")
@@ -106,10 +108,91 @@ def clip(text, limit=TITLE_MAX):
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
-def pick(rows_by_label, labels, keys=None):
+# Words that say nothing about which story a headline is about. Kept short on
+# purpose: every word removed here makes two unrelated headlines look more
+# alike, and the Jaccard floor below is doing the real work.
+_STOPWORDS = frozenset(
+    "the a an of to in for on at and or is are be as with by from its it this"
+    " that new now how why what who".split())
+
+# Two headlines are the same event at or above this overlap, and must also
+# share at least `_CLUSTER_MIN_SHARED` words outright - without that floor a
+# pair of three-word headlines clusters on one accidental word.
+#
+# 0.5 is measured, not picked: over the 530 stories pushed on 2026-09-13 and
+# 09-14 it found 16 clusters and every one of them was genuinely one event.
+# Higher does not hold real headlines together - `China's Xi proposes BRICS
+# 'open-source AI zone'` and `Xi Jinping Pushes Open Source AI Plan At BRICS
+# Summit In Delhi` share five words of thirteen, which is 0.38.
+_CLUSTER_AT = 0.5
+_CLUSTER_MIN_SHARED = 3
+
+
+def _words(title):
+    """The comparison words of a headline: `title_key()` minus the stopwords.
+
+    Borrowed from `item` rather than re-normalised here, so a clustering
+    decision and an identity decision are reading the same folded, de-bylined,
+    de-punctuated string. `title_key()` is what `dedup_key()` hashes, and
+    clustering is the near-miss case of exactly that question.
+    """
+    return frozenset(title_key(title or "").split()) - _STOPWORDS
+
+
+def _same_event(left, right):
+    """Do two word sets describe one event? Jaccard, with a shared-word floor."""
+    shared = len(left & right)
+    return (shared >= _CLUSTER_MIN_SHARED
+            and shared / len(left | right) >= _CLUSTER_AT)
+
+
+def cluster(rows):
+    """`[row]` (best first) -> `[[row]]`, one list per event, best first.
+
+    The exact-match key in [[news-item]] makes one story of one headline. It
+    cannot make one story of nine outlets writing nine different headlines
+    about the same event, and that is what a phone actually receives: measured
+    over 2026-09-13 and 09-14, one BRICS open-source-AI announcement arrived as
+    **21 separate messages**, 12 on the first day and 9 on the second.
+
+    Greedy and single-pass: a row joins the first cluster holding a headline it
+    overlaps with, and the rows arrive sorted best-first, so the row that
+    represents a cluster is the highest-scoring member rather than whichever
+    one was fetched first.
+
+    Compared against **every** member rather than against the representative,
+    which is what lets a chain close. Six write-ups of one announcement are not
+    six restatements of the first: `China Proposes Open-Source AI Platform For
+    BRICS At Summit` overlaps `China's Xi proposes BRICS 'open-source AI zone'`
+    at 0.45 and misses, and reaches it only through `Xi Jinping Proposes BRICS
+    Open Source AI Zone at Summit`, which it meets at 0.55.
+
+    **This is a selection step, never an identity one.** Membership depends on
+    what else is in the batch - two headlines that cluster this cycle may not
+    next cycle, when only one of them was fetched - so it must not reach
+    `dedup_key`, the store, or the page, all of which need an answer that is
+    stable across runs. It changes what is *sent*, and nothing else.
+    """
+    clusters = []
+    for row in rows:
+        words = _words(row["title"])
+        for known, members in clusters:
+            if any(_same_event(words, other) for other in known):
+                known.append(words)
+                members.append(row)
+                break
+        else:
+            # ponytail: O(n^2) against the rows of one group, which is the
+            # day's shortlist and caps out in the low hundreds. Worth an index
+            # only if a group's day ever runs to thousands.
+            clusters.append(([words], [row]))
+    return [members for _, members in clusters]
+
+
+def pick(rows_by_label, labels, keys=None, caps=None):
     """`{label: [row]}` -> `[(label, [row])]` in the keyword file's own order.
 
-    Three jobs, all of which decide what a channel is even shown:
+    Five jobs, all of which decide what a channel is even shown:
 
     - **Order.** `labels` is the group order the keyword file fixes, the same
       one the page renders in. A mapping's own order would shuffle the sections
@@ -118,6 +201,29 @@ def pick(rows_by_label, labels, keys=None):
       not been told about. `None` means send everything (`report.mode: current`);
       an *empty* set means everything has already been sent, which is not the
       same thing and must send nothing at all.
+    - **One event, one message.** `cluster()` groups the near-duplicate
+      headlines nine outlets write about one announcement, and only the
+      best-scoring member of each cluster is sent. It runs **before** the cap,
+      so `@12` buys twelve events rather than twelve write-ups of four; and
+      **after** the cap comes the diff, where a cluster is eligible only if
+      every member is still unsent - testing the representative alone returns
+      the event the moment a tenth outlet files its own version of it.
+
+    - **The cap.** `caps` is `{label: @n}` from the keyword file, applied to
+      `rows_by_label` **before** the seen-set diff, which is what makes `@12`
+      mean twelve AI stories rather than twelve every cycle. The rows arrive
+      sorted best-first, so the slice is the day's top n; a story already sent
+      is still in that slice and still spends its slot, so the budget counts
+      what the reader got rather than what is left. A better story arriving at
+      three in the afternoon enters the slice and pushes the weakest out - it
+      is sent, the one it displaced stays sent, and that churn is the only way
+      the day's total goes past n.
+
+      It bounds a day only when `rows_by_label` **is** the day, which is
+      `report.mode: daily`. The other two modes hand this function one run, and
+      `rank_groups()` has already capped that run, so the slice is a no-op
+      there rather than a second, different rule.
+
     - **One story, one appearance.** A story matching two groups has a row in
       each, and a message that prints it twice - same headline, same link, same
       AI sentence - is the reader scrolling past their own report. It goes out
@@ -140,16 +246,37 @@ def pick(rows_by_label, labels, keys=None):
     out = []
     seen = set()
     for label in labels:
-        rows = rows_by_label.get(label) or []
+        groups = cluster(rows_by_label.get(label) or [])
+
+        cap = (caps or {}).get(label)
+        if cap:
+            # Before the diff, so a cluster already sent still spends its slot.
+            #
+            # ponytail: the slice runs per label, so a story claimed by an
+            # earlier group below still spends a slot here and this group can
+            # under-fill. Counting the cap after that hand-off needs two passes
+            # over every label; it is worth one only if a group is measurably
+            # starved.
+            groups = groups[:cap]
+
         if keys is not None:
-            rows = [row for row in rows if row["dedup_key"] in keys]
+            # A cluster travels only if **every** member is unsent. Testing the
+            # representative alone re-sends the event each time a new outlet
+            # writes it up: the one already sent is dropped by the diff, the
+            # next member is promoted in its place, and the reader gets the
+            # same story again under a different headline.
+            groups = [members for members in groups
+                      if all(row["dedup_key"] in keys for row in members)]
 
         kept = []
-        for row in rows:
-            if row["dedup_key"] in seen:
+        for members in groups:
+            if any(row["dedup_key"] in seen for row in members):
                 continue
-            seen.add(row["dedup_key"])
-            kept.append(row)
+            # The whole cluster is spent, not just the row that represents it,
+            # or its other members reappear under the next group that claims
+            # one of them.
+            seen.update(row["dedup_key"] for row in members)
+            kept.append(members[0])
 
         if kept:
             out.append((label, kept))

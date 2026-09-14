@@ -40,7 +40,7 @@ DAYS_DIR = "days"
 # Bumped whenever the shape below changes. `open_db` migrates forward only: a
 # file written by a newer version is refused rather than downgraded, because
 # the alternative is silently dropping columns the operator's other copy needs.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE items (
@@ -130,11 +130,11 @@ def open_db(data_dir):
 
     - equal to `SCHEMA_VERSION` - open it.
     - `0` - no file, or an empty one. Create the schema.
-    - `1` or `2` - migrate in place, **through every step in turn**: a v1 store
-      runs the v1->v2 migration and then the v2->v3 one, rather than jumping
-      straight to the current number and skipping what happened in between. A
-      v1 store is a homelab that has been collecting since P4 and there is
-      nothing in it worth throwing away.
+    - `1`, `2` or `3` - migrate in place, **through every step in turn**: a v1
+      store runs v1->v2, then v2->v3, then v3->v4, rather than jumping straight
+      to the current number and skipping what happened in between. A v1 store is
+      a homelab that has been collecting since P4 and there is nothing in it
+      worth throwing away.
     - higher - refuse. Another copy of this store is being written by a newer
       build, and dropping columns it needs is not a recovery.
     - **anything in between - refuse, loudly.** Returning a connection to a
@@ -178,6 +178,12 @@ def open_db(data_dir):
     if version == 2:
         _reseed_reported(conn)
         version = 3
+    if version == 3:
+        # Same migration, second cause: v0.2.11 widened the publisher-suffix
+        # strip in `title_key()`, so a headline carrying a byline this build
+        # now removes hashes to a different key than it did under v3.
+        _reseed_reported(conn)
+        version = 4
 
     if version != SCHEMA_VERSION:
         conn.close()
@@ -206,13 +212,20 @@ def _add_summary_columns(conn):
 
 
 def _reseed_reported(conn):
-    """v2 -> v3: mark every already-sent story reported under its **new** key.
+    """Mark every already-sent story reported under this build's key.
 
-    v0.2.10 moved `dedup_key` off the canonical url and onto the normalised
-    title, so every key in a v2 store is stale. Without this, the first cycle
-    after the upgrade reads a whole local day of stories it has already sent,
-    finds none of their new keys in `reported`, and pushes the lot again - one
-    message each, now that a story is its own message.
+    Run whenever a release changes what `key_for_title()` returns, which has
+    happened twice: v0.2.10 moved `dedup_key` off the canonical url and onto the
+    normalised title (v2 -> v3), and v0.2.11 widened the publisher-suffix strip
+    inside `title_key()` (v3 -> v4). Either way every key already in the store
+    is stale. Without this, the first cycle after the upgrade reads a whole
+    local day of stories it has already sent, finds none of their new keys in
+    `reported`, and pushes the lot again - one message each, now that a story is
+    its own message.
+
+    It reads `items.title` and re-derives the key, so it is correct for any such
+    change and needs no per-version variant. `INSERT OR IGNORE` makes it safe to
+    run twice.
 
     Only `reported` is rewritten, and only by adding rows. The old keys stay on
     every table: rewriting `items`, `matches` and `item_sources` would have to

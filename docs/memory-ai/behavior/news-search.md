@@ -3,7 +3,7 @@ title: How News Is Searched, Matched and Ranked
 category: behavior
 purpose: The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered.
 status: active
-updated: 2026-09-12
+updated: 2026-09-14
 source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py
 confidence: confirmed
 keywords: crawl, search algorithm, matching, max_age_days, fresh_enough, age cut, match_excerpt, excerpt, _haystack, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases
@@ -190,7 +190,11 @@ Two properties decided by measurement rather than taste:
   real story.
 - `source_count` saturates at four sources: past that, more copies say nothing new.
 - After sorting, the group's `@n` cap applies, falling back to
-  `report.max_per_group`.
+  `report.max_per_group`. That one is **per run**, and it bounds the page. The
+  same `@n` is applied a second time in `notify.pick()`, against the day's rows
+  and before the seen-set diff, which is what bounds a phone - see
+  [[notify-channels]]. Without it a 30-minute cycle sends a fresh `n` every run:
+  measured 2026-09-14, 344 messages in a day against a sum of caps of 110.
 
 ## Edge cases
 

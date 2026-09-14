@@ -24,8 +24,19 @@ and rejected on the measurement - p10 to p90 spans 0.016, so no threshold exists
 that does not also empty `DeepSeek`, `Qwen`, `STM32`, `GLM` and `Firmware`.
 
 Replayed over the 25 runs of 2026-09-14: **344 messages become 161**. Full
-numbers in [[progress]]. Nothing is deployed - the homelab runs a GHCR image and
-this needs a release.
+numbers in [[progress]].
+
+**Cut as v0.2.11 and waiting on watchtower (2026-09-14 20:54).** All three CI
+workflows green and the image published. The homelab was *not* pulled by hand
+this time: `WATCHTOWER_POLL_INTERVAL` was moved from 86400 to **3600** in
+`docker/.env`, so the deployment picks a release up within the hour instead of
+within a day. The compose default is untouched at 86400 - this is a
+deployment-local override, and `.env.bak-20260914205357` is the file it replaced.
+
+The store is still at schema v3 until that pull lands; the first cycle on the
+new image runs the v3 -> v4 rekey. `backups/news-pre-v0.2.11.db` was taken with
+the online backup API before any of it, and is the only way back: a v4 store
+refuses to open under v0.2.10, which is what makes this upgrade one-way.
 
 **Four reader complaints, measured against the live store and fixed
 (2026-09-12, unreleased after v0.2.9).** The reader said: the news is not from
@@ -58,8 +69,8 @@ honours the key.
 
 **v0.2.10 is cut and live (2026-09-12 13:00).** All five CI runs green, the
 image published, and the homelab pulled it by hand - watchtower's
-`WATCHTOWER_POLL_INTERVAL` is 86400, so a release does not reach the deployment
-on its own inside a day. `--check` reports the config up to date.
+`WATCHTOWER_POLL_INTERVAL` was 86400 then, so a release did not reach the
+deployment on its own inside a day. It is 3600 since 2026-09-14. `--check` reports the config up to date.
 
 The first cycle on the new image is the end-to-end proof of all four changes:
 

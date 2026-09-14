@@ -190,6 +190,93 @@ for name, built in (("telegram", tg_once), ("discord", dc_once)):
           repr([t for t, _ in built]))
 
 
+# --- cluster: one event, one message ---------------------------------------
+
+# Nine real headlines from 2026-09-13/14, all of them the same announcement.
+# The exact-headline key makes nine stories of these; a phone should get one.
+BRICS = [
+    "China's Xi proposes BRICS 'open-source AI zone'",
+    "Xi Jinping Proposes BRICS Open Source AI Zone at Summit",
+    "Xi Jinping Pushes Open Source AI Plan At BRICS Summit In Delhi",
+    "Xi proposes BRICS ‘open-source AI zone’ - macaubusiness.com",
+    "China Proposes Open-Source AI Platform For BRICS At Summit",
+    "Xi Jinping proposes BRICS to create an \"open-source AI zone\"",
+]
+OTHER = [
+    "ESP32-C6 board adds Thread and Zigbee to a familiar footprint",
+    "Anthropic researcher quits, calls AI an existential threat to humanity",
+]
+mixed = [row(t, "b%d" % i) for i, t in enumerate(BRICS)]
+mixed += [row(t, "o%d" % i) for i, t in enumerate(OTHER)]
+
+clustered = notify.cluster(mixed)
+eq("nine write-ups of one announcement become one cluster",
+   [len(c) for c in clustered], [len(BRICS), 1, 1])
+eq("the cluster is represented by the first (best-scoring) member",
+   clustered[0][0]["dedup_key"], "b0")
+eq("unrelated headlines are left alone",
+   [c[0]["dedup_key"] for c in clustered[1:]], ["o0", "o1"])
+
+# A short headline must not cluster on one accidental shared word.
+shorts = [row("Claude 4 ships", "s1"), row("Gemini 4 ships", "s2")]
+eq("two short headlines sharing one word stay apart",
+   [len(c) for c in notify.cluster(shorts)], [1, 1])
+
+# --- pick: a clustered event is sent once, and stays sent -------------------
+
+EVENT = {"AI": mixed}
+sent_all = notify.pick(EVENT, ["AI"], None)
+eq("the group sends one message per event, not per write-up",
+   [r["dedup_key"] for _, rs in sent_all for r in rs], ["b0", "o0", "o1"])
+
+# The rule that matters: eligibility is the whole cluster, not its
+# representative. `b0` has gone out, so the event is done - promoting `b1`
+# because it happens to be unsent is how one announcement became 21 messages.
+tail_unsent = {"b1", "b2", "b3", "b4", "b5", "o0", "o1"}
+eq("an event whose representative was sent does not return under a sibling",
+   [r["dedup_key"] for _, rs in notify.pick(EVENT, ["AI"], tail_unsent)
+    for r in rs], ["o0", "o1"])
+
+# And the cap counts events, because clustering runs first: at @2 the BRICS
+# cluster takes one slot rather than all six.
+eq("the cap buys events, not write-ups",
+   [r["dedup_key"] for _, rs in notify.pick(EVENT, ["AI"], None, {"AI": 2})
+    for r in rs], ["b0", "o0"])
+
+
+# --- pick: @n is the day's budget, not the cycle's -------------------------
+
+# The rows arrive best-first, so the cap is the day's top n. What makes it a
+# budget rather than a page size is that it is spent BEFORE the seen-set diff:
+# a story already sent still sits in the slice and still holds its slot, or a
+# 30-minute cycle would hand out n fresh stories every run and `@12` would mean
+# 576 a day.
+DAY = {"AI": [row("best", "d1"), row("second", "d2"), row("third", "d3"),
+               row("fourth", "d4")]}
+CAPS = {"AI": 2}
+
+capped = notify.pick(DAY, ["AI"], None, CAPS)
+eq("the cap keeps the day's top n and drops the tail",
+   [r["dedup_key"] for _, rs in capped for r in rs], ["d1", "d2"])
+
+# The whole point: d1 and d2 have been sent, so the budget is gone and the
+# unsent d3 waits rather than topping the cap up to two again.
+spent = notify.pick(DAY, ["AI"], {"d3", "d4"}, CAPS)
+eq("a story already sent still spends its slot", spent, [])
+
+# And one still inside the cap is sent exactly once more.
+partial = notify.pick(DAY, ["AI"], {"d2", "d3"}, CAPS)
+eq("only the unsent half of the slice travels",
+   [r["dedup_key"] for _, rs in partial for r in rs], ["d2"])
+
+# No cap, or a cap of 0, is unlimited - `report.max_per_group: 0` is the
+# shipped default and must not silently mute every group.
+eq("a missing cap does not truncate",
+   len(notify.pick(DAY, ["AI"], None)[0][1]), 4)
+eq("a cap of 0 means unlimited, not nothing",
+   len(notify.pick(DAY, ["AI"], None, {"AI": 0})[0][1]), 4)
+
+
 # --- one story, one message -----------------------------------------------
 
 # A group used to travel as one message with a bullet per story. It is now one

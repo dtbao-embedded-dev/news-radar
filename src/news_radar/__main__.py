@@ -571,6 +571,7 @@ def run(cfg, once=False):
     health = ops.Health()
 
     while not _stop.is_set():
+        started = time.monotonic()
         try:
             _, problems = crawl(cfg)
         except Exception as exc:  # noqa: BLE001
@@ -588,8 +589,19 @@ def run(cfg, once=False):
         if message:
             _alert(cfg, message)
 
-        log.info("next crawl in %d minute(s)", interval_s // 60)
-        if _stop.wait(interval_s):
+        # Start to start, not end to start. Waiting the whole interval after
+        # a cycle that took two minutes makes a 30-minute schedule a 32-minute
+        # one: the runs drift later all day and the day gets fewer than the
+        # config says. A cycle that overran its interval is followed at once.
+        took = time.monotonic() - started
+        wait = max(0.0, interval_s - took)
+        if wait:
+            log.info("next crawl in %.1f minute(s)", wait / 60)
+        else:
+            log.warning("the cycle took %.0fs, longer than the %d-minute "
+                        "interval; starting the next one now",
+                        took, interval_s // 60)
+        if _stop.wait(wait):
             break
 
     log.info("stopped")

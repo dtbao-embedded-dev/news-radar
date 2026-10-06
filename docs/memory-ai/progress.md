@@ -1,6 +1,6 @@
 ---
 title: Progress
-updated: 2026-09-14
+updated: 2026-10-06
 ---
 
 # Progress
@@ -8,6 +8,29 @@ updated: 2026-09-14
 > Current delivery state - what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
 
 ## What works
+
+### The cycle's waiting, cut in four places (2026-10-06, unreleased)
+
+A review of a whole cycle found it is almost all waiting on the wire - CPU
+for match + collapse + rank + cluster over 1100 real titles is ~0.25 s. Four
+fixes, each test-first: 🟢
+
+1. **One fetch schedule.** `feeds.read_sources()` sends fixed feeds and search
+   queries together, busiest free host first, and returns in plan order so
+   tie-breaks and the kept headline are unchanged. Simulated with the real
+   `Fetcher` throttle (12 feeds + 13 groups x 2 hosts, scaled to 2000 ms):
+   **~57 s -> ~28 s**, same 38 requests.
+2. **Host breaker.** Two for-good failures in a row (429/5xx/network, after
+   retries) skip that host for the rest of the cycle. Two rather than one keeps
+   the existing contract that one throttled query does not cost the other
+   groups. Bounds a throttled Google News at two stalled queries, not thirteen.
+3. **Start-to-start interval.** `run()` waits `interval - cycle time`.
+4. **Channels side by side.** One thread + one Fetcher per channel; plan and
+   mark stay on the main thread.
+
+Not yet seen on the homelab. The proofs there are the
+`fetched N raw item(s) in X s` line and the `next crawl in N.N minute(s)` line
+on the first cycles after the release.
 
 ### `@n` is the day's budget, not the cycle's (2026-09-14, unreleased)
 

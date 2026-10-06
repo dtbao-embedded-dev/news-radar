@@ -217,6 +217,143 @@ check("a fixed-feed item has no keyword group",
       all(i.keyword_group is None for i in all_items))
 
 
+# --- read_sources: the order requests go out in ---------------------------
+
+class ClockFetcher:
+    """A Fetcher on a fake clock: the per-host gap is real, the time is not.
+
+    `get()` waits out the host's interval the way `Fetcher._throttle()` does,
+    then spends `latency` on the answer, all by moving `now` - so a schedule's
+    wall time can be read off exactly instead of measured with a stopwatch.
+    """
+
+    def __init__(self, interval, latency, failing=None, bodies=None):
+        self.interval = interval
+        self.latency = latency
+        self.failing = dict(failing or {})  # url -> HttpError to raise
+        self.bodies = bodies or {}
+        self.now = 0.0
+        self.last = {}
+        self.calls = []
+
+    def ready_in(self, host):
+        last = self.last.get(host)
+        return 0.0 if last is None else max(0.0, self.interval - (self.now - last))
+
+    def get(self, url):
+        host = url.split("/")[2]
+        self.now += self.ready_in(host)
+        self.last[host] = self.now
+        self.calls.append(url)
+        self.now += self.latency
+        if url in self.failing:
+            raise self.failing[url]
+        return self.bodies.get(url, b"")
+
+
+def plan(*urls):
+    return [({"id": "s{}".format(i), "url": u}, None) for i, u in enumerate(urls)]
+
+
+def host(url):
+    return url.split("/")[2]
+
+
+GOOGLE_Q = ["https://news.google.com/rss/search?q={}".format(i) for i in range(4)]
+FIXED = ["https://hnrss.org/frontpage", "https://lobste.rs/rss",
+         "https://lwn.net/headlines/rss"]
+
+# The busiest host is the critical path: four Google queries cannot finish in
+# less than three intervals, whatever else happens. Everything else belongs in
+# the gaps between them, not queued after them.
+clock = ClockFetcher(interval=1.0, latency=0.1)
+results = mod.read_sources(clock, plan(*(FIXED + GOOGLE_Q)), fetched_at=NOW)
+eq("the busiest host goes first, and the fixed feeds fill its gaps",
+   [host(u) for u in clock.calls],
+   ["news.google.com", "hnrss.org", "lobste.rs", "lwn.net",
+    "news.google.com", "news.google.com", "news.google.com"])
+check("so the run takes the critical path and no longer",
+      abs(clock.now - 3.1) < 1e-9, repr(clock.now))
+eq("one result per planned source, in plan order",
+   len(results), len(FIXED + GOOGLE_Q))
+
+# The same plan sent in plan order would wait out every Google gap in full.
+naive = ClockFetcher(interval=1.0, latency=0.1)
+for u in FIXED + GOOGLE_Q:
+    naive.get(u)
+check("which is faster than sending the plan as written",
+      clock.now < naive.now, "{} vs {}".format(clock.now, naive.now))
+
+# A fetcher without ready_in() - the test doubles elsewhere - is treated as
+# always ready, and the busiest-host-first rule alone still interleaves.
+plain = FakeFetcher({u: b"" for u in GOOGLE_Q[:2] + FIXED[:2]})
+mod.read_sources(plain, plan(*(GOOGLE_Q[:2] + FIXED[:2])), fetched_at=NOW)
+eq("no clock: busiest host first, then plan order",
+   [host(u) for u in plain.calls],
+   ["news.google.com", "news.google.com", "hnrss.org", "lobste.rs"])
+
+clock_items = ClockFetcher(interval=1.0, latency=0.1,
+                           bodies={FIXED[2]: body("rss_lwn.xml"),
+                                   GOOGLE_Q[0]: body("rss_vnexpress.xml")})
+results = mod.read_sources(clock_items, [({"id": "lwn", "url": FIXED[2]}, None),
+                                         ({"id": "gn", "url": GOOGLE_Q[0]}, "ESP32")],
+                           fetched_at=NOW)
+eq("results come back in plan order, not fetch order",
+   [{i.source_id for i in got} for got, _ in results], [{"lwn"}, {"gn"}])
+eq("and each carries its own keyword group",
+   [{i.keyword_group for i in got} for got, _ in results], [{None}, {"ESP32"}])
+
+
+# --- read_sources: a host that is down is asked once ----------------------
+
+# Google answering 429 is the case this exists for: every later query to it
+# would retry and wait too, up to RETRY_AFTER_MAX each, and the cycle would
+# stall past its own interval for results that are not coming.
+throttled = HttpError("HTTP 429 Too Many Requests", status=429, url=GOOGLE_Q[0])
+down = ClockFetcher(interval=1.0, latency=0.1,
+                    failing={u: throttled for u in GOOGLE_Q})
+results = mod.read_sources(down, plan(*(GOOGLE_Q + FIXED)), fetched_at=NOW)
+eq("after HOST_STRIKES failures in a row the host is not asked again",
+   [u for u in down.calls if host(u) == "news.google.com"],
+   GOOGLE_Q[:mod.HOST_STRIKES])
+eq("every other host is still asked",
+   sorted(u for u in down.calls if host(u) != "news.google.com"), sorted(FIXED))
+errors = [error for _, error in results if error]
+eq("but every skipped source is still its own error, so a dead host is visible",
+   [e[0] for e in errors], ["s0", "s1", "s2", "s3"])
+check("and the skip says which failure it is standing in for",
+      "429" in errors[3][1] and "news.google.com" in errors[3][1]
+      and "skipped" in errors[3][1], repr(errors[3]))
+
+# One 429 can be a blip, and search.py's contract is that one throttled query
+# must not cost the other groups their results.
+blip = ClockFetcher(interval=1.0, latency=0.1, failing={GOOGLE_Q[0]: throttled})
+mod.read_sources(blip, plan(*GOOGLE_Q), fetched_at=NOW)
+eq("a single failure leaves the host in the plan", blip.calls, GOOGLE_Q)
+
+# The strikes must be consecutive: an answer in between is the host working.
+flaky = ClockFetcher(interval=1.0, latency=0.1,
+                     failing={GOOGLE_Q[0]: throttled, GOOGLE_Q[2]: throttled})
+mod.read_sources(flaky, plan(*GOOGLE_Q), fetched_at=NOW)
+eq("failures separated by a success never add up", flaky.calls, GOOGLE_Q)
+
+# A network failure is the same class - DNS gone, connection refused, timeout -
+# and the fetcher reports it with no status.
+dns = HttpError("URLError: Name or service not known", url=GOOGLE_Q[0])
+gone = ClockFetcher(interval=1.0, latency=0.1, failing={u: dns for u in GOOGLE_Q})
+mod.read_sources(gone, plan(*GOOGLE_Q), fetched_at=NOW)
+eq("a network failure takes the host out too",
+   gone.calls, GOOGLE_Q[:mod.HOST_STRIKES])
+
+# A 403 or a 404 is a verdict on one url, not on the host: Reddit refuses one
+# path and serves the next, and GitHub 404s a renamed repo and nothing else.
+refused = HttpError("HTTP 404 Not Found", status=404, url=GOOGLE_Q[0])
+picky = ClockFetcher(interval=1.0, latency=0.1,
+                     failing={u: refused for u in GOOGLE_Q})
+mod.read_sources(picky, plan(*GOOGLE_Q), fetched_at=NOW)
+eq("a non-retryable status never takes the host out", picky.calls, GOOGLE_Q)
+
+
 # --------------------------------------------------------------------------
 
 if FAILURES:

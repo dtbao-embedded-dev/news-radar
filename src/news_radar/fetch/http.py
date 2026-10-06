@@ -87,13 +87,23 @@ class Fetcher:
         different hosts and must not queue behind each other, while the fixed
         Reddit feed and the Reddit search are the same host and must.
         """
-        last = self._last_request.get(host)
-        if last is not None:
-            wait = self.interval_s - (time.monotonic() - last)
-            if wait > 0:
-                log.debug("throttle: waiting %.2fs for %s", wait, host)
-                time.sleep(wait)
+        wait = self.ready_in(host)
+        if wait > 0:
+            log.debug("throttle: waiting %.2fs for %s", wait, host)
+            time.sleep(wait)
         self._last_request[host] = time.monotonic()
+
+    def ready_in(self, host):
+        """Seconds until this host may be asked again; `0.0` means now.
+
+        The throttle's own arithmetic, asked without sleeping. `feeds.read_sources()`
+        reads it to send whichever host is free rather than queue behind the
+        one that is not.
+        """
+        last = self._last_request.get(host)
+        if last is None:
+            return 0.0
+        return max(0.0, self.interval_s - (time.monotonic() - last))
 
     def get(self, url):
         """Fetch one URL. Returns the body as bytes, or raises HttpError."""

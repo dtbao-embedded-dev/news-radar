@@ -3,7 +3,7 @@ title: Crawl CLI - python -m news_radar
 category: interface
 purpose: The command-line contract of the crawl service itself, its flags, its exit codes, and how it behaves as a container process.
 status: active
-updated: 2026-09-07
+updated: 2026-10-06
 source: src/news_radar/__main__.py, src/news_radar/ops.py, src/news_radar/config.py, src/news_radar/fetch/, src/news_radar/store.py, src/news_radar/render.py, Dockerfile
 confidence: confirmed
 keywords: python -m news_radar, heartbeat, problems, ops.Health, alert, --once, --check, --config, --debug, config drift, config-templates, missing_keys, template_path, entrypoint, schedule loop, SIGTERM, exit codes, crawl, report.html, render.remove, site_check_url
@@ -68,6 +68,12 @@ hunts nothing and reports to nobody looks like success. See [[config-and-env]].
 `time.sleep`, and `SIGTERM`/`SIGINT` set it. `docker stop` allows 10 seconds
 before `SIGKILL`; a plain sleep of `interval_minutes` would be killed every time.
 Measured: `docker stop` returns in under a second mid-interval.
+
+**The interval is start to start.** The loop waits `interval - (time the
+cycle took)`, logging `next crawl in N.N minute(s)`. Waiting the whole interval
+after the cycle made a 30-minute schedule drift later by the cycle's own length
+every run, and gave the day fewer cycles than configured. A cycle that overran
+its interval logs a WARNING and the next one starts at once. 🟢
 
 **One bad cycle does not end the service.** `crawl()` is called inside a
 `try/except`; a traceback is logged and the next cycle runs. Letting it escape

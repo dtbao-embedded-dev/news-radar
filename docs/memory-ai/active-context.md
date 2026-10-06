@@ -1,6 +1,6 @@
 ---
 title: Active Context
-updated: 2026-09-14
+updated: 2026-10-06
 ---
 
 # Active Context
@@ -8,6 +8,13 @@ updated: 2026-09-14
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**Cycle waiting cut in four places, unreleased after v0.2.11 (2026-10-06).**
+One host-aware fetch schedule for fixed feeds + searches (~57 s -> ~28 s
+simulated), a two-strike host breaker, a start-to-start schedule interval, and
+Telegram/Discord sent side by side. Item order downstream is unchanged. Next:
+cut a release and compare the `fetched ... in X s` and `next crawl in` lines on
+the homelab against the pre-change cycles. See [[progress]].
 
 **Two days of the live store read for duplicates, three fixes, unreleased after
 v0.2.10 (2026-09-14).** The question was "are titles duplicated". They were not -
@@ -484,7 +491,7 @@ starts when this branch merges.
   per destination, `_story()` gains `target="_blank"`), `notify/__init__.py`
   (`stamp()`, `TIME_FMT`, `NO_TIME`, `UTC`), `notify/telegram.py` and
   `notify/discord.py` (`_line()`, `build()`, `send()` all take `tz`),
-  `__main__.py` (`_rows_to_send()`, `_send_channel()` and both `SENDERS`
+  `__main__.py` (`_rows_to_send()`, `_plan_channel()`/`_record_channel()` and both `SENDERS`
   wrappers take `tz`; `_notify()` resolves it once), `config.yaml.example`, and
   `tests/test_render.py`, `test_notify.py`, `test_config.py`.
 - **Two files that are identical are two files that cannot both be right.**

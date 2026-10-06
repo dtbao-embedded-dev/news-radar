@@ -9,7 +9,7 @@ updated: 2026-10-06
 
 ## What works
 
-### The cycle's waiting, cut in four places (2026-10-06, unreleased)
+### The cycle's waiting, cut in four places (2026-10-06, v0.2.12, live)
 
 A review of a whole cycle found it is almost all waiting on the wire - CPU
 for match + collapse + rank + cluster over 1100 real titles is ~0.25 s. Four
@@ -28,9 +28,17 @@ fixes, each test-first: 🟢
 4. **Channels side by side.** One thread + one Fetcher per channel; plan and
    mark stay on the main thread.
 
-Not yet seen on the homelab. The proofs there are the
-`fetched N raw item(s) in X s` line and the `next crawl in N.N minute(s)` line
-on the first cycles after the release.
+**Live on the homelab since 2026-10-06 15:48 (v0.2.12, pulled by hand).** The
+last two cycles on v0.2.11 logged `fetched 3091 raw item(s) in 70.8s` and
+`3090 ... in 60.5s`; the first on v0.2.12 logged `fetched 3088 raw item(s) in
+35.1s, 0 source(s) failed` - the same items in roughly half the time. Telegram
+and Discord logged their sends 7 ms apart, and the loop logged
+`next crawl in 29.2 minute(s)` after a 48 s cycle. 🟢
+
+CI note: the first `Test` run on `main` failed on a wall-clock bound in
+`tests/test_main.py` (0.95 s against 0.55 s on a loaded runner) while the
+overlap check passed. Test-only; fixed on `release/v0.2` in `a652271` and
+`c2289a0`, and `main` goes green with the next release.
 
 ### `@n` is the day's budget, not the cycle's (2026-09-14, unreleased)
 

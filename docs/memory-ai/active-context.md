@@ -9,12 +9,14 @@ updated: 2026-10-06
 
 ## Current focus
 
-**Cycle waiting cut in four places, unreleased after v0.2.11 (2026-10-06).**
-One host-aware fetch schedule for fixed feeds + searches (~57 s -> ~28 s
-simulated), a two-strike host breaker, a start-to-start schedule interval, and
-Telegram/Discord sent side by side. Item order downstream is unchanged. Next:
-cut a release and compare the `fetched ... in X s` and `next crawl in` lines on
-the homelab against the pre-change cycles. See [[progress]].
+**Cycle waiting cut in four places - v0.2.12, live on the homelab
+(2026-10-06 15:48).** One host-aware fetch schedule for fixed feeds + searches,
+a two-strike host breaker, a start-to-start schedule interval, and
+Telegram/Discord sent side by side. Measured live: the fetch went from 60-71 s
+on v0.2.11 to **35.1 s** for the same ~3090 items. `main`'s CI is red on a
+test-only timing flake fixed after the tag; it clears with the next release.
+Still to watch: a `failed N request(s) in a row ... skipped` warning, which is
+the breaker tripping. See [[progress]].
 
 **Two days of the live store read for duplicates, three fixes, unreleased after
 v0.2.10 (2026-09-14).** The question was "are titles duplicated". They were not -

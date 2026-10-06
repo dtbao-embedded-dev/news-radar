@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.2.12 - 2026-10-06
+
 ### Changed
 
 - The fixed feeds and the search queries are fetched as one schedule that

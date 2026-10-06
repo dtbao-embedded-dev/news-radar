@@ -361,8 +361,12 @@ def _rows_to_send(cfg, conn, run_id, fetched_at, tz):
     return store.run_matches(conn, run_id)
 
 
-def _send_channel(conn, cfg, fetcher, name, rows, labels, caps, now, tz):
-    """One channel: diff, send, and mark only what was accepted."""
+def _plan_channel(conn, cfg, name, rows, labels, caps):
+    """One channel's message plan: the seen-set diff, then `notify.pick()`.
+
+    On the calling thread, because it reads the store and a SQLite connection
+    belongs to the thread that opened it.
+    """
     keys = None
     if cfg.get("report.mode") != "current":
         # `current` re-sends the run's whole shortlist by design. The other two
@@ -371,13 +375,42 @@ def _send_channel(conn, cfg, fetcher, name, rows, labels, caps, now, tz):
         every = [row["dedup_key"] for label in labels
                  for row in rows.get(label) or []]
         keys = set(store.unreported(conn, every, name))
+    return notify.pick(rows, labels, keys, caps)
 
-    groups = notify.pick(rows, labels, keys, caps)
-    if not groups:
-        log.info("  %-8s nothing new to send", name)
-        return
 
-    result = SENDERS[name](fetcher, groups, os.environ, tz)
+def _send_side_by_side(cfg, plans, tz):
+    """`{channel: groups}` -> `{channel: SendResult | Exception}`, all sent at once.
+
+    One thread and one Fetcher per channel. Telegram and Discord are two hosts
+    with two rate limits, and `NOTIFY_INTERVAL_MS` is a gap *within* one
+    channel; sending them one after the other made a busy cycle sit through
+    every Telegram gap and then every Discord gap. Side by side it costs the
+    slower channel's time, and each channel still keeps its own gap.
+
+    A sender's exception is caught on its own thread and handed back, so one
+    channel raising can neither stop the other nor be lost.
+    """
+    outcomes = {}
+
+    def send(name, groups):
+        try:
+            fetcher = _fetcher(cfg, interval_ms=notify.NOTIFY_INTERVAL_MS)
+            outcomes[name] = SENDERS[name](fetcher, groups, os.environ, tz)
+        except Exception as exc:  # noqa: BLE001 - handed back, logged by the caller
+            outcomes[name] = exc
+
+    threads = [threading.Thread(target=send, args=(name, groups),
+                                name="notify-" + name)
+               for name, groups in plans.items()]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return outcomes
+
+
+def _record_channel(conn, name, result, now):
+    """Mark what one channel accepted, and say what it did."""
     if result.keys:
         # Only now, and only what was accepted. A crash between the send and
         # this line re-sends next cycle - a duplicate is the acceptable
@@ -398,17 +431,17 @@ def _notify(cfg, run_id, labels, caps, fetched_at):
     must leave the *other* channel still attempted, so it cannot be allowed to
     unwind the loop.
 
-    Its **own** Fetcher, not the crawl's. A story is its own message now, so a
-    busy cycle posts twenty in a row, and `advanced.request_interval_ms` is a
-    number chosen for feeds - two seconds is over Telegram's ~20-a-minute group
-    limit, and a 429 ends the channel for the cycle.
+    The channels are planned and marked here, on this thread, and **sent side
+    by side** - see `_send_side_by_side()`. Each gets its own Fetcher, not the
+    crawl's: a story is its own message now, so a busy cycle posts twenty in a
+    row, and `advanced.request_interval_ms` is a number chosen for feeds - two
+    seconds is over Telegram's ~20-a-minute group limit, and a 429 ends the
+    channel for the cycle.
     """
     channels = [c for c in cfg.enabled_channels() if c in SENDERS]
     if not channels:
         log.info("no notification channel is enabled, nothing is sent")
         return
-
-    fetcher = _fetcher(cfg, interval_ms=notify.NOTIFY_INTERVAL_MS)
 
     log.info("notifying %d channel(s) in %s mode", len(channels),
              cfg.get("report.mode"))
@@ -420,10 +453,27 @@ def _notify(cfg, run_id, labels, caps, fetched_at):
     try:
         conn = store.open_db(cfg.get("storage.data_dir", "output"))
         rows = _rows_to_send(cfg, conn, run_id, fetched_at, tz)
+
+        plans = {}
         for name in channels:
             try:
-                _send_channel(conn, cfg, fetcher, name, rows, labels, caps,
-                              fetched_at, tz)
+                groups = _plan_channel(conn, cfg, name, rows, labels, caps)
+            except Exception:
+                log.exception("channel %s failed; the page and the other "
+                              "channels are unaffected", name)
+                continue
+            if groups:
+                plans[name] = groups
+            else:
+                log.info("  %-8s nothing new to send", name)
+
+        outcomes = _send_side_by_side(cfg, plans, tz)
+        for name in plans:
+            outcome = outcomes.get(name)
+            try:
+                if isinstance(outcome, Exception):
+                    raise outcome
+                _record_channel(conn, name, outcome, fetched_at)
             except Exception:
                 log.exception("channel %s failed; the page and the other "
                               "channels are unaffected", name)

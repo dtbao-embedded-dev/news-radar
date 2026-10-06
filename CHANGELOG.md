@@ -16,6 +16,25 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Changed
+
+- The fixed feeds and the search queries are fetched as one schedule that
+  sends the busiest free host next. The per-host `request_interval_ms` gap was
+  being slept through before every Google News query, because all thirteen were
+  queued back to back after the fixed feeds; now the other hosts' requests fill
+  it. Same 38 requests, same items in the same order, and the fetch takes ~28 s
+  instead of ~57 s at the shipped 2000 ms.
+- A host that fails twice in a row after its retries (429, 5xx, timeout, DNS)
+  is skipped for the rest of the cycle, instead of every remaining query to it
+  retrying and waiting up to 60 s apiece. Each skipped source is still reported
+  as failed.
+- The schedule interval is measured start to start. It used to begin after the
+  cycle finished, so a 30-minute schedule ran every 30 minutes plus the length
+  of a cycle and drifted later all day.
+- Telegram and Discord are sent side by side instead of one after the other,
+  each keeping its own 3.5 s gap, so a busy cycle's notifications take the
+  slower channel's time instead of the sum of both.
+
 ## v0.2.11 - 2026-09-14
 
 ### Fixed

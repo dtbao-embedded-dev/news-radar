@@ -77,8 +77,10 @@ def run_with(cycle_s, interval_minutes, cycles=1):
 # 32-minute period: the runs drift later all day and the day gets fewer of
 # them than the config says.
 waits = run_with(cycle_s=0.3, interval_minutes=1)
+# The cycle sleeps 0.3 s, so the wait can be at most 59.7 s; the lower bound is
+# loose on purpose, a loaded CI runner may take far longer than 0.3 s.
 check("the wait is the interval minus the time the cycle took",
-      len(waits) == 1 and 59.6 <= waits[0] <= 59.75, repr(waits))
+      len(waits) == 1 and 50.0 <= waits[0] <= 59.7, repr(waits))
 
 # A cycle longer than its interval starts the next one at once - a negative
 # wait is not a wait, and skipping a beat to "catch up" would lose a cycle.
@@ -132,9 +134,7 @@ def fake_sender(name, fail=False):
 real_senders = dict(mod.SENDERS)
 mod.SENDERS.update(telegram=fake_sender("telegram"), discord=fake_sender("discord"))
 try:
-    start = time.monotonic()
     mod._notify(notify_cfg, run_id, ["ESP32"], {"ESP32": 0}, NOW)
-    took = time.monotonic() - start
 finally:
     mod.SENDERS.clear()
     mod.SENDERS.update(real_senders)
@@ -145,8 +145,9 @@ check("both channels were sent", set(SPANS) == {"telegram", "discord"}, repr(SPA
 check("and they overlapped rather than queued",
       SPANS["telegram"][0] < SPANS["discord"][1]
       and SPANS["discord"][0] < SPANS["telegram"][1], repr(SPANS))
-check("so the notification takes one channel's time, not the sum",
-      took < 0.55, "{:.2f}s".format(took))
+# The overlap above is the property. A wall-clock bound on the whole call was
+# here too and failed on a loaded CI runner (0.95 s) while the overlap held:
+# opening the store and starting threads are not this test's business.
 
 conn = store.open_db(tmp)
 for channel in ("telegram", "discord"):

@@ -162,6 +162,99 @@ eq("the second group still gets its items", len(items2), 2)
 eq("and the first group's failure is its own error", len(errors2), 1)
 
 
+# --- fetch order: interleaved by host, results in plan order --------------
+
+class ClockFetcher(FakeFetcher):
+    """FakeFetcher with a fake clock behind a per-host gap of 1.0 s."""
+
+    def __init__(self, bodies=None, failing=()):
+        super().__init__(bodies or {}, failing)
+        self.now = 0.0
+        self.last = {}
+
+    def ready_in(self, host_name):
+        last = self.last.get(host_name)
+        return 0.0 if last is None else max(0.0, 1.0 - (self.now - last))
+
+    def get(self, url):
+        self.now += self.ready_in(url.split("/")[2])
+        self.last[url.split("/")[2]] = self.now
+        self.now += 0.1
+        return super().get(url)
+
+
+def host(url):
+    return url.split("/")[2]
+
+
+# Template-major, every request after the first queues a full interval behind
+# the one before it on the same host. Interleaved, each host's gap is spent
+# waiting on the other host's answer instead.
+three = [group("ESP32"), group("RTOS"), group("CVE")]
+fetcher3 = FakeFetcher({})
+mod.read_search_feeds(fetcher3, cfgmod.Config({"search_templates": [GOOGLE, ALGOLIA]}),
+                      three, fetched_at=NOW)
+eq("two hosts alternate request by request",
+   [host(u) for u in fetcher3.calls],
+   ["news.google.com", "hn.algolia.com"] * 3)
+
+# Two templates on one host are one lane: the throttle is per hostname, so
+# alternating between them would gain nothing and is not attempted.
+GOOGLE_EN = dict(GOOGLE, id="google_news_en",
+                 url="https://news.google.com/rss/search?q={kw}&hl=en")
+fetcher4 = ClockFetcher()
+mod.read_search_feeds(
+    fetcher4, cfgmod.Config({"search_templates": [GOOGLE, GOOGLE_EN, ALGOLIA]}),
+    [group("ESP32"), group("RTOS")], fetched_at=NOW)
+eq("a shared host is one lane, and the other host still interleaves with it",
+   [host(u) for u in fetcher4.calls],
+   ["news.google.com", "hn.algolia.com", "news.google.com", "hn.algolia.com",
+    "news.google.com", "news.google.com"])
+eq("and every planned url is still fetched exactly once",
+   sorted(fetcher4.calls),
+   sorted(u for u, _, _ in mod.build_urls([group("ESP32"), group("RTOS")],
+                                          [GOOGLE, GOOGLE_EN, ALGOLIA])))
+
+# The fetch order is a transport detail. What comes back must not depend on
+# it: rank sorts stably and collapse keeps the first copy's title, so a
+# reordered item list would change which headline ships.
+ALGOLIA_RTOS = "https://hn.algolia.com/api/v1/search?query=RTOS"
+GOOGLE_RTOS = "https://news.google.com/rss/search?q=RTOS&hl=vi&gl=VN&ceid=VN:vi"
+algolia_body = (FIXTURES / "hn_algolia.json").read_bytes()
+fetcher5 = FakeFetcher({ALGOLIA_URL: algolia_body, ALGOLIA_RTOS: algolia_body,
+                        GOOGLE_URL: (FIXTURES / "rss_lwn.xml").read_bytes()},
+                       failing=[GOOGLE_RTOS])
+items5, errors5 = mod.read_search_feeds(
+    fetcher5, cfgmod.Config({"search_templates": [GOOGLE, ALGOLIA]}),
+    [group("ESP32"), group("RTOS")], fetched_at=NOW)
+eq("items come back template-major, as planned, not as fetched",
+   [(i.source_id, i.keyword_group) for i in items5],
+   [("google_news", "ESP32")] * (len(items5) - 4)
+   + [("hn_algolia", "ESP32")] * 2 + [("hn_algolia", "RTOS")] * 2)
+check("the google template answered at all", len(items5) > 4, repr(len(items5)))
+eq("and the failure is still reported", [e[0] for e in errors5], ["google_news"])
+
+
+# --- read_all_sources: fixed feeds and searches on one schedule ------------
+
+LWN = "https://lwn.net/headlines/rss"
+both_cfg = cfgmod.Config({
+    "feeds": [{"id": "lwn", "url": LWN, "enabled": True}],
+    "search_templates": [GOOGLE]})
+fetcher6 = ClockFetcher({LWN: (FIXTURES / "rss_lwn.xml").read_bytes(),
+                         GOOGLE_URL: (FIXTURES / "rss_vnexpress.xml").read_bytes()})
+(feed6, feed_err6), (search6, search_err6) = mod.read_all_sources(
+    fetcher6, both_cfg, [group("ESP32"), group("RTOS")], fetched_at=NOW)
+eq("the fixed feed is sent inside the search host's gap, not before it",
+   [host(u) for u in fetcher6.calls],
+   ["news.google.com", "lwn.net", "news.google.com"])
+eq("the fixed half comes back as the fixed half",
+   ({i.source_id for i in feed6}, feed_err6), ({"lwn"}, []))
+check("and the search half as the search half",
+      bool(search6) and {i.source_id for i in search6} == {"google_news"}
+      and search_err6 == [], repr((len(search6), search_err6)))
+
+
 # --------------------------------------------------------------------------
 
 if FAILURES:

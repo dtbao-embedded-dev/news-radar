@@ -28,9 +28,8 @@ from .config import (
     missing_keys,
     template_path,
 )
-from .fetch.feeds import read_fixed_feeds
 from .fetch.http import Fetcher
-from .fetch.search import read_search_feeds
+from .fetch.search import read_all_sources
 from .filter import select
 from .keywords import KeywordError, parse as parse_keywords
 from .rank import collapse, rank_groups
@@ -481,8 +480,9 @@ def crawl(cfg):
         problems.append("the keyword file is unusable, so every search feed "
                         "was skipped: {}".format(exc))
 
-    feed_items, feed_errors = read_fixed_feeds(fetcher, cfg, fetched_at=fetched_at)
-    search_items, search_errors = read_search_feeds(
+    # One plan for both halves: the fixed feeds are sent inside the search
+    # hosts' gaps rather than in a phase of their own before them.
+    (feed_items, feed_errors), (search_items, search_errors) = read_all_sources(
         fetcher, cfg, groups, fetched_at=fetched_at)
 
     items = feed_items + search_items

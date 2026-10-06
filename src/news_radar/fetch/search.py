@@ -9,6 +9,13 @@ Cost is `len(groups) x len(enabled templates)` requests per run - eight feeds,
 six groups and three templates is 26 requests, not eight. Worth knowing before
 enabling a fourth.
 
+Wall time is a separate number from the request count. The Fetcher spaces two
+requests to one host by `request_interval_ms`, so `read_all_sources()` sends
+the fixed feeds and the searches as one plan through `feeds.read_sources()`:
+the busiest host goes whenever it is free and every other request fills its
+gaps. Thirteen groups over two hosts went from ~50 s to ~25 s at the shipped
+2000 ms for the same 26 requests, and the fixed feeds now ride inside that.
+
 Contract: docs/memory-ai/data/news-sources.md (search feeds),
 docs/memory-ai/behavior/news-search.md (stage 1)
 """
@@ -18,9 +25,10 @@ from __future__ import annotations
 import logging
 from urllib.parse import quote_plus
 
-from .feeds import read_source
+from .feeds import collect, fixed_plan, read_sources
 
-__all__ = ["build_urls", "read_search_feeds", "KW_PLACEHOLDER"]
+__all__ = ["build_urls", "search_plan", "read_search_feeds",
+           "read_all_sources", "KW_PLACEHOLDER"]
 
 log = logging.getLogger("news_radar.fetch.search")
 
@@ -63,27 +71,43 @@ def build_urls(groups, templates):
     return built
 
 
+def search_plan(groups, cfg):
+    """Every enabled template x group as a `feeds.read_sources()` plan entry.
+
+    The source is tagged with the template id, and the entry with the group's
+    label as its keyword group, so the report can say why a story was picked
+    up. Template-major, as `build_urls()` lays it out - which is the order the
+    items come back in, whatever order they were fetched in.
+    """
+    plan = build_urls(groups, cfg.enabled_search_templates())
+    log.debug("search plan: %d request(s) from %d group(s)", len(plan), len(groups))
+    return [({"id": template.get("id"), "url": url,
+              "format": template.get("format")}, group.label)
+            for url, template, group in plan]
+
+
 def read_search_feeds(fetcher, cfg, groups, fetched_at=None):
     """Every enabled template queried with every group. Returns (items, errors).
 
-    Items are tagged with the template id as their source and the group's label
-    as their keyword group, so the report can say why a story was picked up.
-    They are still matched normally in P2: the engine's idea of relevance does
-    not get a free pass into the report.
+    Search items are still matched normally in P2: the engine's idea of
+    relevance does not get a free pass into the report. Errors are per
+    (template, group), not per template: one throttled query must not cost the
+    other nineteen groups their results.
     """
-    items = []
-    errors = []
-    plan = build_urls(groups, cfg.enabled_search_templates())
-    log.debug("search plan: %d request(s) from %d group(s)", len(plan), len(groups))
+    return collect(read_sources(fetcher, search_plan(groups, cfg),
+                                fetched_at=fetched_at))
 
-    for url, template, group in plan:
-        source = {"id": template.get("id"), "url": url,
-                  "format": template.get("format")}
-        got, error = read_source(fetcher, source, keyword_group=group.label,
-                                 fetched_at=fetched_at)
-        items.extend(got)
-        if error:
-            # Per (template, group), not per template: one throttled query must
-            # not cost the other nineteen groups their results.
-            errors.append(error)
-    return items, errors
+
+def read_all_sources(fetcher, cfg, groups, fetched_at=None):
+    """The cycle's whole fetch. Returns `((feed_items, feed_errors), (search_items, search_errors))`.
+
+    One plan, not two calls, because the two halves share the per-host gap:
+    twelve fixed feeds on twelve hosts cost nothing extra when they are sent
+    inside the Google News gaps, and a whole extra phase when they are sent
+    before them. The halves come back apart because `crawl()` counts and logs
+    them apart.
+    """
+    fixed = fixed_plan(cfg)
+    results = read_sources(fetcher, fixed + search_plan(groups, cfg),
+                           fetched_at=fetched_at)
+    return collect(results[:len(fixed)]), collect(results[len(fixed):])

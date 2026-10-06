@@ -8,6 +8,8 @@ Layer 2. Two halves of one concern:
   that lies about its type must not silently produce nothing.
 - `read_source()` is the single place a source failure is caught. `search.py`
   calls it too, so the guard lives once instead of in every caller.
+- `read_sources()` sends a whole plan - fixed feeds and search queries alike -
+  host-interleaved, and stops asking a host once it has failed for good.
 
 Contract: docs/memory-ai/data/news-sources.md (field mapping),
 docs/memory-ai/behavior/news-search.md (stages 2 and 3)
@@ -19,12 +21,15 @@ import calendar
 import datetime as dt
 import json
 import logging
+from urllib.parse import urlsplit
 
 import feedparser
 
 from ..item import new_item
+from .http import RETRY_STATUSES, HttpError
 
-__all__ = ["parse", "read_source", "read_fixed_feeds", "FORMATS", "DEFAULT_FORMAT"]
+__all__ = ["parse", "read_source", "read_sources", "collect", "fixed_plan",
+           "read_fixed_feeds", "FORMATS", "DEFAULT_FORMAT"]
 
 log = logging.getLogger("news_radar.fetch.feeds")
 
@@ -35,6 +40,13 @@ FORMATS = ("rss", "atom", "hn_algolia_json")
 DEFAULT_FORMAT = "rss"
 
 HN_ITEM_URL = "https://news.ycombinator.com/item?id={}"
+
+# Consecutive for-good failures that take a host out of the rest of a cycle.
+# Two, not one: `search.py`'s own contract is that one throttled query must not
+# cost the other groups their results, and a single 429 can be a blip. Two in a
+# row, after the transport's retries on each, is the host saying no - and it
+# bounds a throttled Google News at two stalled queries instead of thirteen.
+HOST_STRIKES = 2
 
 
 def _utc(struct_time):
@@ -192,13 +204,113 @@ def read_source(fetcher, source, keyword_group=None, fetched_at=None):
     return items, None
 
 
-def read_fixed_feeds(fetcher, cfg, fetched_at=None):
-    """Every enabled `feeds[]` entry, fetched in order. Returns (items, errors)."""
+class _HostBreaker:
+    """The fetcher, minus every host that has already failed for good this cycle.
+
+    "For good" is the retryable class - 429, 5xx, timeout, DNS, refused - and
+    only once the transport has spent its own retries on it. Without this, a
+    Google News that answers 429 makes each of its remaining queries retry and
+    wait as well, up to `RETRY_AFTER_MAX` apiece, and the cycle stalls past its
+    own interval for results that are not coming. A 403 or a 404 is a verdict
+    on one url and leaves the host alone: Reddit refuses one path and serves
+    the next.
+
+    It takes `HOST_STRIKES` of them in a row; an answer in between resets the
+    count. A skipped request still raises, so `read_source()` records it as
+    that source's own error and a dead host stays visible in the count lines
+    and in `_dead_sources()`. Scoped to one `read_sources()` call, so the next
+    cycle asks again.
+    """
+
+    def __init__(self, fetcher):
+        self._fetcher = fetcher
+        self._strikes = {}  # hostname -> consecutive for-good failures
+        self._down = {}     # hostname -> the failure that took it out
+
+    def ready_in(self, host):
+        if host in self._down:
+            return 0.0  # costs nothing to send, so it never holds up the plan
+        ready_in = getattr(self._fetcher, "ready_in", None)
+        return ready_in(host) if ready_in else 0.0
+
+    def get(self, url):
+        host = urlsplit(url).hostname
+        if host in self._down:
+            raise HttpError("skipped: {} already failed this cycle ({})".format(
+                host, self._down[host]), url=url)
+        try:
+            body = self._fetcher.get(url)
+        except HttpError as exc:
+            if host and (exc.status is None or exc.status in RETRY_STATUSES):
+                self._strikes[host] = self._strikes.get(host, 0) + 1
+                if self._strikes[host] >= HOST_STRIKES:
+                    self._down[host] = str(exc)
+                    log.warning("%s failed %d request(s) in a row (%s); its "
+                                "remaining requests are skipped this cycle",
+                                host, self._strikes[host], exc)
+            raise
+        self._strikes.pop(host, None)
+        return body
+
+
+def _next_host(lanes, fetcher):
+    """The host to ask next: the busiest one that is free, else the soonest free.
+
+    The busiest host is the critical path - thirteen Google queries cannot end
+    sooner than twelve intervals after the first - so it goes whenever it may,
+    and every other host fills its gaps instead of queuing after it. Ties fall
+    to plan order, because `lanes` keeps insertion order.
+    """
+    waits = {host: fetcher.ready_in(host) for host in lanes}
+    free = [host for host in lanes if waits[host] <= 0]
+    if free:
+        return max(free, key=lambda host: len(lanes[host]))
+    return min(lanes, key=lambda host: waits[host])
+
+
+def read_sources(fetcher, plan, fetched_at=None):
+    """`[(source, keyword_group)]` -> `[(items, error)]`, one per entry, in plan order.
+
+    Sent in whatever order wastes least time on the per-host gap (see
+    `_next_host()`), returned in the order planned. The difference must not
+    leak: `rank_groups()` sorts stably and `collapse()` keeps the first copy's
+    title, so an item list reordered by the transport would change which
+    headline ships.
+    """
+    breaker = _HostBreaker(fetcher)
+    lanes = {}
+    for index, (source, _) in enumerate(plan):
+        host = urlsplit(source.get("url") or "").hostname
+        lanes.setdefault(host, []).append(index)
+
+    results = [None] * len(plan)
+    while lanes:
+        host = _next_host(lanes, breaker)
+        index = lanes[host].pop(0)
+        if not lanes[host]:
+            del lanes[host]
+        source, keyword_group = plan[index]
+        results[index] = read_source(breaker, source, keyword_group=keyword_group,
+                                     fetched_at=fetched_at)
+    return results
+
+
+def collect(results):
+    """`[(items, error)]` -> `(items, errors)`, flattened in the same order."""
     items = []
     errors = []
-    for source in cfg.enabled_feeds():
-        got, error = read_source(fetcher, source, fetched_at=fetched_at)
+    for got, error in results:
         items.extend(got)
         if error:
             errors.append(error)
     return items, errors
+
+
+def fixed_plan(cfg):
+    """Every enabled `feeds[]` entry as a `read_sources()` plan entry."""
+    return [(source, None) for source in cfg.enabled_feeds()]
+
+
+def read_fixed_feeds(fetcher, cfg, fetched_at=None):
+    """Every enabled `feeds[]` entry. Returns (items, errors), in config order."""
+    return collect(read_sources(fetcher, fixed_plan(cfg), fetched_at=fetched_at))

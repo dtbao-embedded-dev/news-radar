@@ -3,10 +3,10 @@ title: Fetch Layer Contracts
 category: interface
 purpose: Every public signature of the fetch layer and the two leaf modules it stands on - what each returns, what it raises, and what it deliberately does not.
 status: active
-updated: 2026-09-08
+updated: 2026-10-06
 source: src/news_radar/fetch/http.py, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py, src/news_radar/item.py, src/news_radar/keywords.py
 confidence: confirmed
-keywords: Fetcher, HttpError, post_json, Retry-After, RETRY_AFTER_MAX, parse, read_source, read_fixed_feeds, build_urls, read_search_feeds, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle
+keywords: Fetcher, HttpError, post_json, Retry-After, RETRY_AFTER_MAX, ready_in, parse, read_source, read_sources, HOST_STRIKES, host breaker, fetch schedule, collect, fixed_plan, read_fixed_feeds, build_urls, search_plan, read_search_feeds, read_all_sources, NewsItem, new_item, dedup_key, canonicalise_url, fold, strip_html, KeywordGroup, KeywordError, failure isolation, throttle
 order: 5
 ---
 
@@ -81,6 +81,9 @@ duplicate is the acceptable failure and a dropped story is not.
   host was asked. Keyed by **hostname**: `hn` and `hn_algolia` are different
   hosts and do not queue behind each other; the fixed Reddit feed and the
   Reddit search are the same host and do.
+- **`ready_in(host)`** returns the seconds until a host may be asked again
+  (`0.0` = now) - the throttle's own arithmetic, asked without sleeping.
+  `feeds.read_sources()` reads it to send whichever host is free. 🟢
 - **An empty `user_agent` raises `ValueError` at construction.** That is
   Reddit's 403 with an extra step, refused where it can still be fixed.
 - **Retried:** `408, 425, 429, 500, 502, 503, 504`, timeouts and connection
@@ -109,8 +112,34 @@ FORMATS = ("rss", "atom", "hn_algolia_json")       DEFAULT_FORMAT = "rss"
 
 parse(body, fmt, source_id, keyword_group=None, fetched_at=None) -> list[NewsItem]
 read_source(fetcher, source, keyword_group=None, fetched_at=None) -> (items, error|None)
+read_sources(fetcher, plan, fetched_at=None) -> list[(items, error|None)]
+collect(results) -> (items, errors)
+fixed_plan(cfg) -> list[(source, None)]
 read_fixed_feeds(fetcher, cfg, fetched_at=None) -> (items, errors)
+HOST_STRIKES = 2
 ```
+
+**`read_sources()` is the cycle's fetch scheduler.** `plan` is
+`[(source, keyword_group)]`; the result is one `(items, error)` per entry, **in
+plan order**, whatever order the requests went out in. 🟢
+
+- **Send order: the busiest free host, else the soonest free.** The busiest
+  host is the critical path - thirteen Google News queries cannot end sooner
+  than twelve intervals after the first - so it goes whenever `ready_in()` says
+  it may, and every other request fills its gaps. Ties fall to plan order. A
+  fetcher without `ready_in()` (test doubles) counts as always ready.
+- **Return order is plan order**, and that is load-bearing: `rank_groups()`
+  sorts stably and `collapse()` keeps the first copy's title, so a list
+  reordered by the transport would change which headline ships.
+- **A host that fails for good is not asked again that call.** "For good" is
+  the retryable class - 429, 5xx, timeout, DNS, refused - after the transport's
+  own retries, `HOST_STRIKES` (2) times **in a row**; an answer in between
+  resets the count. Two, not one, because one throttled query must not cost
+  the other groups their results. The rest of that host's sources fail at once
+  with `skipped: <host> already failed this cycle (<reason>)`, so each is still
+  its own error. A 403/404 never counts - it is a verdict on one url. Without
+  it a throttled Google News made each of its thirteen queries retry and wait
+  up to `RETRY_AFTER_MAX`, which can stall a cycle past its interval. 🟢
 
 - **Dispatch is on the declared format, never on the response content type.**
   `rss` and `atom` share a branch: feedparser normalises both into `entries[]`.
@@ -133,8 +162,17 @@ read_fixed_feeds(fetcher, cfg, fetched_at=None) -> (items, errors)
 KW_PLACEHOLDER = "{kw}"
 
 build_urls(groups, templates) -> list[(url, template, group)]
+search_plan(groups, cfg) -> list[(source, label)]
 read_search_feeds(fetcher, cfg, groups, fetched_at=None) -> (items, errors)
+read_all_sources(fetcher, cfg, groups, fetched_at=None)
+    -> ((feed_items, feed_errors), (search_items, search_errors))
 ```
+
+`read_all_sources()` is what `crawl()` calls: the fixed feeds and the search
+plan go through **one** `read_sources()` call, so the twelve fixed feeds are
+sent inside the search hosts' gaps rather than in a phase of their own, and one
+host breaker covers both halves. The halves come back apart because `crawl()`
+counts and logs them apart. 🟢
 
 - `build_urls()` is **pure**: no request is made, so the request count is known
   before the first byte goes out. It is `len(groups) x len(templates)` - seven
@@ -146,8 +184,18 @@ read_search_feeds(fetcher, cfg, groups, fetched_at=None) -> (items, errors)
   ceid=VN:vi`) survives character for character.
 - A template whose URL lost its `{kw}` contributes nothing and logs a warning -
   `config.validate()` rejects it first, this is the second line of defence.
-- Templates are iterated **outermost**, so a run's requests arrive grouped by
-  host, which is what the per-host throttle is for.
+- Templates are iterated **outermost** in the plan, and that is the order
+  `read_search_feeds()` **returns** items in - template-major, then group.
+  `rank_groups()` sorts stably and `collapse()` keeps the first copy's title,
+  so this order decides tie-breaks and which headline ships. 🟢
+- It is **not** the order requests are sent in - see `read_sources()` above.
+  Template-major sending put every Google News query back to back and waited
+  a full interval before each. Measured 2026-10-06 with the real `Fetcher`
+  throttle on a fake wire (12 fixed feeds + 13 groups x 2 hosts, 60 ms latency,
+  scaled to the shipped 2000 ms): the whole fetch went from **~57 s to ~28 s**
+  for the same 38 requests. Two templates on one hostname (`google_news` +
+  `google_news_en`) share one gap, so enabling both lengthens the critical
+  path rather than overlapping. 🟢
 - Items are tagged with the template id as `source_id` and the group's `label`
   as `keyword_group`. They are still matched normally in P2: the engine's idea
   of relevance does not get a free pass into the report.

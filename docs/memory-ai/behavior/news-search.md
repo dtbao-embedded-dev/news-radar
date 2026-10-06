@@ -3,7 +3,7 @@ title: How News Is Searched, Matched and Ranked
 category: behavior
 purpose: The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered.
 status: active
-updated: 2026-09-14
+updated: 2026-10-06
 source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py
 confidence: confirmed
 keywords: crawl, search algorithm, matching, max_age_days, fresh_enough, age cut, match_excerpt, excerpt, _haystack, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases
@@ -39,8 +39,14 @@ byte goes out.
 
 ## Stage 2 - fetch
 
-Requests are issued sequentially, grouped by host, honouring
-`advanced.request_interval_ms` **per hostname**. Every request carries the
+Requests are issued sequentially, honouring `advanced.request_interval_ms`
+**per hostname**. The fixed feeds and the search plan are **one schedule**
+(`feeds.read_sources()`): the busiest free host goes next, so its gaps are
+spent on other hosts' requests rather than slept through - about half the
+fetch's wall time on the shipped config. Items are still returned in plan
+order, so nothing downstream sees the difference. A host that fails for good
+twice in a row (429, 5xx, network) is skipped for the rest of the cycle; each
+skipped source is still reported as its own error. Every request carries the
 configured User-Agent, `advanced.request_timeout_s`, and up to
 `advanced.max_retries` retries with exponential backoff.
 

@@ -3,7 +3,7 @@ title: Notification Channels - Telegram and Discord
 category: interface
 purpose: Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send.
 status: active
-updated: 2026-09-14
+updated: 2026-10-06
 source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py
 confidence: confirmed
 keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, cluster, caps, daily cap, budget, jaccard, near-duplicate, clip, SendResult, report.mode, incremental, current, daily, seen set
@@ -233,8 +233,8 @@ parser.
 
 ## What `__main__._notify()` wires
 
-`enabled_channels()` → `open_db` → `_rows_to_send()` → per channel:
-`unreported()` → `pick()` → `send()` → `mark_reported()`.
+`enabled_channels()` → `open_db` → `_rows_to_send()` → per channel `unreported()` → `pick()` →
+all `send()`s **side by side**, a thread + Fetcher each → per channel `mark_reported()`. 🟢
 
 **Two levels of guard, both in the contract.** The outer one keeps a locked store
 or an unreadable run from costing the page, which is already written by the time

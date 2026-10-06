@@ -217,6 +217,19 @@ f5._throttle("news.google.com")
 check("a different host does not wait for the first one's interval",
       time.monotonic() - start < 0.05)
 
+# ready_in() is the throttle's own arithmetic, asked without sleeping: the
+# fetch planner reads it to send whichever host is free instead of waiting.
+f7 = mod.Fetcher(user_agent=UA, timeout_s=5, max_retries=0, interval_ms=300)
+eq("a host never asked is ready now", f7.ready_in("hn.algolia.com"), 0.0)
+f7._throttle("hn.algolia.com")
+check("a host just asked is ready only after the rest of its interval",
+      0.2 < f7.ready_in("hn.algolia.com") <= 0.3,
+      repr(f7.ready_in("hn.algolia.com")))
+eq("and another host is still ready now", f7.ready_in("news.google.com"), 0.0)
+time.sleep(0.32)
+eq("once the interval has passed it is ready again",
+   f7.ready_in("hn.algolia.com"), 0.0)
+
 start = time.monotonic()
 eq("the first request to a host is not delayed at all",
    mod.Fetcher(user_agent=UA, timeout_s=5, interval_ms=5000).get(url("/ok")),

@@ -77,10 +77,11 @@ def run_with(cycle_s, interval_minutes, cycles=1):
 # 32-minute period: the runs drift later all day and the day gets fewer of
 # them than the config says.
 waits = run_with(cycle_s=0.3, interval_minutes=1)
-# The cycle sleeps 0.3 s, so the wait can be at most 59.7 s; the lower bound is
+# The cycle sleeps 0.3 s, so the wait is about 59.7 s at most (sleep may wake a
+# few ms early on Windows, hence 59.75); the lower bound is
 # loose on purpose, a loaded CI runner may take far longer than 0.3 s.
 check("the wait is the interval minus the time the cycle took",
-      len(waits) == 1 and 50.0 <= waits[0] <= 59.7, repr(waits))
+      len(waits) == 1 and 50.0 <= waits[0] <= 59.75, repr(waits))
 
 # A cycle longer than its interval starts the next one at once - a negative
 # wait is not a wait, and skipping a beat to "catch up" would lose a cycle.

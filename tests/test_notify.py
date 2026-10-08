@@ -222,6 +222,37 @@ shorts = [row("Claude 4 ships", "s1"), row("Gemini 4 ships", "s2")]
 eq("two short headlines sharing one word stay apart",
    [len(c) for c in notify.cluster(shorts)], [1, 1])
 
+# --- cluster with vectors: what the word overlap cannot see ----------------
+
+# Real pair from 2026-10-07: one event, 0.42 Jaccard (under the 0.5 floor),
+# about 0.86 cosine under all-MiniLM-L6-v2. The words cannot join these; a
+# model that reads them can. The vectors below are hand-made stand-ins.
+PARAPHRASE = [row("Meta and Microsoft Limit Employee Use of Claude AI Tools", "p0"),
+              row("Meta and Microsoft take steps to reduce employee usage of Claude AI", "p1"),
+              row("ESP32-C3 Adblock", "p2")]
+ALIKE = {"p0": [1.0, 0.0], "p1": [0.8, 0.6], "p2": [0.0, 1.0]}   # p0.p1 = 0.8
+
+eq("without vectors a paraphrase is two events",
+   [len(c) for c in notify.cluster(PARAPHRASE)], [1, 1, 1])
+eq("a vector pair at or above the threshold is one event",
+   [len(c) for c in notify.cluster(PARAPHRASE, ALIKE, 0.75)], [2, 1])
+eq("below the threshold it is still two",
+   [len(c) for c in notify.cluster(PARAPHRASE, ALIKE, 0.85)], [1, 1, 1])
+
+# Vectors only ever add a link. A row the endpoint did not answer for falls
+# back to the words, so a half-answered batch clusters no worse than before.
+eq("the word overlap still clusters when no vector is present",
+   [len(c) for c in notify.cluster(mixed, {"b0": [1.0, 0.0]}, 0.75)],
+   [len(BRICS), 1, 1])
+eq("a row with no vector is compared on words alone",
+   [len(c) for c in notify.cluster(PARAPHRASE, {"p0": [1.0, 0.0]}, 0.75)],
+   [1, 1, 1])
+
+eq("pick() hands the vectors to cluster()",
+   [r["dedup_key"] for _, rs in notify.pick({"AI": PARAPHRASE}, ["AI"], None,
+                                            vectors=ALIKE, threshold=0.75)
+    for r in rs], ["p0", "p2"])
+
 # --- pick: a clustered event is sent once, and stays sent -------------------
 
 EVENT = {"AI": mixed}

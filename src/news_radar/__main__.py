@@ -33,7 +33,7 @@ from .fetch.search import read_all_sources
 from .filter import select
 from .keywords import KeywordError, parse as parse_keywords
 from .rank import collapse, rank_groups
-from . import notify, ops, render, store, summarize
+from . import notify, ops, render, similar, store, summarize
 from .notify import discord, telegram
 
 log = logging.getLogger("news_radar")
@@ -361,7 +361,28 @@ def _rows_to_send(cfg, conn, run_id, fetched_at, tz):
     return store.run_matches(conn, run_id)
 
 
-def _plan_channel(conn, cfg, name, rows, labels, caps):
+def _vectors(cfg, rows, labels):
+    """`{dedup_key: unit vector}` for every row about to be planned, or `{}`.
+
+    Once a cycle and shared by every channel: the clustering is the same
+    question for Telegram and Discord, and one request answers it for both.
+    Off is the shipped case and never reaches the network. Guarded for the same
+    reason `_summarize()` is - an optional feature may cost a log line, never
+    the notification.
+    """
+    if not cfg.get("similar.enabled"):
+        return {}
+    try:
+        every = [row for label in labels for row in rows.get(label) or []]
+        return similar.vectors(
+            _fetcher(cfg, cfg.get("similar.timeout_s", 30)),
+            cfg.get("similar.api_url"), cfg.get("similar.model"), every)
+    except Exception:
+        log.exception("headline vectors failed; clustering on words alone")
+        return {}
+
+
+def _plan_channel(conn, cfg, name, rows, labels, caps, vectors=None):
     """One channel's message plan: the seen-set diff, then `notify.pick()`.
 
     On the calling thread, because it reads the store and a SQLite connection
@@ -375,7 +396,8 @@ def _plan_channel(conn, cfg, name, rows, labels, caps):
         every = [row["dedup_key"] for label in labels
                  for row in rows.get(label) or []]
         keys = set(store.unreported(conn, every, name))
-    return notify.pick(rows, labels, keys, caps)
+    return notify.pick(rows, labels, keys, caps, vectors,
+                       cfg.get("similar.threshold"))
 
 
 def _send_side_by_side(cfg, plans, tz):
@@ -453,11 +475,13 @@ def _notify(cfg, run_id, labels, caps, fetched_at):
     try:
         conn = store.open_db(cfg.get("storage.data_dir", "output"))
         rows = _rows_to_send(cfg, conn, run_id, fetched_at, tz)
+        vectors = _vectors(cfg, rows, labels)
 
         plans = {}
         for name in channels:
             try:
-                groups = _plan_channel(conn, cfg, name, rows, labels, caps)
+                groups = _plan_channel(conn, cfg, name, rows, labels, caps,
+                                       vectors)
             except Exception:
                 log.exception("channel %s failed; the page and the other "
                               "channels are unaffected", name)

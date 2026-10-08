@@ -146,7 +146,12 @@ def _same_event(left, right):
             and shared / len(left | right) >= _CLUSTER_AT)
 
 
-def cluster(rows):
+def _close(left, right, threshold):
+    """Do two unit vectors describe one event? Their dot product is the cosine."""
+    return sum(a * b for a, b in zip(left, right)) >= threshold
+
+
+def cluster(rows, vectors=None, threshold=None):
     """`[row]` (best first) -> `[[row]]`, one list per event, best first.
 
     The exact-match key in [[news-item]] makes one story of one headline. It
@@ -167,29 +172,47 @@ def cluster(rows):
     at 0.45 and misses, and reaches it only through `Xi Jinping Proposes BRICS
     Open Source AI Zone at Summit`, which it meets at 0.55.
 
+    `vectors` is `{dedup_key: unit vector}` from `similar.vectors()`, and with
+    it two headlines are also one event when their cosine reaches
+    `threshold`. Vectors only ever **add** a link: a row the endpoint did not
+    answer for is compared on words alone, so an empty map - the endpoint down,
+    or the feature off - clusters exactly as the word overlap always did.
+    Measured over the 145 stories pushed on 2026-10-07, the words joined 2
+    pairs; `all-MiniLM-L6-v2` at 0.75 cut the day to 125 messages - see
+    `similar.py`.
+
     **This is a selection step, never an identity one.** Membership depends on
     what else is in the batch - two headlines that cluster this cycle may not
     next cycle, when only one of them was fetched - so it must not reach
     `dedup_key`, the store, or the page, all of which need an answer that is
     stable across runs. It changes what is *sent*, and nothing else.
     """
+    vectors = vectors or {}
+
+    def same(one, other):
+        if _same_event(one[0], other[0]):
+            return True
+        return (threshold is not None and one[1] is not None
+                and other[1] is not None and _close(one[1], other[1], threshold))
+
     clusters = []
     for row in rows:
-        words = _words(row["title"])
+        this = (_words(row["title"]), vectors.get(row["dedup_key"]))
         for known, members in clusters:
-            if any(_same_event(words, other) for other in known):
-                known.append(words)
+            if any(same(this, other) for other in known):
+                known.append(this)
                 members.append(row)
                 break
         else:
             # ponytail: O(n^2) against the rows of one group, which is the
             # day's shortlist and caps out in the low hundreds. Worth an index
             # only if a group's day ever runs to thousands.
-            clusters.append(([words], [row]))
+            clusters.append(([this], [row]))
     return [members for _, members in clusters]
 
 
-def pick(rows_by_label, labels, keys=None, caps=None):
+def pick(rows_by_label, labels, keys=None, caps=None, vectors=None,
+         threshold=None):
     """`{label: [row]}` -> `[(label, [row])]` in the keyword file's own order.
 
     Five jobs, all of which decide what a channel is even shown:
@@ -230,6 +253,9 @@ def pick(rows_by_label, labels, keys=None, caps=None):
       under the **first** group in `labels` that claims it, and the operator
       controls which that is by ordering the groups in `frequency_words.txt`.
 
+    `vectors` and `threshold` go straight to `cluster()`; absent, the word
+    overlap is the only rule, as it always was.
+
     That last job is the one place a message deliberately diverges from the
     page. The page is browsed by topic, so a story belonging to two topics
     belongs in both sections; a message is read top to bottom once, so the
@@ -246,7 +272,7 @@ def pick(rows_by_label, labels, keys=None, caps=None):
     out = []
     seen = set()
     for label in labels:
-        groups = cluster(rows_by_label.get(label) or [])
+        groups = cluster(rows_by_label.get(label) or [], vectors, threshold)
 
         cap = (caps or {}).get(label)
         if cap:

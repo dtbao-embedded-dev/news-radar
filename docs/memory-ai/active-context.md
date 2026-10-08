@@ -1,6 +1,6 @@
 ---
 title: Active Context
-updated: 2026-10-06
+updated: 2026-10-08
 ---
 
 # Active Context
@@ -9,12 +9,46 @@ updated: 2026-10-06
 
 ## Current focus
 
-**Cycle waiting cut in four places, unreleased after v0.2.11 (2026-10-06).**
-One host-aware fetch schedule for fixed feeds + searches (~57 s -> ~28 s
-simulated), a two-strike host breaker, a start-to-start schedule interval, and
-Telegram/Discord sent side by side. Item order downstream is unchanged. Next:
-cut a release and compare the `fetched ... in X s` and `next crawl in` lines on
-the homelab against the pre-change cycles. See [[progress]].
+**Headline vectors for clustering - built, unreleased, not deployed
+(2026-10-08).** `similar.py` + `similar.*` config + a compose `ollama` sidecar
+(profile `similar`, `all-minilm`). Replayed on the live store: 143 -> 125
+messages on 10-07, and Ollama on the homelab gave the same counts as the offline
+measurement. Next: `--profile similar up -d` on the homelab, set
+`similar.enabled: true` in its `config.yaml`, and watch for a `similar: no
+vectors` warning. See [[similar]].
+
+**AI KEEP/DROP screening - dry-run only, nothing built (2026-10-08).** The
+OpenRouter account is on the **50 requests/day** free tier, and the summary
+already spends 48 (one per 30-minute cycle; 10-07 logged 48 of 48 plus 429s).
+So a verdict can only ride inside the summary prompt (`<n>. KEEP|DROP
+<sentence>`), never as its own request. Dry-run over the 145 stories pushed on
+10-07: qwen3.8-27b on the DGX said DROP to 86 (funding rounds, IPOs, teen-safety
+coverage, travel plugins), and `ling-3.0-flash-sante:free` matched it **20 of
+20** on one batch in 8.7 s, with the Vietnamese sentence intact. Open
+decisions: whether a DROP hides the story from messages only (proposed) or also
+from the page, and fail-open when there is no verdict. Scripts are in the
+session scratchpad, not the repo.
+
+**No Vietnamese source ships enabled - unreleased after v0.2.12, already applied
+on the homelab (2026-10-08).** `vnexpress_sohoa` and `tinhte` joined `genk` and
+`google_news` (hl=vi) as `enabled: false`: the homelab store showed 11 of 10998
+matched stories reachable only through them. The homelab's own `config.yaml` was
+edited by hand (backup `config.yaml.bak-20261008135332`) and the crawl restarted;
+first cycle `3010 raw item(s) in 33.2s, 0 source(s) failed`. Open thread: the
+real noise is the `AI` group (6342 of 10998 matches, mostly `google_news_en`) -
+a model-based relevance filter was discussed (local `qwen3.8-27b` answered a
+4-headline RTOS yes/no test correctly in 2.7 s; Laya judged not worth it yet:
+needs fine-tuning, a separate service, and speed is not the bottleneck). See
+[[news-sources]].
+
+**Cycle waiting cut in four places - v0.2.12, live on the homelab
+(2026-10-06 15:48).** One host-aware fetch schedule for fixed feeds + searches,
+a two-strike host breaker, a start-to-start schedule interval, and
+Telegram/Discord sent side by side. Measured live: the fetch went from 60-71 s
+on v0.2.11 to **35.1 s** for the same ~3090 items. `main`'s CI is red on a
+test-only timing flake fixed after the tag; it clears with the next release.
+Still to watch: a `failed N request(s) in a row ... skipped` warning, which is
+the breaker tripping. See [[progress]].
 
 **Two days of the live store read for duplicates, three fixes, unreleased after
 v0.2.10 (2026-09-14).** The question was "are titles duplicated". They were not -

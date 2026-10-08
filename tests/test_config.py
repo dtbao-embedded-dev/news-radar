@@ -298,6 +298,43 @@ check("no page and no url is still no site check",
 
 
 # --------------------------------------------------------------------------
+# the similar section - embedding-assisted clustering
+# --------------------------------------------------------------------------
+
+# Off, like `ai`: an existing config.yaml that says nothing about `similar`
+# clusters on words alone, exactly as before.
+check("headline vectors ship off", cfg.get("similar.enabled") is False,
+      repr(cfg.get("similar.enabled")))
+check("the default endpoint is the compose sidecar",
+      cfg.get("similar.api_url") == "http://ollama:11434/v1/embeddings",
+      repr(cfg.get("similar.api_url")))
+check("the default model is the measured one",
+      cfg.get("similar.model") == "all-minilm", repr(cfg.get("similar.model")))
+check("the default threshold is the measured one",
+      cfg.get("similar.threshold") == 0.75, repr(cfg.get("similar.threshold")))
+
+for bad in ("0", "1.5", "true", "high"):
+    msg = check_raises("similar.threshold {} is refused".format(bad), cfgmod.load,
+                       write(MINIMAL + "\nsimilar:\n  threshold: {}\n".format(bad)),
+                       env=SECRETS)
+    check("the threshold message names the key", "similar.threshold" in msg, msg)
+
+msg = check_raises("a non-http embeddings url is refused", cfgmod.load,
+                   write(MINIMAL + "\nsimilar:\n  api_url: ollama:11434\n"),
+                   env=SECRETS)
+check("the url message names the key", "similar.api_url" in msg, msg)
+
+msg = check_raises("similar on with no url is refused", cfgmod.load,
+                   write(MINIMAL + '\nsimilar:\n  enabled: true\n  api_url: ""\n'),
+                   env=SECRETS)
+check("the blank url message names the key", "similar.api_url" in msg, msg)
+
+check("a threshold of exactly 1 is legal",
+      cfgmod.load(write(MINIMAL + "\nsimilar:\n  threshold: 1\n"),
+                  env=SECRETS).get("similar.threshold") == 1)
+
+
+# --------------------------------------------------------------------------
 # the ai section - P6-4
 # --------------------------------------------------------------------------
 
@@ -435,6 +472,18 @@ if example.is_file():
     check("genk ships disabled - it dates nothing, so it can never place",
           [f.get("enabled") for f in shipped.get("feeds") or []
            if f.get("id") == "genk"] == [False])
+    # Measured on the homelab store over 2026-09-06..2026-10-08: of 10998
+    # matched stories, 11 came only from a Vietnamese source, and 1 of 2727 in
+    # the last week. The entries stay, disabled, so the reason stays with them.
+    vietnamese = ("vnexpress_sohoa", "genk", "tinhte", "google_news")
+    check("no Vietnamese source ships enabled",
+          [s.get("id") for s in (shipped.get("feeds") or [])
+           + (shipped.get("search_templates") or [])
+           if s.get("id") in vietnamese and s.get("enabled")] == [])
+    check("and every one of them is still in the template",
+          sorted(s.get("id") for s in (shipped.get("feeds") or [])
+                 + (shipped.get("search_templates") or [])
+                 if s.get("id") in vietnamese) == sorted(vietnamese))
     check("gh_trending is the one feed that reads its excerpt",
           [f.get("id") for f in shipped.get("feeds") or []
            if f.get("match_excerpt")] == ["gh_trending"],

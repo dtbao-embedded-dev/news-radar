@@ -140,5 +140,36 @@ services:
       # keeps this container from running anywhere it is not wanted.
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
+  # Headline vectors for `similar.*` - a 22M-parameter sentence model on the
+  # CPU, answering /v1/embeddings to the crawl over the compose network only.
+  # Opt-in, because `similar.enabled` ships false:
+  #
+  #   docker compose --profile similar up -d
+  #
+  # The entrypoint pulls the model on every start; on a warm volume that is a
+  # no-op. Without it a fresh volume answers 404 "model not found" forever and
+  # the crawl quietly clusters on words alone, which is the failure the summary
+  # had for nine hours before anybody looked.
+  #
+  # Pinned, and not labelled for watchtower: an upgraded runtime can change
+  # the vectors, and `similar.threshold` was measured against these ones.
+  ollama:
+    image: ollama/ollama:0.34.2
+    container_name: news-radar-ollama
+    profiles: ["similar"]
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "ollama serve & pid=$$!; sleep 3; ollama pull all-minilm; wait $$pid"
+    environment:
+      TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      # One small model, kept loaded: the crawl asks once every thirty minutes,
+      # and a five-minute unload would make every request a cold load.
+      OLLAMA_KEEP_ALIVE: "-1"
+    volumes:
+      - ollama_models:/root/.ollama
+
 volumes:
   caddy_data:
+  ollama_models:

@@ -314,6 +314,28 @@ ai:
   # rather than wonder why every summary "times out".
   timeout_s: 60
 
+similar:
+  # One message per event, not per write-up. Off, the messages cluster on word
+  # overlap alone, which joined 2 pairs among the 145 stories pushed on
+  # 2026-10-07 - a day that carried seven write-ups of one ChatGPT launch. On,
+  # a small sentence model also joins headlines that say the same thing in
+  # different words: those 145 became 125 messages. Only the messages change;
+  # the page and the store still show every write-up.
+  #
+  # Needs the `ollama` sidecar: docker compose --profile similar up -d
+  # It never costs a cycle - an endpoint that fails logs one warning and the
+  # messages cluster on words, exactly as with this off.
+  enabled: false
+  # Any OpenAI-compatible /v1/embeddings works; the default is the sidecar.
+  api_url: http://ollama:11434/v1/embeddings
+  model: all-minilm
+  # Cosine at or above this joins two headlines into one event. 0.75 measured
+  # on 2026-10-06/07: 21 of 23 clusters were one event, the other two were one
+  # theme. Lower joins more and starts merging columns about the same subject;
+  # higher lets more write-ups of one event through.
+  threshold: 0.75
+  timeout_s: 30
+
 notification:
   enabled: true
   channels:

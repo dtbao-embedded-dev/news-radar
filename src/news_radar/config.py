@@ -80,6 +80,17 @@ DEFAULTS = {
         "max_per_run": 20,
         "timeout_s": 60,
     },
+    # Headline vectors for clustering. Off: an existing config.yaml that says
+    # nothing about `similar` clusters on word overlap alone, exactly as before.
+    # The url is the compose `ollama` sidecar; the model and the threshold are
+    # the pair measured over the stories pushed on 2026-10-06 and 10-07.
+    "similar": {
+        "enabled": False,
+        "api_url": "http://ollama:11434/v1/embeddings",
+        "model": "all-minilm",
+        "threshold": 0.75,
+        "timeout_s": 30,
+    },
     "notification": {
         "enabled": True,
         "channels": {
@@ -358,6 +369,25 @@ def validate(cfg, env=None):
     # visible, which is the property the fatal check was really protecting.
     if cfg.get("ai.enabled") and not api_url:
         problems.append("ai.enabled is true but ai.api_url is empty")
+
+    # A cosine, so (0, 1]. Zero would join every pair of headlines into one
+    # event and send one message a group; a bool is YAML's `on` read as 1.
+    threshold = cfg.get("similar.threshold")
+    if (not isinstance(threshold, (int, float)) or isinstance(threshold, bool)
+            or not 0 < threshold <= 1):
+        problems.append("similar.threshold must be a number in (0, 1], got "
+                        "{!r}".format(threshold))
+    timeout_s = cfg.get("similar.timeout_s")
+    if (not isinstance(timeout_s, int) or isinstance(timeout_s, bool)
+            or timeout_s < 1):
+        problems.append("similar.timeout_s must be an integer >= 1, got "
+                        "{!r}".format(timeout_s))
+    similar_url = cfg.get("similar.api_url") or ""
+    if similar_url and not _is_http_url(similar_url):
+        problems.append("similar.api_url must be an http(s) url, got "
+                        "{!r}".format(similar_url))
+    if cfg.get("similar.enabled") and not similar_url:
+        problems.append("similar.enabled is true but similar.api_url is empty")
 
     # The one rule the whole project cares most about.
     for channel in cfg.enabled_channels():

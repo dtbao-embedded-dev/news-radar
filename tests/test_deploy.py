@@ -14,6 +14,7 @@ Needs PyYAML, which is already a runtime dependency.
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 import yaml
@@ -247,6 +248,20 @@ check("no service declares a tunnel profile",
       repr({n: s.get("profiles") for n, s in services.items()}))
 check("the tunnel config file is gone",
       not (ROOT / "docker" / "cloudflared.yml").exists())
+
+# The embeddings sidecar is opt-in and reachable from the compose network only.
+# `up -d` with no profile must start exactly what it started before it existed.
+ollama = services.get("ollama", {})
+check("the ollama sidecar is behind the similar profile",
+      ollama.get("profiles") == ["similar"], repr(ollama.get("profiles")))
+check("its image is pinned to an exact version, not a moving tag",
+      re.fullmatch(r"ollama/ollama:\d+\.\d+\.\d+", str(ollama.get("image"))) is not None,
+      repr(ollama.get("image")))
+check("watchtower is not allowed to replace it",
+      labels("ollama").get(WATCH_LABEL) != "true", repr(labels("ollama")))
+check("it pulls the model the config defaults to, so a fresh volume works",
+      "all-minilm" in " ".join(str(x) for x in ollama.get("entrypoint") or []),
+      repr(ollama.get("entrypoint")))
 
 # Caddy is the only service with a published port, and it is the only way in.
 published = {n: s.get("ports") for n, s in services.items() if s.get("ports")}

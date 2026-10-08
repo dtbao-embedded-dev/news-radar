@@ -180,6 +180,83 @@ eq("and the other channel still sent and marked",
 conn.close()
 
 
+# --- _notify(): headline vectors reach the clustering ----------------------
+
+def paraphrase_store():
+    """Two write-ups of one event that share too few words to cluster."""
+    path = tempfile.mkdtemp(prefix="news-radar-main-")
+    db = store.open_db(path)
+    rid = store.start_run(db, NOW)
+    pair = [story("Meta and Microsoft limit employee use of Claude tools"),
+            story("Big tech firms take steps to reduce staff usage of an assistant")]
+    store.save(db, rid, {"ESP32": pair}, NOW)
+    db.close()
+    return path, rid, [dedup_key(s.item) for s in pair]
+
+
+def recording_sender():
+    def send(fetcher, groups, env, tz):
+        keys = tuple(row["dedup_key"] for _, rows in groups for row in rows)
+        SENT.append(keys)
+        return SendResult(sent=len(keys), keys=keys)
+    return send
+
+
+# `Config()` straight from a dict skips `load()`'s defaults, so the section is
+# spelled out in full here.
+SIMILAR_ON = dict(NOTIFY, similar={"enabled": True, "threshold": 0.75,
+                                   "api_url": "http://ollama:11434/v1/embeddings",
+                                   "model": "all-minilm"},
+                  notification={"channels": {"telegram": {"enabled": True},
+                                             "discord": {"enabled": False}}})
+ASKED = []
+
+
+def fake_vectors(answer):
+    def vectors(fetcher, api_url, model, rows):
+        ASKED.append((api_url, model, sorted(r["dedup_key"] for r in rows)))
+        return answer(rows)
+    return vectors
+
+
+real_vectors = mod.similar.vectors
+for name, answer, want in (
+        ("close vectors send one message for the event",
+         lambda rows: {r["dedup_key"]: [1.0, 0.0] for r in rows}, 1),
+        ("an endpoint that failed clusters on words alone",
+         lambda rows: {}, 2)):
+    path, rid, keys = paraphrase_store()
+    SENT, ASKED[:] = [], []
+    mod.SENDERS.update(telegram=recording_sender())
+    mod.similar.vectors = fake_vectors(answer)
+    try:
+        mod._notify(cfgmod.Config(dict(SIMILAR_ON, storage={"data_dir": path})),
+                    rid, ["ESP32"], {"ESP32": 0}, NOW)
+    finally:
+        mod.similar.vectors = real_vectors
+        mod.SENDERS.clear()
+        mod.SENDERS.update(real_senders)
+    eq(name, [len(k) for k in SENT], [want])
+    eq("the vectors are asked once a cycle, for every row: " + name,
+       ASKED, [("http://ollama:11434/v1/embeddings", "all-minilm", sorted(keys))])
+
+# Off is the shipped case, and off never asks.
+path, rid, keys = paraphrase_store()
+SENT, ASKED[:] = [], []
+mod.SENDERS.update(telegram=recording_sender())
+mod.similar.vectors = fake_vectors(lambda rows: {})
+try:
+    off = dict(SIMILAR_ON, similar={"enabled": False})
+    mod._notify(cfgmod.Config(dict(off, storage={"data_dir": path})),
+                rid, ["ESP32"], {"ESP32": 0}, NOW)
+finally:
+    mod.similar.vectors = real_vectors
+    mod.SENDERS.clear()
+    mod.SENDERS.update(real_senders)
+eq("similar off never asks for vectors", ASKED, [])
+eq("and sends both write-ups, as before", [len(k) for k in SENT], [2])
+
+
 # --------------------------------------------------------------------------
 
 if FAILURES:

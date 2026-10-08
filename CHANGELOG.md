@@ -16,6 +16,22 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Added
+
+- **similar**: messages can cluster on headline *meaning*, not only on shared
+  words. With `similar.enabled: true`, each cycle sends the day's headlines to an
+  OpenAI-compatible `/v1/embeddings` once, and two headlines whose cosine
+  reaches `similar.threshold` (default 0.75) count as one event. Replayed over
+  the stories pushed on 2026-10-06 and 10-07, that took 157 and 143 messages to
+  133 and 125. Word overlap had joined 2 pairs on 10-07, a day with seven
+  write-ups of one ChatGPT launch. Only the messages change; the page and the
+  store keep every write-up. Off by default. If the endpoint fails, the cycle
+  logs one warning and clusters on words alone, as before.
+- **docker**: an `ollama` service behind the `similar` profile
+  (`ollama/ollama:0.34.2`, model `all-minilm`, 45 MB, CPU only). It is reachable
+  over the compose network only and pulls its model on start. Embedding a whole
+  day's 529 headlines measured 3.1 s on the homelab.
+
 ### Changed
 
 - **sources**: `vnexpress_sohoa` and `tinhte` ship **disabled**, so no

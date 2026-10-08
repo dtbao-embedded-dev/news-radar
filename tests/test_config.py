@@ -435,6 +435,18 @@ if example.is_file():
     check("genk ships disabled - it dates nothing, so it can never place",
           [f.get("enabled") for f in shipped.get("feeds") or []
            if f.get("id") == "genk"] == [False])
+    # Measured on the homelab store over 2026-09-06..2026-10-08: of 10998
+    # matched stories, 11 came only from a Vietnamese source, and 1 of 2727 in
+    # the last week. The entries stay, disabled, so the reason stays with them.
+    vietnamese = ("vnexpress_sohoa", "genk", "tinhte", "google_news")
+    check("no Vietnamese source ships enabled",
+          [s.get("id") for s in (shipped.get("feeds") or [])
+           + (shipped.get("search_templates") or [])
+           if s.get("id") in vietnamese and s.get("enabled")] == [])
+    check("and every one of them is still in the template",
+          sorted(s.get("id") for s in (shipped.get("feeds") or [])
+                 + (shipped.get("search_templates") or [])
+                 if s.get("id") in vietnamese) == sorted(vietnamese))
     check("gh_trending is the one feed that reads its excerpt",
           [f.get("id") for f in shipped.get("feeds") or []
            if f.get("match_excerpt")] == ["gh_trending"],

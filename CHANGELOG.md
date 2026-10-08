@@ -16,6 +16,15 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+### Changed
+
+- **sources**: `vnexpress_sohoa` and `tinhte` ship **disabled**, so no
+  Vietnamese source ships enabled (`genk` and the `google_news` hl=vi template
+  already did not). On the homelab store over 2026-09-06..2026-10-08, 11 of
+  10998 matched stories came from a Vietnamese source and nowhere else, and 1
+  of 2727 in the last week. A deployment's own `config.yaml` is not touched by
+  an upgrade; set `enabled: false` there to follow.
+
 ## v0.2.12 - 2026-10-06
 
 ### Changed

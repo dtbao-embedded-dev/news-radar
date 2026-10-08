@@ -58,10 +58,15 @@ feeds:
     url: https://www.reddit.com/r/embedded/.rss
     enabled: true
     rank_weight: 0.8
+  # The four Vietnamese sources ship off: `vnexpress_sohoa`, `genk`, `tinhte`
+  # and the `google_news` (hl=vi) template. Measured on the homelab store over
+  # 2026-09-06..2026-10-08: of 10998 matched stories, 11 came from a Vietnamese
+  # source and nowhere else (1 of 2727 in the last week), and most of those
+  # were English re-posts from vietnam.vn. The entries stay so the reason does.
   - id: vnexpress_sohoa
     name: VnExpress So hoa
     url: https://vnexpress.net/rss/so-hoa.rss
-    enabled: true
+    enabled: false
     rank_weight: 0.7
   # Off, and the reason is the feed's own, not a judgement on the site: GenK
   # ships **no pubDate at all** - 0 of 61 entries carried one on 2026-09-07.
@@ -69,8 +74,8 @@ feeds:
   # tops out at `0.5 x 0.6 = 0.30` while the lowest group cut measured in a full
   # cycle was 0.40. It matched 11 items a cycle and placed none of them. Raising
   # rank_weight to compensate would be the guess `rank.py` refuses to make, in a
-  # different key. Turn it back on the day GenK dates its entries - the other two
-  # Vietnamese feeds do (`vnexpress_sohoa` 60/60, `tinhte` 20/20) and both place.
+  # different key. The other two Vietnamese feeds do date their entries
+  # (`vnexpress_sohoa` 60/60, `tinhte` 20/20); they are off for coverage instead.
   - id: genk
     name: GenK
     url: https://genk.vn/rss/home.rss
@@ -79,7 +84,7 @@ feeds:
   - id: tinhte
     name: Tinh te
     url: https://tinhte.vn/rss
-    enabled: true
+    enabled: false
     rank_weight: 0.6
 
   # GitHub trending, via a third-party RSS mirror - GitHub publishes no feed of
@@ -157,7 +162,7 @@ search_templates:
   # AI group, 0 for ESP32, RTOS and GitHub Trending. At eleven groups that is
   # eleven requests a cycle - every ten minutes, at the one host already known
   # to throttle - for coverage the five new model groups more than replace.
-  # `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news.
+  # See `vnexpress_sohoa` above for why no Vietnamese source ships enabled.
   - id: google_news
     name: Google News (vi)
     url: "https://news.google.com/rss/search?q={kw}+when:1d&hl=vi&gl=VN&ceid=VN:vi"
@@ -168,8 +173,8 @@ search_templates:
   # which press is searched at all. Measured on 2026-09-05 over the six shipped
   # groups, `hl=vi` returned 48 usable stories and every one of them was in the
   # AI group - the Vietnamese press does not write about ESP32, RTOS or RISC-V.
-  # `hl=en` returned 218 across all six. Keeping both costs one request per
-  # group per cycle and is what keeps Vietnamese AI coverage on the page.
+  # `hl=en` returned 218 across all six. A month later it alone carried 8938 of
+  # 10998 matched stories on the homelab, which is why `hl=vi` could go.
   - id: google_news_en
     name: Google News (en)
     url: "https://news.google.com/rss/search?q={kw}+when:1d&hl=en&gl=US&ceid=US:en"

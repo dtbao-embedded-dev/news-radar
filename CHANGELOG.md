@@ -16,6 +16,8 @@ one makes the file and the tags disagree.
 
 ## Unreleased
 
+## v0.3.0 - 2026-10-08
+
 ### Added
 
 - **similar**: messages can cluster on headline *meaning*, not only on shared

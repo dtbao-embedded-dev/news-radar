@@ -1,6 +1,6 @@
 ---
 title: Active Context
-updated: 2026-10-06
+updated: 2026-10-08
 ---
 
 # Active Context
@@ -8,6 +8,18 @@ updated: 2026-10-06
 > What is being worked on right now. Read first every session; rewrite when the focus shifts. Transient - not a durable fact.
 
 ## Current focus
+
+**No Vietnamese source ships enabled - unreleased after v0.2.12, already applied
+on the homelab (2026-10-08).** `vnexpress_sohoa` and `tinhte` joined `genk` and
+`google_news` (hl=vi) as `enabled: false`: the homelab store showed 11 of 10998
+matched stories reachable only through them. The homelab's own `config.yaml` was
+edited by hand (backup `config.yaml.bak-20261008135332`) and the crawl restarted;
+first cycle `3010 raw item(s) in 33.2s, 0 source(s) failed`. Open thread: the
+real noise is the `AI` group (6342 of 10998 matches, mostly `google_news_en`) -
+a model-based relevance filter was discussed (local `qwen3.8-27b` answered a
+4-headline RTOS yes/no test correctly in 2.7 s; Laya judged not worth it yet:
+needs fine-tuning, a separate service, and speed is not the bottleneck). See
+[[news-sources]].
 
 **Cycle waiting cut in four places - v0.2.12, live on the homelab
 (2026-10-06 15:48).** One host-aware fetch schedule for fixed feeds + searches,

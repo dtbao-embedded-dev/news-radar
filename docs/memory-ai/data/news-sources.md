@@ -3,7 +3,7 @@ title: News Sources and Search Paths
 category: data
 purpose: Every source news-radar pulls from - the fixed feed list, the keyword-driven search URL templates, and what each one returns.
 status: active
-updated: 2026-09-12
+updated: 2026-10-08
 source: config/config.yaml.example, src/news_radar/fetch/feeds.py, src/news_radar/fetch/search.py
 confidence: confirmed
 keywords: sources, feeds, RSS, Atom, match_excerpt, gh_trending, openai, huggingface, esp_idf_releases, cnx_esp32, hnrss, lobste.rs, hackaday, lwn, reddit, vnexpress, genk, tinhte, google news rss, hn algolia, search url, user-agent
@@ -29,9 +29,9 @@ one is a config edit, never a code edit.
 | `hackaday` | Hackaday | `https://hackaday.com/blog/feed/` | RSS 2.0 | en | WordPress feed; full body in `content:encoded` - ignore it, titles only |
 | `lwn` | LWN headlines | `https://lwn.net/headlines/rss` | RSS 2.0 | en | Subscriber-only items appear with a `[$]` title prefix |
 | `r_embedded` | r/embedded | `https://www.reddit.com/r/embedded/.rss` | Atom | en | **Requires a real User-Agent**; the default Python one gets HTTP 403. **Needs its own resolver**: `www.reddit.com` failed to resolve on this homelab - host *and* container - so the crawl service sets `dns: [1.1.1.1, 8.8.8.8]` in `docker-compose.yml`. `reddit.com` resolves and then 301s to the name that will not; `old.reddit.com` resolves and then serves 350 kB of HTML rather than the feed. Neither is a workaround, the resolver is |
-| `vnexpress_sohoa` | VnExpress So hoa | `https://vnexpress.net/rss/so-hoa.rss` | RSS 2.0 | vi | Description carries an `<img>` tag - strip HTML before matching |
-| `genk` | GenK | `https://genk.vn/rss/home.rss` | RSS 2.0 | vi | Mixed tech and consumer news |
-| `tinhte` | Tinh te | `https://tinhte.vn/rss` | RSS 2.0 | vi | Forum-flavoured; heavier duplicate rate than the others |
+| `vnexpress_sohoa` | VnExpress So hoa | `https://vnexpress.net/rss/so-hoa.rss` | RSS 2.0 | vi | **Ships disabled since 2026-10-08** - see *No Vietnamese source ships enabled* below. Description carries an `<img>` tag - strip HTML before matching |
+| `genk` | GenK | `https://genk.vn/rss/home.rss` | RSS 2.0 | vi | **Ships disabled**: carries no `pubDate` (0 of 61 on 2026-09-07), so it scores at most 0.30 and never placed. Mixed tech and consumer news |
+| `tinhte` | Tinh te | `https://tinhte.vn/rss` | RSS 2.0 | vi | **Ships disabled since 2026-10-08**. Forum-flavoured; heavier duplicate rate than the others |
 | `gh_trending` | GitHub Trending | `https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml` | RSS 2.0 | en | Third-party mirror - GitHub publishes no trending feed. **The only source with `match_excerpt: true`**: every entry is titled `owner/repo` and the description is the only matchable text (1 of 18 matched on the title, 10 with the excerpt). Carries **no dates at all**, so its freshness term is always 0 and `rank_weight` is its whole score. Its own `GitHub Trending` keyword group is what keeps it out of the AI group's way |
 | `openai` | OpenAI News | `https://openai.com/news/rss.xml` | RSS 2.0 | en | The full archive, ~1,170 entries every fetch, ~700 kB. A primary source: weighted 1.0 |
 | `huggingface` | Hugging Face Blog | `https://huggingface.co/blog/feed.xml` | RSS 2.0 | en | ~860 entries every fetch. **Carries no descriptions at all**, so `match_excerpt` would be inert here even if set |
@@ -51,9 +51,33 @@ group with three templates enabled produces three requests per run.
 | id | Template | Returns | Substitution |
 |----|----------|---------|--------------|
 | `google_news` | `https://news.google.com/rss/search?q={kw}+when:1d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | **Ships disabled since the keyword file reached eleven groups** (thirteen since 2026-09-12) - see the row below. `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:1d` is not optional - without it the engine answers relevance-first and returns hits aged months. It was `when:7d` until 2026-09-12: a week is not a radar, and this template was the one carrying the same story back three and four days running |
-| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. A template costs one request **per keyword group**, so at thirteen groups `hl=vi` would spend thirteen requests a cycle at the host most likely to throttle, for coverage the five model groups replace - it is switched off, and `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news |
+| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. A template costs one request **per keyword group**, so at thirteen groups `hl=vi` would spend thirteen requests a cycle at the host most likely to throttle, for coverage the five model groups replace - it is switched off. A month later `hl=en` alone carried 8938 of 10998 matched stories on the homelab |
 | `hn_algolia` | `https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story&typoTolerance=false` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID`. `search_by_date` orders chronologically, so the window needs no epoch computing; `tags=story` drops comment hits, whose title is not a headline. **`typoTolerance=false` is required, not cosmetic**: with it on, Algolia matches 41,612 stories for `RTOS` and `FreeToken` for `FreeRTOS`, and a date sort then returns the most recent of that noise - `RTOS` yielded 0 usable of 20. Off, it is strictly better on every shipped group: 97 usable a cycle instead of 77 |
 | `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement, and the same resolver requirement |
+
+## No Vietnamese source ships enabled
+
+Since 2026-10-08 all four - `vnexpress_sohoa`, `genk`, `tinhte` and the
+`google_news` (hl=vi) template - are `enabled: false` in the template, and
+`tests/test_config.py` pins both that and that the entries are still there (the
+comments carry the reason; deleting them invites re-adding the feed). Measured
+read-only on the homelab store, 2026-09-06..2026-10-08, matched stories by
+source:
+
+| Source | Matched stories |
+|--------|-----------------|
+| `google_news_en` | 8938 |
+| `hn_algolia` | 1290 |
+| `hn` | 551 |
+| `google_news` (vi) | 8 |
+| `vnexpress_sohoa` | 3 |
+| `genk`, `tinhte` | 0 |
+
+Stories reachable **only** through a Vietnamese source: 11 of 10998, 1 of 2727
+in the last week, 9 of the 11 in the `AI` group and most of them English
+re-posts from vietnam.vn. The first cycle without `vnexpress_sohoa` and `tinhte`
+fetched 3010 raw items in 33.2 s against ~3088 before. Why `tinhte` matched
+nothing in a month while enabled was not investigated. 🟢
 
 `hl` / `gl` / `ceid` on the Google template pin the result locale to Vietnamese.
 Changing them to `hl=en&gl=US&ceid=US:en` gives the English-language cut of the

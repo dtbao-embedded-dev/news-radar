@@ -3,10 +3,10 @@ title: Config Keys, Keyword File and Environment
 category: interface
 purpose: Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads.
 status: active
-updated: 2026-09-12
+updated: 2026-10-08
 source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py
 confidence: confirmed
-keywords: config.yaml, match_excerpt, max_age_days, when:1d, today only, STM32, AI Model Release, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER
+keywords: config.yaml, match_excerpt, max_age_days, when:1d, today only, STM32, AI Model Release, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, similar, similar.enabled, similar.api_url, similar.model, similar.threshold, similar.timeout_s, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER
 order: 1
 ---
 
@@ -70,6 +70,11 @@ someone chose it.
 | `ai.model` | str | `gpt-4o-mini` | Model id, passed through verbatim, and asked **first**. On an endpoint that publishes `:free` models a failure falls through to those rather than to no summary - see [[ai-summary]] |
 | `ai.max_per_run` | int | `20` | Stories one cycle will pay to summarise. The rest wait for the next cycle, so a first run against a full store does not send one enormous prompt. Must be >= 1: zero is a prompt with nothing in it, and a cap of zero would silently disable a feature `ai.enabled` says is on |
 | `ai.timeout_s` | int | `60` | Per-request timeout for the completion only. `advanced.request_timeout_s` stays the feeds' budget; fifteen seconds would time out every summary while looking like an outage. It is now **per model tried**, and the free models that answer at all measured 13 s, 66 s and 111 s on a 20-story prompt - 60 clears the fastest and cuts off the rest, so raise it if the fallback is meant to land |
+| `similar.enabled` | bool | `false` | Cluster the messages on headline meaning as well as shared words. Off clusters on words alone, as before. See [[similar]] |
+| `similar.api_url` | str | `http://ollama:11434/v1/embeddings` | Any OpenAI-compatible `/v1/embeddings`; the default is the compose `ollama` sidecar (`--profile similar`). Must be an http(s) url, and non-empty when enabled |
+| `similar.model` | str | `all-minilm` | The embedding model. `similar.threshold` was measured against this one |
+| `similar.threshold` | number | `0.75` | Cosine at or above which two headlines are one event. Must be in (0, 1]; zero would make every group one message |
+| `similar.timeout_s` | int | `30` | The embeddings request's own timeout, >= 1 |
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |

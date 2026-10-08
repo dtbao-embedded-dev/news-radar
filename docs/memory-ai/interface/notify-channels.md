@@ -3,10 +3,10 @@ title: Notification Channels - Telegram and Discord
 category: interface
 purpose: Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send.
 status: active
-updated: 2026-10-06
+updated: 2026-10-08
 source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py
 confidence: confirmed
-keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, cluster, caps, daily cap, budget, jaccard, near-duplicate, clip, SendResult, report.mode, incremental, current, daily, seen set
+keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, cluster, caps, daily cap, budget, jaccard, near-duplicate, vectors, threshold, similar, clip, SendResult, report.mode, incremental, current, daily, seen set
 order: 3
 ---
 
@@ -33,8 +33,8 @@ with nothing installed and nothing configured.
 
 | Signature | Returns | Notes |
 |-----------|---------|-------|
-| `cluster(rows)` | `[[row]]` | Near-duplicate headlines about one event, grouped. Best-first in and out; a selection step, never an identity one |
-| `pick(rows_by_label, labels, keys=None, caps=None)` | `[(label, [row])]` | Group order, one message per event, the day's `@n` budget, the seen-set diff, and one appearance per story. Empty groups dropped |
+| `cluster(rows, vectors=None, threshold=None)` | `[[row]]` | Near-duplicate headlines about one event, grouped. Best-first in and out; a selection step, never an identity one. `vectors` (`{dedup_key: unit vector}`) adds a cosine link, never removes one - see [[similar]] |
+| `pick(rows_by_label, labels, keys=None, caps=None, vectors=None, threshold=None)` | `[(label, [row])]` | Group order, one message per event, the day's `@n` budget, the seen-set diff, and one appearance per story. Empty groups dropped |
 | `messages(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. **One message per story**, header included, each text under `limit` |
 | `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
 | `stamp(moment, tz)` | `str` | `published_at` as `TIME_FMT` (`%H:%M %d/%m`), or `NO_TIME` (`--`) |

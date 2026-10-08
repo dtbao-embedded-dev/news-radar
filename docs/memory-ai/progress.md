@@ -1,6 +1,6 @@
 ---
 title: Progress
-updated: 2026-10-06
+updated: 2026-10-08
 ---
 
 # Progress
@@ -8,6 +8,18 @@ updated: 2026-10-06
 > Current delivery state - what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
 
 ## What works
+
+### Messages cluster on headline meaning (2026-10-08, unreleased)
+
+Word overlap joined 2 pairs among the 145 stories pushed on 2026-10-07, a day
+with seven write-ups of one ChatGPT launch, five of one teen-safety report and
+fourteen of DeepSeek's funding round (on 10-06). `similar.py` asks an
+OpenAI-compatible `/v1/embeddings` once a cycle, and `cluster()` also joins two
+headlines whose cosine is >= `similar.threshold`. With `all-minilm` at 0.75:
+**157 -> 133** (10-06) and **143 -> 125** (10-07). 21 of 23 clusters were one
+event and 2 were one theme. Ollama 0.34.2 on the homelab matched the offline
+fastembed numbers exactly, and embedded 529 headlines in 3.1 s. Off by default.
+Full measurement in [[similar]]. 🟢
 
 ### The cycle's waiting, cut in four places (2026-10-06, v0.2.12, live)
 

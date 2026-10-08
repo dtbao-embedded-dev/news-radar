@@ -3,7 +3,7 @@ title: Homelab Deployment
 category: architecture
 purpose: How news-radar runs on the homelab, what serves the report, and why nothing in the stack carries it off the LAN.
 status: active
-updated: 2026-09-07
+updated: 2026-10-08
 source: docker/docker-compose.yml, docker/Caddyfile, docker/.env.example, .github/workflows/image.yml, scripts/setup.py
 confidence: confirmed
 keywords: homelab, LAN only, published nowhere, no tunnel, docker compose, caddy, NEWS_RADAR_HTTP_PORT, 8088, autoupdate profile, watchtower, ghcr, image, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, WATCHTOWER_POLL_INTERVAL, schedule, volumes, restart policy
@@ -52,6 +52,7 @@ write HTML into a directory.
 | `news-radar` | `ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}`, or built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
 | `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` inside the network; published on the host as `NEWS_RADAR_HTTP_PORT`, default `8088` |
 | `watchtower` | `containrrr/watchtower:1.7.1` | Polls GHCR and recreates `news-radar` on a newer `:latest`. Behind the `autoupdate` compose profile | none |
+| `ollama` | `ollama/ollama:0.34.2` | `/v1/embeddings` for `similar.*`; pulls `all-minilm` on start into the `ollama_models` volume. Behind the `similar` profile, not watchtower-labelled (a runtime upgrade can move the vectors the threshold was measured on). Not yet started on the homelab | none - compose network only |
 
 **The crawl service carries both `image:` and `build:`, deliberately.** Compose
 builds only when the image is absent locally, so a checkout compiles what it is

@@ -7,7 +7,7 @@
 > architecture -> data -> interface -> behavior -> rule (then adr/).
 > Confidence per doc: 🟢 confirmed | 🟡 inferred (verify) | 🔴 gap (needs a human).
 
-_Generated 2026-10-06 - 20 durable doc(s)._
+_Generated 2026-10-08 - 21 durable doc(s)._
 
 ## State (transient)
 
@@ -18,6 +18,18 @@ _Generated 2026-10-06 - 20 durable doc(s)._
 > Current delivery state - what works, what's left, known issues. Update at every checkpoint (feature shipped, milestone, direction change).
 
 ## What works
+
+### Messages cluster on headline meaning (2026-10-08, unreleased)
+
+Word overlap joined 2 pairs among the 145 stories pushed on 2026-10-07, a day
+with seven write-ups of one ChatGPT launch, five of one teen-safety report and
+fourteen of DeepSeek's funding round (on 10-06). `similar.py` asks an
+OpenAI-compatible `/v1/embeddings` once a cycle, and `cluster()` also joins two
+headlines whose cosine is >= `similar.threshold`. With `all-minilm` at 0.75:
+**157 -> 133** (10-06) and **143 -> 125** (10-07). 21 of 23 clusters were one
+event and 2 were one theme. Ollama 0.34.2 on the homelab matched the offline
+fastembed numbers exactly, and embedded 529 headlines in 3.1 s. Off by default.
+Full measurement in [[similar]]. 🟢
 
 ### The cycle's waiting, cut in four places (2026-10-06, v0.2.12, live)
 
@@ -1186,6 +1198,38 @@ the ops layer and the summary - and the whole thing is reachable at
 
 ## Current focus
 
+**Headline vectors for clustering - built, unreleased, not deployed
+(2026-10-08).** `similar.py` + `similar.*` config + a compose `ollama` sidecar
+(profile `similar`, `all-minilm`). Replayed on the live store: 143 -> 125
+messages on 10-07, and Ollama on the homelab gave the same counts as the offline
+measurement. Next: `--profile similar up -d` on the homelab, set
+`similar.enabled: true` in its `config.yaml`, and watch for a `similar: no
+vectors` warning. See [[similar]].
+
+**AI KEEP/DROP screening - dry-run only, nothing built (2026-10-08).** The
+OpenRouter account is on the **50 requests/day** free tier, and the summary
+already spends 48 (one per 30-minute cycle; 10-07 logged 48 of 48 plus 429s).
+So a verdict can only ride inside the summary prompt (`<n>. KEEP|DROP
+<sentence>`), never as its own request. Dry-run over the 145 stories pushed on
+10-07: qwen3.8-27b on the DGX said DROP to 86 (funding rounds, IPOs, teen-safety
+coverage, travel plugins), and `ling-3.0-flash-sante:free` matched it **20 of
+20** on one batch in 8.7 s, with the Vietnamese sentence intact. Open
+decisions: whether a DROP hides the story from messages only (proposed) or also
+from the page, and fail-open when there is no verdict. Scripts are in the
+session scratchpad, not the repo.
+
+**No Vietnamese source ships enabled - unreleased after v0.2.12, already applied
+on the homelab (2026-10-08).** `vnexpress_sohoa` and `tinhte` joined `genk` and
+`google_news` (hl=vi) as `enabled: false`: the homelab store showed 11 of 10998
+matched stories reachable only through them. The homelab's own `config.yaml` was
+edited by hand (backup `config.yaml.bak-20261008135332`) and the crawl restarted;
+first cycle `3010 raw item(s) in 33.2s, 0 source(s) failed`. Open thread: the
+real noise is the `AI` group (6342 of 10998 matches, mostly `google_news_en`) -
+a model-based relevance filter was discussed (local `qwen3.8-27b` answered a
+4-headline RTOS yes/no test correctly in 2.7 s; Laya judged not worth it yet:
+needs fine-tuning, a separate service, and speed is not the bottleneck). See
+[[news-sources]].
+
 **Cycle waiting cut in four places - v0.2.12, live on the homelab
 (2026-10-06 15:48).** One host-aware fetch schedule for fixed feeds + searches,
 a two-strike host breaker, a start-to-start schedule interval, and
@@ -2205,7 +2249,7 @@ run unattended for longer than a cycle. `progress.md` carries the clock.
 - No mobile app; the page is responsive and that is the whole client story.
 
 ### [architecture] Module Layout and Stack  [confirmed]
-*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: active - source: src/news_radar/, Dockerfile, requirements.txt - keywords: tree, layout, layering, ops.py, summarize.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
+*`architecture/module-layout.md` - The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take. - status: active - source: src/news_radar/, Dockerfile, requirements.txt - keywords: tree, layout, layering, ops.py, summarize.py, similar.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker*
 
 # Module Layout and Stack
 
@@ -2247,6 +2291,7 @@ news-radar/
 │   ├── store.py                # DONE - SQLite persistence, seen-set, retention, backup
 │   ├── render.py               # DONE - write() + remove(); index.html + days/<date>.html
 │   ├── ops.py                  # DONE - P6: heartbeat, Health, ALERT_AFTER
+│   ├── similar.py              # headline vectors from /v1/embeddings, for notify.cluster()
 │   ├── summarize.py            # DONE - P6-4: per-topic AI summary, OpenAI wire format
 │   └── notify/                 # DONE - P4
 │       ├── __init__.py         # SendResult, pick, chunk, clip
@@ -2264,6 +2309,7 @@ news-radar/
 │   ├── test_store.py           # plain asserts, stdlib only (sqlite3)
 │   ├── test_render.py          # plain asserts, stdlib only
 │   ├── test_notify.py          # plain asserts, stdlib only, local http.server
+│   ├── test_similar.py         # plain asserts, stdlib only, local http.server
 │   ├── test_summarize.py       # plain asserts, stdlib only, local http.server
 │   ├── test_release.py         # plain asserts, stdlib only
 │   └── fixtures/               # one feed body per edge case, no network
@@ -2289,7 +2335,7 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
 | 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
 | 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
-| 5 — output | `render.py`, `notify/*`, `ops.py`, `summarize.py` | layers 3 and 4; `notify/*`, `ops.py` and `summarize.py` also layer 1 |
+| 5 — output | `render.py`, `notify/*`, `ops.py`, `summarize.py`, `similar.py` | layers 3 and 4; `notify/*`, `ops.py`, `summarize.py` and `similar.py` also layer 1 |
 
 `ops.py` sits in layer 5 for the same reason `notify/*` does and imports layer 1
 for the same reason too - the heartbeat's site check and its ping are GETs, and
@@ -2409,6 +2455,7 @@ write HTML into a directory.
 | `news-radar` | `ghcr.io/dtbao-embedded-dev/news-radar:${NEWS_RADAR_VERSION:-latest}`, or built from the repo `Dockerfile` | Crawl loop: fetch, filter, rank, store, render, notify | none |
 | `caddy` | `caddy:2-alpine` | Serves `/srv` (the `output/` volume) as static files | `8080` inside the network; published on the host as `NEWS_RADAR_HTTP_PORT`, default `8088` |
 | `watchtower` | `containrrr/watchtower:1.7.1` | Polls GHCR and recreates `news-radar` on a newer `:latest`. Behind the `autoupdate` compose profile | none |
+| `ollama` | `ollama/ollama:0.34.2` | `/v1/embeddings` for `similar.*`; pulls `all-minilm` on start into the `ollama_models` volume. Behind the `similar` profile, not watchtower-labelled (a runtime upgrade can move the vectors the threshold was measured on). Not yet started on the homelab | none - compose network only |
 
 **The crawl service carries both `image:` and `build:`, deliberately.** Compose
 builds only when the image is absent locally, so a checkout compiles what it is
@@ -2577,9 +2624,9 @@ one is a config edit, never a code edit.
 | `hackaday` | Hackaday | `https://hackaday.com/blog/feed/` | RSS 2.0 | en | WordPress feed; full body in `content:encoded` - ignore it, titles only |
 | `lwn` | LWN headlines | `https://lwn.net/headlines/rss` | RSS 2.0 | en | Subscriber-only items appear with a `[$]` title prefix |
 | `r_embedded` | r/embedded | `https://www.reddit.com/r/embedded/.rss` | Atom | en | **Requires a real User-Agent**; the default Python one gets HTTP 403. **Needs its own resolver**: `www.reddit.com` failed to resolve on this homelab - host *and* container - so the crawl service sets `dns: [1.1.1.1, 8.8.8.8]` in `docker-compose.yml`. `reddit.com` resolves and then 301s to the name that will not; `old.reddit.com` resolves and then serves 350 kB of HTML rather than the feed. Neither is a workaround, the resolver is |
-| `vnexpress_sohoa` | VnExpress So hoa | `https://vnexpress.net/rss/so-hoa.rss` | RSS 2.0 | vi | Description carries an `<img>` tag - strip HTML before matching |
-| `genk` | GenK | `https://genk.vn/rss/home.rss` | RSS 2.0 | vi | Mixed tech and consumer news |
-| `tinhte` | Tinh te | `https://tinhte.vn/rss` | RSS 2.0 | vi | Forum-flavoured; heavier duplicate rate than the others |
+| `vnexpress_sohoa` | VnExpress So hoa | `https://vnexpress.net/rss/so-hoa.rss` | RSS 2.0 | vi | **Ships disabled since 2026-10-08** - see *No Vietnamese source ships enabled* below. Description carries an `<img>` tag - strip HTML before matching |
+| `genk` | GenK | `https://genk.vn/rss/home.rss` | RSS 2.0 | vi | **Ships disabled**: carries no `pubDate` (0 of 61 on 2026-09-07), so it scores at most 0.30 and never placed. Mixed tech and consumer news |
+| `tinhte` | Tinh te | `https://tinhte.vn/rss` | RSS 2.0 | vi | **Ships disabled since 2026-10-08**. Forum-flavoured; heavier duplicate rate than the others |
 | `gh_trending` | GitHub Trending | `https://mshibanami.github.io/GitHubTrendingRSS/daily/all.xml` | RSS 2.0 | en | Third-party mirror - GitHub publishes no trending feed. **The only source with `match_excerpt: true`**: every entry is titled `owner/repo` and the description is the only matchable text (1 of 18 matched on the title, 10 with the excerpt). Carries **no dates at all**, so its freshness term is always 0 and `rank_weight` is its whole score. Its own `GitHub Trending` keyword group is what keeps it out of the AI group's way |
 | `openai` | OpenAI News | `https://openai.com/news/rss.xml` | RSS 2.0 | en | The full archive, ~1,170 entries every fetch, ~700 kB. A primary source: weighted 1.0 |
 | `huggingface` | Hugging Face Blog | `https://huggingface.co/blog/feed.xml` | RSS 2.0 | en | ~860 entries every fetch. **Carries no descriptions at all**, so `match_excerpt` would be inert here even if set |
@@ -2599,9 +2646,33 @@ group with three templates enabled produces three requests per run.
 | id | Template | Returns | Substitution |
 |----|----------|---------|--------------|
 | `google_news` | `https://news.google.com/rss/search?q={kw}+when:1d&hl=vi&gl=VN&ceid=VN:vi` | RSS 2.0 | **Ships disabled since the keyword file reached eleven groups** (thirteen since 2026-09-12) - see the row below. `{kw}` percent-encoded; a multi-word term is wrapped in `%22...%22` to search the phrase. `when:1d` is not optional - without it the engine answers relevance-first and returns hits aged months. It was `when:7d` until 2026-09-12: a week is not a radar, and this template was the one carrying the same story back three and four days running |
-| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. A template costs one request **per keyword group**, so at thirteen groups `hl=vi` would spend thirteen requests a cycle at the host most likely to throttle, for coverage the five model groups replace - it is switched off, and `vnexpress_sohoa` and `tinhte` still carry Vietnamese tech news |
+| `google_news_en` | the same url with `hl=en&gl=US&ceid=US:en` | RSS 2.0 | Not a duplicate: the locale decides which press is searched. Measured 2026-09-05 over the six shipped groups, `hl=vi` returned 48 usable stories and **all of them were the AI group** - the Vietnamese press does not cover ESP32, RTOS or RISC-V; `hl=en` returned 218 across all six. A template costs one request **per keyword group**, so at thirteen groups `hl=vi` would spend thirteen requests a cycle at the host most likely to throttle, for coverage the five model groups replace - it is switched off. A month later `hl=en` alone carried 8938 of 10998 matched stories on the homelab |
 | `hn_algolia` | `https://hn.algolia.com/api/v1/search_by_date?query={kw}&tags=story&typoTolerance=false` | **JSON**, not a feed | `{kw}` percent-encoded; read `hits[]`, fields `title`, `url`, `created_at`, `objectID`. `search_by_date` orders chronologically, so the window needs no epoch computing; `tags=story` drops comment hits, whose title is not a headline. **`typoTolerance=false` is required, not cosmetic**: with it on, Algolia matches 41,612 stories for `RTOS` and `FreeToken` for `FreeRTOS`, and a date sort then returns the most recent of that noise - `RTOS` yielded 0 usable of 20. Off, it is strictly better on every shipped group: 97 usable a cycle instead of 77 |
 | `reddit_search` | `https://www.reddit.com/search.rss?q={kw}&sort=new` | Atom | `{kw}` percent-encoded; same User-Agent requirement, and the same resolver requirement |
+
+## No Vietnamese source ships enabled
+
+Since 2026-10-08 all four - `vnexpress_sohoa`, `genk`, `tinhte` and the
+`google_news` (hl=vi) template - are `enabled: false` in the template, and
+`tests/test_config.py` pins both that and that the entries are still there (the
+comments carry the reason; deleting them invites re-adding the feed). Measured
+read-only on the homelab store, 2026-09-06..2026-10-08, matched stories by
+source:
+
+| Source | Matched stories |
+|--------|-----------------|
+| `google_news_en` | 8938 |
+| `hn_algolia` | 1290 |
+| `hn` | 551 |
+| `google_news` (vi) | 8 |
+| `vnexpress_sohoa` | 3 |
+| `genk`, `tinhte` | 0 |
+
+Stories reachable **only** through a Vietnamese source: 11 of 10998, 1 of 2727
+in the last week, 9 of the 11 in the `AI` group and most of them English
+re-posts from vietnam.vn. The first cycle without `vnexpress_sohoa` and `tinhte`
+fetched 3010 raw items in 33.2 s against ~3088 before. Why `tinhte` matched
+nothing in a month while enabled was not investigated. 🟢
 
 `hl` / `gl` / `ceid` on the Google template pin the result locale to Vietnamese.
 Changing them to `hl=en&gl=US&ceid=US:en` gives the English-language cut of the
@@ -2871,7 +2942,7 @@ Two consequences worth knowing before changing this:
   asserts the rule is on the page.
 
 ### [interface] Config Keys, Keyword File and Environment  [confirmed]
-*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, match_excerpt, max_age_days, when:1d, today only, STM32, AI Model Release, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER*
+*`interface/config-and-env.md` - Every key in config.yaml, the frequency_words.txt syntax, and every environment variable news-radar reads. - status: active - source: src/news_radar/config.py, config/config.yaml.example, config/frequency_words.txt, src/news_radar/summarize.py - keywords: config.yaml, match_excerpt, max_age_days, when:1d, today only, STM32, AI Model Release, NEWS_RADAR_HOME, NEWS_RADAR_VERSION, NEWS_RADAR_HTTP_PORT, WATCHTOWER_POLL_INTERVAL, ops, heartbeat_url, site_url, site_check_url, backup_dir, backup_keep, retention_days, ai, ai.enabled, ai.api_url, similar, similar.enabled, similar.api_url, similar.model, similar.threshold, similar.timeout_s, ai.model, max_per_run, OPENAI_API_KEY, frequency_words.txt, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK_URL, TZ, NEWS_RADAR_CONFIG, schedule.interval_minutes, report.html, rank weights, GLOBAL_FILTER*
 
 # Config Keys, Keyword File and Environment
 
@@ -2933,6 +3004,11 @@ someone chose it.
 | `ai.model` | str | `gpt-4o-mini` | Model id, passed through verbatim, and asked **first**. On an endpoint that publishes `:free` models a failure falls through to those rather than to no summary - see [[ai-summary]] |
 | `ai.max_per_run` | int | `20` | Stories one cycle will pay to summarise. The rest wait for the next cycle, so a first run against a full store does not send one enormous prompt. Must be >= 1: zero is a prompt with nothing in it, and a cap of zero would silently disable a feature `ai.enabled` says is on |
 | `ai.timeout_s` | int | `60` | Per-request timeout for the completion only. `advanced.request_timeout_s` stays the feeds' budget; fifteen seconds would time out every summary while looking like an outage. It is now **per model tried**, and the free models that answer at all measured 13 s, 66 s and 111 s on a 20-story prompt - 60 clears the fastest and cuts off the rest, so raise it if the fallback is meant to land |
+| `similar.enabled` | bool | `false` | Cluster the messages on headline meaning as well as shared words. Off clusters on words alone, as before. See [[similar]] |
+| `similar.api_url` | str | `http://ollama:11434/v1/embeddings` | Any OpenAI-compatible `/v1/embeddings`; the default is the compose `ollama` sidecar (`--profile similar`). Must be an http(s) url, and non-empty when enabled |
+| `similar.model` | str | `all-minilm` | The embedding model. `similar.threshold` was measured against this one |
+| `similar.threshold` | number | `0.75` | Cosine at or above which two headlines are one event. Must be in (0, 1]; zero would make every group one message |
+| `similar.timeout_s` | int | `30` | The embeddings request's own timeout, >= 1 |
 | `notification.enabled` | bool | `true` | Master switch; `false` renders the page and sends nothing |
 | `notification.channels.telegram.enabled` | bool | `true` | Needs `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` |
 | `notification.channels.discord.enabled` | bool | `true` | Needs `DISCORD_WEBHOOK_URL` |
@@ -3206,7 +3282,7 @@ chain it drives.
   it is asked.
 
 ### [interface] Notification Channels - Telegram and Discord  [confirmed]
-*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, cluster, caps, daily cap, budget, jaccard, near-duplicate, clip, SendResult, report.mode, incremental, current, daily, seen set*
+*`interface/notify-channels.md` - Every public signature of the notify layer, the exact contract with the Telegram Bot API and a Discord webhook, and how a run decides what to send. - status: active - source: src/news_radar/ops.py, src/news_radar/notify/__init__.py, src/news_radar/notify/telegram.py, src/news_radar/notify/discord.py, src/news_radar/__main__.py, src/news_radar/fetch/http.py - keywords: alert, Health, ALERT_AFTER, stamp, TIME_FMT, NO_TIME, published_at, timestamp, telegram, sendMessage, bot token, chat_id, discord, webhook, content, 429, retry_after, Retry-After, rate limit, NOTIFY_INTERVAL_MS, one message per story, message format, 4096, 2000, messages, pick, cluster, caps, daily cap, budget, jaccard, near-duplicate, vectors, threshold, similar, clip, SendResult, report.mode, incremental, current, daily, seen set*
 
 # Notification Channels - Telegram and Discord
 
@@ -3231,8 +3307,8 @@ with nothing installed and nothing configured.
 
 | Signature | Returns | Notes |
 |-----------|---------|-------|
-| `cluster(rows)` | `[[row]]` | Near-duplicate headlines about one event, grouped. Best-first in and out; a selection step, never an identity one |
-| `pick(rows_by_label, labels, keys=None, caps=None)` | `[(label, [row])]` | Group order, one message per event, the day's `@n` budget, the seen-set diff, and one appearance per story. Empty groups dropped |
+| `cluster(rows, vectors=None, threshold=None)` | `[[row]]` | Near-duplicate headlines about one event, grouped. Best-first in and out; a selection step, never an identity one. `vectors` (`{dedup_key: unit vector}`) adds a cosine link, never removes one - see [[similar]] |
+| `pick(rows_by_label, labels, keys=None, caps=None, vectors=None, threshold=None)` | `[(label, [row])]` | Group order, one message per event, the day's `@n` budget, the seen-set diff, and one appearance per story. Empty groups dropped |
 | `messages(blocks, limit)` | `[(text, keys)]` | `blocks` is `[(header, [(line, key)])]`. **One message per story**, header included, each text under `limit` |
 | `clip(text, limit=TITLE_MAX)` | `str` | Ellipsis when it had to cut |
 | `stamp(moment, tz)` | `str` | `published_at` as `TIME_FMT` (`%H:%M %d/%m`), or `NO_TIME` (`--`) |
@@ -4508,6 +4584,91 @@ third as many stories and a run makes more messages than it used to.
 `ai.*` and `OPENAI_API_KEY` are specified in [[config-and-env]]. The section
 ships inert: `ai.enabled` is `false`, so a config that says nothing about `ai`
 upgrades into this version and behaves exactly as it did before.
+
+### [interface] Headline Vectors - similar.py  [confirmed]
+*`interface/similar.md` - The embeddings client that lets notify.cluster() join headlines saying the same thing in different words, its OpenAI-compatible contract, the measured model and threshold, and the rule that it can only ever add a cluster link and never cost a cycle. - status: active - source: src/news_radar/similar.py, src/news_radar/notify/__init__.py, src/news_radar/__main__.py, src/news_radar/config.py, docker/docker-compose.yml - keywords: similar, embed, vectors, embeddings, /v1/embeddings, all-minilm, all-MiniLM-L6-v2, cosine, threshold, similar.enabled, similar.api_url, similar.model, similar.threshold, similar.timeout_s, ollama, sidecar, profile similar, cluster, paraphrase, near-duplicate, _vectors*
+
+# Headline Vectors - `similar.py`
+
+> One request a cycle turns every headline about to be planned into a unit
+> vector. `notify.cluster()` then treats two headlines as one event when their
+> words overlap **or** their cosine reaches `similar.threshold`. Off by default;
+> a failure falls back to words alone.
+
+## Signatures
+
+```
+embed(fetcher, api_url, model, texts)   -> [unit vector] | None
+vectors(fetcher, api_url, model, rows)  -> {dedup_key: unit vector}
+```
+
+| Function | Contract |
+|----------|----------|
+| `embed()` | One POST `{"model", "input": [texts]}`. Read back `data[*].embedding` **by `index`**, not by position. Every vector is scaled to length 1, so a dot product is the cosine. `[]` for no texts (no request); `None` for any failure: HTTP error, non-JSON, a missing index, a zero vector, or an empty url |
+| `vectors()` | Embeds `item.title_key(title)` (the same folded, de-bylined text the word overlap reads), **once per `dedup_key`** even when a story has a row in two groups. `{}` when `embed()` failed |
+
+Layer 5, imports layer 1 (`Fetcher.post_json`) and `item.title_key`. No config,
+no clock, no store. No third dependency: the wire format is the contract, so
+Ollama, vLLM, SGLang or a hosted API all work.
+
+## Wiring
+
+`__main__._vectors(cfg, rows, labels)` runs inside `_notify()` once a cycle,
+after `_rows_to_send()` and before either channel is planned. Both channels
+share the answer. It returns `{}` without touching the network when
+`similar.enabled` is false, and `{}` (plus a logged exception) if anything
+raises. The map goes to `notify.pick(..., vectors, threshold)` and from there to
+`cluster()`. See [[notify-channels]].
+
+`cluster()` rule: a link exists if `_same_event(words)` **or** both rows have a
+vector **and** `threshold` is set **and** `dot >= threshold`. Vectors only add
+links, so a partial or empty map clusters no worse than words alone.
+
+Only the messages change. The page, the store and `dedup_key` never see a
+vector, which keeps clustering a selection step and never an identity one.
+
+## Measured (2026-10-08, copy of the homelab store)
+
+| Measure | Value |
+|---------|-------|
+| Word overlap alone, 145 stories pushed on 2026-10-07 | 2 pairs joined |
+| + `all-minilm` at 0.75, messages for 10-06 / 10-07 | 157 -> 133 / 143 -> 125 |
+| Clusters formed over both days (cross-group replay) | 23: 21 one event, 2 one theme |
+| Ollama `0.34.2` vs fastembed ONNX of the same model | identical message counts |
+| Embed a whole day (529 headlines), homelab CPU | 3.1 s |
+| Model size | 45 MB |
+
+Threshold bands on 10-07 (cosine of `title_key()` text): from 0.75 up, every
+pair inspected was one event. Around 0.73 and below, theme pairs appeared, for
+example two different columns on China leading open-source AI. `0.80` lets the
+seven-way ChatGPT launch split again. Larger models were tried:
+`nomic-embed-text` scores everything high (1142 pairs >= 0.60 against 164), and
+`paraphrase-multilingual-MiniLM-L12-v2` ranked pairs the same as `all-minilm`.
+So the smallest model was kept. 🟢
+
+The replay clustered the pushed set as one list. `pick()` clusters **per
+group**, so the live cut is somewhat smaller. Freed `@n` slots also refill with
+other stories, so the day's total is still bounded by the caps.
+
+## Deployment
+
+The compose `ollama` service (profile `similar`, image pinned to `0.34.2`,
+`OLLAMA_KEEP_ALIVE=-1`, volume `ollama_models`) pulls `all-minilm` on every
+start, so a fresh volume never answers 404 "model not found". It publishes no
+port. It is deliberately not watchtower-labelled, because a runtime upgrade can
+move the vectors the threshold was measured against. See [[deployment-homelab]].
+
+The homelab cannot reach the DGX (`172.16.0.194`), so the model has to run on
+the homelab itself.
+
+## Known limits
+
+- English model. Vietnamese sources ship disabled (see [[news-sources]]). A
+  Vietnamese headline will cluster poorly but never wrongly, because the word
+  rule still applies.
+- Clustering stays per group. The same event filed under `AI` and `ChatGPT` is
+  still two clusters; `pick()` drops the second appearance only when it is the
+  *same* `dedup_key`. 🟡
 
 ### [behavior] How News Is Searched, Matched and Ranked  [confirmed]
 *`behavior/news-search.md` - The end-to-end crawl algorithm - which URLs are built, how a title is matched against a keyword group, how duplicates collapse, and how the shortlist is ordered. - status: active - source: src/news_radar/fetch/, src/news_radar/filter.py, src/news_radar/rank.py, src/news_radar/__main__.py - keywords: crawl, search algorithm, matching, max_age_days, fresh_enough, age cut, match_excerpt, excerpt, _haystack, diacritics, dedup, ranking, freshness, half-life, user-agent, 403, rate limit, edge cases*

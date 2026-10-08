@@ -3,10 +3,10 @@ title: Module Layout and Stack
 category: architecture
 purpose: The directory tree news-radar is built as, its layering rules, and every dependency it is allowed to take.
 status: active
-updated: 2026-09-06
+updated: 2026-10-08
 source: src/news_radar/, Dockerfile, requirements.txt
 confidence: confirmed
-keywords: tree, layout, layering, ops.py, summarize.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
+keywords: tree, layout, layering, ops.py, summarize.py, similar.py, layer 5, dependencies, pyyaml, feedparser, python 3.12, src/news_radar, scripts, docker
 order: 2
 ---
 
@@ -50,6 +50,7 @@ news-radar/
 │   ├── store.py                # DONE - SQLite persistence, seen-set, retention, backup
 │   ├── render.py               # DONE - write() + remove(); index.html + days/<date>.html
 │   ├── ops.py                  # DONE - P6: heartbeat, Health, ALERT_AFTER
+│   ├── similar.py              # headline vectors from /v1/embeddings, for notify.cluster()
 │   ├── summarize.py            # DONE - P6-4: per-topic AI summary, OpenAI wire format
 │   └── notify/                 # DONE - P4
 │       ├── __init__.py         # SendResult, pick, chunk, clip
@@ -67,6 +68,7 @@ news-radar/
 │   ├── test_store.py           # plain asserts, stdlib only (sqlite3)
 │   ├── test_render.py          # plain asserts, stdlib only
 │   ├── test_notify.py          # plain asserts, stdlib only, local http.server
+│   ├── test_similar.py         # plain asserts, stdlib only, local http.server
 │   ├── test_summarize.py       # plain asserts, stdlib only, local http.server
 │   ├── test_release.py         # plain asserts, stdlib only
 │   └── fixtures/               # one feed body per edge case, no network
@@ -92,7 +94,7 @@ preference: it is what makes the pipeline impossible to test one stage at a time
 | 2 — sources | `fetch/feeds.py`, `fetch/search.py` | layer 1, `config`, `keywords`, `item` |
 | 3 — selection | `filter.py`, `rank.py` | `keywords`, `item`, plain data types |
 | 4 — persistence | `store.py` | stdlib, `item`, layer 3 output types |
-| 5 — output | `render.py`, `notify/*`, `ops.py`, `summarize.py` | layers 3 and 4; `notify/*`, `ops.py` and `summarize.py` also layer 1 |
+| 5 — output | `render.py`, `notify/*`, `ops.py`, `summarize.py`, `similar.py` | layers 3 and 4; `notify/*`, `ops.py`, `summarize.py` and `similar.py` also layer 1 |
 
 `ops.py` sits in layer 5 for the same reason `notify/*` does and imports layer 1
 for the same reason too - the heartbeat's site check and its ping are GETs, and
